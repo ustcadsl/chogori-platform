@@ -411,15 +411,15 @@ public:
     void *cacheRowFromPlog(BufferPage *pagePtr, RowOffset rowOffset, PLogAddr pAddress);
     
     // find an empty slot between the beginOffset and endOffset in the page
-    RowOffset findEmptySlot(BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset);
+    RowOffset findEmptySlotInPage(BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset);
 
     // find an empty slot in the page
-    RowOffset findEmptySlot(BufferPage *pagePtr);
+    RowOffset findEmptySlotInPage(BufferPage *pagePtr);
 
-    std::pair<BufferPage *, RowOffset> findEmptyRow(uint32_t schemaID);
+    std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID);
 
     // Find the page pointer and row offset to cache cold row
-    std::pair<BufferPage *, RowOffset> findEmptyRow(uint32_t schemaID, String key, PLogAddr pAddr);
+    std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID, String key, PLogAddr pAddr);
     
     // store hot row in the empty row
     // void cacheHotRow(uint32_t schemaID, SKVRecord hotRecord);

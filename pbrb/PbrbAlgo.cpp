@@ -150,7 +150,7 @@ void *PBRB::cacheColdRow(PLogAddr pAddress)
             return nullptr;
     }
     
-    auto retVal = findEmptyRow(schemaId);
+    auto retVal = findCacheRowPosition(schemaId);
     BufferPage *pagePtr = retVal.first;
     RowOffset rowOffset = retVal.second;
 
@@ -199,7 +199,7 @@ void *PBRB::cacheColdRow(PLogAddr pAddress, String key)
     }
 
     // need to find new place to cache row.
-    auto retPair = findEmptyRow(schemaId, key, pAddress);
+    auto retPair = findCacheRowPosition(schemaId, key, pAddress);
     BufferPage *pagePtr = retPair.first;
     RowOffset rowOffset = retPair.second;
     void *hotAddr = cacheRowFromPlog(pagePtr, rowOffset, pAddress);
@@ -211,7 +211,7 @@ void *PBRB::cacheColdRow(PLogAddr pAddress, String key)
 }
 
 //find an empty slot between the beginOffset and endOffset in the page
-RowOffset PBRB::findEmptySlot(BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset)
+RowOffset PBRB::findEmptySlotInPage(BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset)
 {
     uint32_t schemaId = getSchemaIDPage(pagePtr);
     
@@ -235,7 +235,7 @@ RowOffset PBRB::findEmptySlot(BufferPage *pagePtr, RowOffset beginOffset, RowOff
 }
 
 //find an empty slot in the page
-RowOffset PBRB::findEmptySlot(BufferPage *pagePtr)
+RowOffset PBRB::findEmptySlotInPage(BufferPage *pagePtr)
 {
     uint32_t schemaId = getSchemaIDPage(pagePtr);
     
@@ -254,11 +254,11 @@ RowOffset PBRB::findEmptySlot(BufferPage *pagePtr)
     return 0xFFFFFFFF; //not find an empty slot
 }
 
-std::pair<BufferPage *, RowOffset> PBRB::findEmptyRow(uint32_t schemaID)
+std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID)
 {
     BufferPage *pagePtr = schemaMap[schemaID].headPage;
     while (pagePtr != nullptr) {
-        RowOffset rowOffset = findEmptySlot(pagePtr);
+        RowOffset rowOffset = findEmptySlotInPage(pagePtr);
         if (rowOffset & 0x80000000)
             // go to next page;
             BufferPage *pagePtr = getNextPage(pagePtr);
@@ -268,14 +268,14 @@ std::pair<BufferPage *, RowOffset> PBRB::findEmptyRow(uint32_t schemaID)
     return std::make_pair(nullptr, 0);
 }
 
-std::pair<BufferPage *, RowOffset> PBRB::findEmptyRow(uint32_t schemaID, String key, PLogAddr pAddr) {
+std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID, String key, PLogAddr pAddr) {
     KVN &kvNode = indexer[key];
     BufferPage *pagePtr;
     RowOffset rowOffset;
     // 1. has hot row:
     if (kvNode.hasCachedVer()) {
         pagePtr = getPageAddr(kvNode.addr[0]);
-        rowOffset = findEmptySlot(pagePtr);
+        rowOffset = findEmptySlotInPage(pagePtr);
         if (rowOffset & 0x80000000)
             return std::make_pair(nullptr, 0);
         else {
@@ -321,23 +321,23 @@ std::pair<BufferPage *, RowOffset> PBRB::findEmptyRow(uint32_t schemaID, String 
 
         // cannot find neighboring pages...
         if (prevPageAddr == nullptr && nextPageAddr == nullptr) {
-            return findEmptyRow(schemaID);
+            return findCacheRowPosition(schemaID);
         }
 
         // insert into next page...
         else if (prevPageAddr == nullptr && nextPageAddr != nullptr) {
-            RowOffset off = findEmptySlot(nextPageAddr);
+            RowOffset off = findEmptySlotInPage(nextPageAddr);
             if (off & 0x80000000)
-                return findEmptyRow(schemaID);
+                return findCacheRowPosition(schemaID);
             else
                 return std::make_pair(nextPageAddr, off);
         }
 
         // insert into prev page...
         else if (prevPageAddr != nullptr && nextPageAddr == nullptr) {
-            RowOffset off = findEmptySlot(prevPageAddr);
+            RowOffset off = findEmptySlotInPage(prevPageAddr);
             if (off & 0x80000000)
-                return findEmptyRow(schemaID);
+                return findCacheRowPosition(schemaID);
             else
                 return std::make_pair(prevPageAddr, off);
         }
@@ -345,30 +345,30 @@ std::pair<BufferPage *, RowOffset> PBRB::findEmptyRow(uint32_t schemaID, String 
         // insert into page with lower occupancy rate...
         else {
             if (prevPageAddr == nextPageAddr) {
-                RowOffset off = findEmptySlot(prevPageAddr, prevOff + 1, nextOff);
+                RowOffset off = findEmptySlotInPage(prevPageAddr, prevOff + 1, nextOff);
                 if (off & 0x80000000)
-                    off = findEmptySlot(prevPageAddr);
+                    off = findEmptySlotInPage(prevPageAddr);
                 if (off & 0x80000000)
-                    return findEmptyRow(schemaID);
+                    return findCacheRowPosition(schemaID);
                 return std::make_pair(prevPageAddr, off);
             }
 
             uint16_t prevHotNum = getHotRowsNumPage(prevPageAddr);
             uint16_t nextHotNum = getHotRowsNumPage(nextPageAddr);
             if (prevHotNum <= nextHotNum) {
-                RowOffset off = findEmptySlot(prevPageAddr, prevOff + 1, schemaMap[schemaID].maxRowCnt);
+                RowOffset off = findEmptySlotInPage(prevPageAddr, prevOff + 1, schemaMap[schemaID].maxRowCnt);
                 if (off & 0x80000000)
-                    off = findEmptySlot(prevPageAddr);
+                    off = findEmptySlotInPage(prevPageAddr);
                 if (off & 0x80000000)
-                    return findEmptyRow(schemaID);
+                    return findCacheRowPosition(schemaID);
                 return std::make_pair(prevPageAddr, off);
             }
             else {
-                RowOffset off = findEmptySlot(nextPageAddr, 0, nextOff);
+                RowOffset off = findEmptySlotInPage(nextPageAddr, 0, nextOff);
                 if (off & 0x80000000)
-                    off = findEmptySlot(nextPageAddr);
+                    off = findEmptySlotInPage(nextPageAddr);
                 if (off & 0x80000000)
-                    return findEmptyRow(schemaID);
+                    return findCacheRowPosition(schemaID);
                 return std::make_pair(nextPageAddr, off);
             }
         }
