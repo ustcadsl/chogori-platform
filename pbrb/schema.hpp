@@ -14,8 +14,6 @@ enum FieldType : uint8_t {
     INT32T,
 };
 
-uint32_t FTSize[256] = {0, 116, 4};
-
 struct SchemaField {
     FieldType type;
     String name;
@@ -35,4 +33,4 @@ struct SchemaUMap {
         umap.insert({currIdx++, schemaPtr});
         return retVal;
     }
-} schemaUMap;
+};

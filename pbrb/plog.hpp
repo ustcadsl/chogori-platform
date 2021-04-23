@@ -1,11 +1,11 @@
 #include<iostream>
 #include<cstdlib>
+#include<new>
 
-#include "schema.hpp"
-
-const int plogSize = 1024 * 1024;
+const int plogSize = 4 * 1024;
 
 using PLogAddr = void *;
+using SchemaId = uint32_t;
 
 class SimplePlog {
 

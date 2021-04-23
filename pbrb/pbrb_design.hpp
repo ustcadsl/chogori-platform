@@ -12,8 +12,8 @@
 #include <vector>
 
 #include "plog.hpp"
-#include "indexer.hpp"
- 
+#include "schema.hpp"
+
 const int pageSize = 1024;
 const long long mask = 0x00000000000003FF;
 
@@ -34,6 +34,9 @@ struct fieldMetaData
     bool isNullable;
     bool isVariable;
 };
+
+extern SchemaUMap schemaUMap;
+extern uint32_t FTSize[];
 
 struct SchemaMetaData
 {
@@ -118,6 +121,9 @@ struct SchemaMetaData
 
 };
 
+class KVN;
+typedef std::map<std::string, KVN> Index;
+
 class PBRB
 {
 
@@ -134,28 +140,32 @@ private:
     std::map<int, std::list<BufferPage *>> _usedPageMap;
 
     // A map to record the schema metadata.
-    std::map<SchemaId, SchemaMetaData> schemaMap;
+    std::map<SchemaId, SchemaMetaData> _schemaMap;
 
+    Index *_indexer;
 public:
 
     int *watermark;
     //Initialize a PBRB cache
-    PBRB(int maxPageNumber, int *wm)
+    PBRB(int maxPageNumber, int *wm, Index *indexer)
     {
         watermark = wm;
         this->_maxPageNumber = maxPageNumber;
         auto aligned_val = std::align_val_t{_pageSize}; //page size = 64KB
-        /*method 1:
+
+        _indexer = indexer;
+        /* method 1:
         for (int i = 0; i < maxPageNumber; i++)
         {
             //support by c++17, Align the last 16 bits of the address
             BufferPage *pagePtr = static_cast<BufferPage *>(operator new(sizeof(BufferPage), aligned_val));
             freePageList.add(pagePtr);
         }*/
-        //method 2:
+
+        // method 2:
         // alloc maxPageNumber pages when initialize.
         BufferPage *basePtr = static_cast<BufferPage *>(operator new(maxPageNumber * sizeof(BufferPage), aligned_val));
-        std::cout << "\nPBRB: Allocated " << maxPageNumber << " Pages in " << basePtr << std::endl;
+        std::cout << std::dec << "\nPBRB: Allocated " << maxPageNumber << " Pages in " << basePtr << std::endl;
         for (int idx = 0; idx < maxPageNumber; idx++)
         {
             _freePageList.push_back(basePtr + idx);
@@ -276,7 +286,7 @@ public:
     // 1.2 row get functions.
 
     void printFieldsRow(const BufferPage *pagePtr, RowOffset rowOffset) {
-        SchemaMetaData smd = schemaMap[getSchemaIDPage(pagePtr)];
+        SchemaMetaData smd = _schemaMap[getSchemaIDPage(pagePtr)];
         char buf[4096];
         size_t rowOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
                                  smd.rowSize * rowOffset;
@@ -336,7 +346,7 @@ public:
         // Get a page and set schemaMetadata.
         BufferPage *pagePtr = _freePageList.front();
         SchemaMetaData smd(schemaId, _pageSize, _pageHeaderSize, _rowHeaderSize, pagePtr);
-        schemaMap.insert({schemaId, smd});
+        _schemaMap.insert({schemaId, smd});
 
         // Initialize Page.
         memset(pagePtr, 0, sizeof(BufferPage));
@@ -358,7 +368,7 @@ public:
         if (_freePageList.empty())
             return nullptr;
 
-        BufferPage *pagePtr = schemaMap[schemaId].headPage;
+        BufferPage *pagePtr = _schemaMap[schemaId].headPage;
         if (pagePtr == nullptr)
             return createCacheForSchema(schemaId);
         else {
@@ -371,11 +381,11 @@ public:
             setSchemaIDPage(newPage, schemaId);
             setSchemaVerPage(newPage, 0);
             setPrevPage(newPage, nullptr);
-            setNextPage(newPage, schemaMap[schemaId].headPage);
+            setNextPage(newPage, _schemaMap[schemaId].headPage);
             setHotRowsNumPage(newPage, 0);
             setReservedHeader(newPage);
 
-            schemaMap[schemaId].headPage = newPage;
+            _schemaMap[schemaId].headPage = newPage;
             _freePageList.pop_front();
             return newPage;
         }
@@ -461,7 +471,7 @@ public:
     }
 
     void printRowsBySchema(SchemaId sid) {
-        SchemaMetaData smd = schemaMap[sid];
+        SchemaMetaData smd = _schemaMap[sid];
         BufferPage *pagePtr = smd.headPage;
         while (pagePtr) {
             std::cout << "\nIn Page: " << pagePtr << std::endl;
