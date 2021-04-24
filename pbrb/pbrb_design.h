@@ -11,8 +11,8 @@
 #include <tuple>
 #include <vector>
 
-#include "plog.hpp"
-#include "schema.hpp"
+#include "plog.h"
+#include "schema.h"
 
 const int pageSize = 1024;
 const long long mask = 0x00000000000003FF;

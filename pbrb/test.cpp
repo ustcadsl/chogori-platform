@@ -1,8 +1,10 @@
 #include<iostream>
 
-#include "pbrb_design.hpp"
-#include "indexer.hpp"
+#include "pbrb_design.h"
+#include "indexer.h"
 
+int length = 9;
+int timestamp[100] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
 char str[100][124] = {
     "Test01_01_1\0",
     "Test02_01_2\0",
@@ -11,13 +13,12 @@ char str[100][124] = {
     "Test01_03_5\0",
     "Test02_02_6\0",
     "Test01_04_7\0",
-    "Test01_05_8\0"
+    "Test01_05_8\0",
+    "Test03_02_9\0"
 };
 
-int uid[100] = {1, 2, 3, 1, 1, 2, 1, 1};
-int ver[100] = {1, 1, 1, 2, 3, 2, 4, 5};
-int timestamp[100] = {1, 2, 3, 4, 5, 6, 7, 8};
-int wm = 0;
+int uid[100] = {1, 2, 3, 1, 1, 2, 1, 1, 2};
+int ver[100] = {1, 1, 1, 2, 3, 2, 4, 5, 2};
 
 std::string makeKey(std::string schemaName, int uid) {
     const char *sname = schemaName.c_str();
@@ -26,17 +27,34 @@ std::string makeKey(std::string schemaName, int uid) {
     return str;
 }
 
+void initPlog(SimplePlog &Plog1, SchemaId sid) {
+    for (int i = 0; i < length; i++) {
+        Plog1.writeSId(sid);
+        Plog1.write(&timestamp[i], 4);
+        Plog1.write(&uid[i], 4);
+        Plog1.write(str[i], 116);
+    }
+}
+
+
 // Tests for findEmptyRow.
 int test1() {
     Index indexer;
-    wm = 0;
-    SimplePlog Plog2;
+    int wm = 0;
+
+    // Plog
+    SimplePlog Plog1;
+    uint8_t *basePtr = (uint8_t *)Plog1.plog;
+
+    // Schema
     SimpleSchema S1({
         "S001", 0, {
-            {INT32T, "uid"}, {STRING, "str"}
+            {INT32T, "uid"},
+            {STRING, "str"}
         }
     });
     auto sid1 = schemaUMap.addSchema(&S1);
+    initPlog(Plog1, sid1);
 
     PBRB pbrb(8, &wm, &indexer);
 
@@ -50,28 +68,14 @@ int test1() {
         
         if (indexer.find(newKey) == indexer.end()) {
             KVN kvn;
-            kvn.insertRow(Plog2.cursor, timestamp[i], false, &pbrb);
+            kvn.insertRow(basePtr + i * 128, timestamp[i], false, &pbrb);
             indexer.insert({newKey, kvn});
         }
         else {
             KVN &kvn = indexer[newKey];
-            kvn.insertRow(Plog2.cursor, timestamp[i], false, &pbrb);
+            kvn.insertRow(basePtr + i * 128, timestamp[i], false, &pbrb);
         }
-
-        Plog2.writeSId(sid1);
-        Plog2.write(&timestamp[i], 4);
-        Plog2.write(&uid[i], 4);
-        Plog2.write(str[i], 116);
     }
-
-    for (int i = 3; i < 8; i++) {
-        Plog2.writeSId(sid1);
-        Plog2.write(&timestamp[i], 4);
-        Plog2.write(&uid[i], 4);
-        Plog2.write(str[i], 116);
-    }
-
-    uint8_t *basePtr = (uint8_t *)Plog2.plog;
 
     std::string testKey1("S001_0001");
     std::string testKey2("S001_0002");
@@ -90,14 +94,21 @@ int test1() {
 
 int test2() {
     Index indexer;
-    wm = 0;
-    SimplePlog Plog2;
+    int wm = 0;
+
+    // Plog
+    SimplePlog Plog1;
+    uint8_t *basePtr = (uint8_t *)Plog1.plog;
+
+    // Schema
     SimpleSchema S1({
         "S001", 0, {
-            {INT32T, "uid"}, {STRING, "str"}
+            {INT32T, "uid"},
+            {STRING, "str"}
         }
     });
     auto sid1 = schemaUMap.addSchema(&S1);
+    initPlog(Plog1, sid1);
 
     PBRB pbrb(8, &wm, &indexer);
 
@@ -111,28 +122,14 @@ int test2() {
         
         if (indexer.find(newKey) == indexer.end()) {
             KVN kvn;
-            kvn.insertRow(Plog2.cursor, timestamp[i], false, &pbrb);
+            kvn.insertRow(basePtr + i * 128, timestamp[i], false, &pbrb);
             indexer.insert({newKey, kvn});
         }
         else {
             KVN &kvn = indexer[newKey];
-            kvn.insertRow(Plog2.cursor, timestamp[i], false, &pbrb);
+            kvn.insertRow(basePtr + i * 128, timestamp[i], false, &pbrb);
         }
-
-        Plog2.writeSId(sid1);
-        Plog2.write(&timestamp[i], 4);
-        Plog2.write(&uid[i], 4);
-        Plog2.write(str[i], 116);
     }
-
-    for (int i = 4; i < 8; i++) {
-        Plog2.writeSId(sid1);
-        Plog2.write(&timestamp[i], 4);
-        Plog2.write(&uid[i], 4);
-        Plog2.write(str[i], 116);
-    }
-
-    uint8_t *basePtr = (uint8_t *)Plog2.plog;
 
     std::string testKey1("S001_0001");
     std::string testKey2("S001_0002");
@@ -152,14 +149,21 @@ int test2() {
 
 int test3() {
     Index indexer;
-    wm = 0;
-    SimplePlog Plog2;
+    int wm = 0;
+
+    // Plog
+    SimplePlog Plog1;
+    uint8_t *basePtr = (uint8_t *)Plog1.plog;
+
+    // Schema
     SimpleSchema S1({
         "S001", 0, {
-            {INT32T, "uid"}, {STRING, "str"}
+            {INT32T, "uid"},
+            {STRING, "str"}
         }
     });
     auto sid1 = schemaUMap.addSchema(&S1);
+    initPlog(Plog1, sid1);
 
     PBRB pbrb(8, &wm, &indexer);
 
@@ -173,28 +177,14 @@ int test3() {
         
         if (indexer.find(newKey) == indexer.end()) {
             KVN kvn;
-            kvn.insertRow(Plog2.cursor, timestamp[i], false, &pbrb);
+            kvn.insertRow(basePtr + i * 128, timestamp[i], false, &pbrb);
             indexer.insert({newKey, kvn});
         }
         else {
             KVN &kvn = indexer[newKey];
-            kvn.insertRow(Plog2.cursor, timestamp[i], false, &pbrb);
+            kvn.insertRow(basePtr + i * 128, timestamp[i], false, &pbrb);
         }
-
-        Plog2.writeSId(sid1);
-        Plog2.write(&timestamp[i], 4);
-        Plog2.write(&uid[i], 4);
-        Plog2.write(str[i], 116);
     }
-
-    for (int i = 4; i < 8; i++) {
-        Plog2.writeSId(sid1);
-        Plog2.write(&timestamp[i], 4);
-        Plog2.write(&uid[i], 4);
-        Plog2.write(str[i], 116);
-    }
-
-    uint8_t *basePtr = (uint8_t *)Plog2.plog;
 
     std::string testKey1("S001_0001");
     std::string testKey2("S001_0002");
@@ -214,19 +204,26 @@ int test3() {
 
 int test4() {
     Index indexer;
-    wm = 0;
+    int wm = 0;
+
+    // Plog
     SimplePlog Plog1;
+    uint8_t *basePtr = (uint8_t *)Plog1.plog;
+
+    // Schema
     SimpleSchema S1({
         "S001", 0, {
-            {INT32T, "uid"}, {STRING, "str"}
+            {INT32T, "uid"},
+            {STRING, "str"}
         }
     });
     auto sid1 = schemaUMap.addSchema(&S1);
+    initPlog(Plog1, sid1);
 
     PBRB pbrb(8, &wm, &indexer);
 
-    pbrb.createCacheForSchema(sid1);
-
+    auto page2 = pbrb.createCacheForSchema(sid1);
+    auto page1 = pbrb.AllocNewPageForSchema(sid1);
     pbrb.printRowsBySchema(sid1);
 
     for (int i = 0; i < 4; i++) {
@@ -235,33 +232,14 @@ int test4() {
         
         if (indexer.find(newKey) == indexer.end()) {
             KVN kvn;
-            kvn.insertRow(Plog1.cursor, timestamp[i], false, &pbrb);
+            kvn.insertRow(basePtr + i * 128, timestamp[i], false, &pbrb);
             indexer.insert({newKey, kvn});
         }
         else {
             KVN &kvn = indexer[newKey];
-            kvn.insertRow(Plog1.cursor, timestamp[i], false, &pbrb);
+            kvn.insertRow(basePtr + i * 128, timestamp[i], false, &pbrb);
         }
-
-        Plog1.writeSId(sid1);
-        Plog1.write(&timestamp[i], 4);
-        Plog1.write(&uid[i], 4);
-        Plog1.write(str[i], 116);
     }
-
-    for (int i = 4; i < 8; i++) {
-        Plog1.writeSId(sid1);
-        Plog1.write(&timestamp[i], 4);
-        Plog1.write(&uid[i], 4);
-        Plog1.write(str[i], 116);
-    }
-
-    uint8_t *basePtr = (uint8_t *)Plog1.plog;
-
-    std::cout << "Read Row 3 of plog: \n\tSchemaId: " << readFromPlog<uint32_t>(basePtr + 2 * 128, 4)
-              << "\n\tTimeStamp: " << readFromPlog<uint32_t>(basePtr + 2 * 128 + 4, 4)
-              << "\n\tuid: " << readFromPlog<uint32_t>(basePtr + 2 * 128 + 8, 4)
-              << std::endl;
 
     std::string testKey1("S001_0001");
     std::string testKey2("S001_0002");

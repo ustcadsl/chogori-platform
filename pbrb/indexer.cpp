@@ -1,5 +1,5 @@
-#include "indexer.hpp"
-#include "pbrb_design.hpp"
+#include "indexer.h"
+#include "pbrb_design.h"
 
 bool KVN::insertRow(void *newAddr, int ts, bool isHot, PBRB *pbrb)
 {

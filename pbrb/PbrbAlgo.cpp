@@ -1,6 +1,6 @@
 #include <iostream>
-#include "pbrb_design.hpp"
-#include "indexer.hpp"
+#include "pbrb_design.h"
+#include "indexer.h"
 
 // Copy memory from plog to (pagePtr, rowOffset)
 void *PBRB::cacheRowFromPlog(BufferPage *pagePtr, RowOffset rowOffset, PLogAddr pAddress)

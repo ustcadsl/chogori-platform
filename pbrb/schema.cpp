@@ -1,4 +1,4 @@
-#include "schema.hpp"
+#include "schema.h"
 
 uint32_t FTSize[256] = {0, 116, 4};
 
