@@ -1,6 +1,8 @@
 #include <iostream>
 #include <cstdlib>
 #include <vector>
+#include <cstring>
+#include <string>
 #include <unordered_map>
 
 using String = std::string;
@@ -23,6 +25,7 @@ struct SimpleSchema {
     String name;
     uint32_t version = 0;
     std::vector<SchemaField> fields;
+    String getKey(int id);
 };
 
 struct SchemaUMap {

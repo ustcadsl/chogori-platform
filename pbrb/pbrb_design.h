@@ -5,6 +5,7 @@
 #include <memory>
 #include <bitset>
 #include <cstddef>
+#include <cassert>
 
 #include <map>
 #include <list>
@@ -313,6 +314,7 @@ public:
         uint32_t byteIndex = rowOffset / 8;
         uint32_t offset = rowOffset % 8;
         pagePtr->content[_pageHeaderSize + byteIndex] |= 0x1 << offset;
+        setHotRowsNumPage(pagePtr, getHotRowsNumPage(pagePtr) + 1);
     }
 
     void clearRowBitMapPage(BufferPage *pagePtr, RowOffset rowOffset)
@@ -320,6 +322,7 @@ public:
         uint32_t byteIndex = rowOffset / 8;
         uint32_t offset = rowOffset % 8;
         pagePtr->content[_pageHeaderSize + byteIndex] &= ~(0x1 << offset);
+        setHotRowsNumPage(pagePtr, getHotRowsNumPage(pagePtr) - 1);
     }
 
     bool isBitmapSet(BufferPage *pagePtr, RowOffset rowOffset)
@@ -337,6 +340,19 @@ public:
 
     // 3.1 Initialize a schema.
 
+    void initializePage(BufferPage *pagePtr) {
+    
+        memset(pagePtr, 0, sizeof(BufferPage));
+
+        setMagicPage(pagePtr, 0x1010);
+        setSchemaIDPage(pagePtr, -1);
+        setSchemaVerPage(pagePtr, 0);
+        setPrevPage(pagePtr, nullptr);
+        setNextPage(pagePtr, nullptr);
+        setHotRowsNumPage(pagePtr, 0);
+        setReservedHeader(pagePtr);
+    }
+
     //create a pageList for a SKV table according to schemaID
     BufferPage *createCacheForSchema(SchemaId schemaId) {
         
@@ -351,13 +367,8 @@ public:
         // Initialize Page.
         memset(pagePtr, 0, sizeof(BufferPage));
 
-        setMagicPage(pagePtr, 0x1010);
+        initializePage(pagePtr);
         setSchemaIDPage(pagePtr, schemaId);
-        setSchemaVerPage(pagePtr, 0);
-        setPrevPage(pagePtr, nullptr);
-        setNextPage(pagePtr, nullptr);
-        setHotRowsNumPage(pagePtr, 0);
-        setReservedHeader(pagePtr);
 
         _freePageList.pop_front();
 
@@ -377,13 +388,9 @@ public:
             // Initialize Page.
             memset(newPage, 0, sizeof(BufferPage));
 
-            setMagicPage(newPage, 0x1010);
+            initializePage(newPage);
             setSchemaIDPage(newPage, schemaId);
-            setSchemaVerPage(newPage, 0);
-            setPrevPage(newPage, nullptr);
             setNextPage(newPage, _schemaMap[schemaId].headPage);
-            setHotRowsNumPage(newPage, 0);
-            setReservedHeader(newPage);
 
             _schemaMap[schemaId].headPage = newPage;
             _freePageList.pop_front();
@@ -441,10 +448,10 @@ public:
     PLogAddr evictRow(void *rowAddr);
     
     //mark the row as unoccupied when evicting a hot row
-    void removeHotRow(BufferPage *pagePtr, int offset);
+    void removeHotRow(BufferPage *pagePtr, RowOffset offset);
 
     //split a full page into two pages
-    bool splitPage(BufferPage *oldPagePtr, BufferPage *newPagePtr);
+    bool splitPage(BufferPage *pagePtr);
 
     //merge two pages into one page, and recliam a page
     bool mergePage(BufferPage *pagePtr1, BufferPage *pagePtr2);
@@ -455,6 +462,9 @@ public:
     //after merging two pages, reclaim a page and insert it to freePageList
     void reclaimPage(BufferPage *pagePtr);
 
+    // copy a row from (srcPagePtr, srcOffset) to (dstPagePtr, dstOffset)
+    void *copyRowInPages(BufferPage *srcPagePtr, RowOffset srcOffset, BufferPage *dstPagePtr, RowOffset dstOffset);
+    
     //insert a hot row into a pagelist according to schemaID
     //bool insertHotRow(int schemaID, Row hotRow) {}
 
@@ -485,6 +495,14 @@ public:
             
             pagePtr = getNextPage(pagePtr);
         }
-        
+    }
+
+    void *getAddrByPageAndOffset(BufferPage *pagePtr, RowOffset offset) {
+        auto sid = getSchemaIDPage(pagePtr);
+        assert(_schemaMap.find(sid) != _schemaMap.end());
+        size_t byteOffsetInPage = _pageHeaderSize + _schemaMap[sid].occuBitmapSize + 
+                                  _schemaMap[sid].rowSize * offset;
+        void *address = (void *) ((uint8_t *)pagePtr + byteOffsetInPage);
+        return address;
     }
 };
