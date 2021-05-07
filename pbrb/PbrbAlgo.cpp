@@ -370,9 +370,8 @@ bool PBRB::splitPage(BufferPage *pagePtr) {
     // NOTE: support only field[0] as key and type == INT32_T
     assert(smd.schema->fields[0].type == INT32T);
 
-    for (int i = 0; i < offVec.size(); i++) {
+    for (RowOffset offset: offVec) {
         // 4.1: got key info from schema
-        RowOffset offset = offVec[i];
         int *uid;
         size_t byteOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + smd.rowSize * offset;
         void *oldRowAddr = (void *) ((uint8_t *)pagePtr + byteOffsetInPage);
@@ -390,7 +389,7 @@ bool PBRB::splitPage(BufferPage *pagePtr) {
         uint32_t ts = getTimestamp(oldRowAddr);
         int verIdx = kvNode.findVerByTs(ts);
         
-        assert(verIdx != -1 && kvNode.isCached[verIdx] == true);
+        assert(verIdx != -1 && kvNode.isCached[verIdx] == true);    
 
         kvNode.addr[verIdx] = newRowAddr;
 
@@ -398,6 +397,76 @@ bool PBRB::splitPage(BufferPage *pagePtr) {
         assert(isBitmapSet(pagePtr, offset));
         removeHotRow(pagePtr, offset);
     }
+
+    return true;
+}
+
+bool PBRB::mergePage(BufferPage *pagePtr1, BufferPage *pagePtr2) {
+    
+    // 1. Check condition.
+    SchemaId sid1 = getSchemaIDPage(pagePtr1);
+    SchemaId sid2 = getSchemaIDPage(pagePtr2);
+    assert(sid1 == sid2);
+    SchemaId sid = sid1;
+
+    SchemaMetaData smd = _schemaMap[sid];
+    uint32_t rowNum1 = getHotRowsNumPage(pagePtr1);
+    uint32_t rowNum2 = getHotRowsNumPage(pagePtr2);
+    assert(rowNum1 + rowNum2 <= smd.maxRowCnt);
+
+    // 2. Find empty slots in pagePtr1
+    std::vector<RowOffset> offVec1;
+    for (RowOffset i = 0; i < smd.maxRowCnt && offVec1.size() < rowNum2; i++) {
+        if (!isBitmapSet(pagePtr1, i))
+            offVec1.push_back(i);
+    }
+    assert(offVec1.size() == rowNum2);
+
+    std::vector<RowOffset> offVec2;
+    for (RowOffset i = 0; i < smd.maxRowCnt && offVec2.size() < rowNum2; i++) {
+        if (isBitmapSet(pagePtr2, i))
+            offVec2.push_back(i);
+    }
+    assert(offVec2.size() == rowNum2);
+
+    // 3. Copy rows from pagePtr2
+    for (int i = 0; i < offVec1.size(); i++) {
+        RowOffset offset1 = offVec1[i];
+        RowOffset offset2 = offVec2[i];
+
+        // 3.1: got key info from page2
+        int *uid;
+        size_t byteOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + smd.rowSize * offset2;
+        void *oldRowAddr = (void *) ((uint8_t *)pagePtr2 + byteOffsetInPage);
+        readFromPage(pagePtr2, byteOffsetInPage + smd.fieldsInfo[0].fieldOffset, smd.fieldsInfo[0].fieldSize, uid);
+        String key = smd.schema->getKey(*uid);
+
+        // 3.2: copy row
+        void *newRowAddr = copyRowInPages(pagePtr2, offset2, pagePtr1, offset1);
+
+        // 3.3: update _indexer
+        KVN &kvNode = (*_indexer)[key];
+        uint32_t ts = getTimestamp(oldRowAddr);
+        int verIdx = kvNode.findVerByTs(ts);
+        
+        assert(verIdx != -1 && kvNode.isCached[verIdx] == true);    
+
+        kvNode.addr[verIdx] = newRowAddr;
+        // 3.4: remove row in old page.
+        assert(isBitmapSet(pagePtr2, offset2));
+        removeHotRow(pagePtr2, offset2);
+    }
+
+    // 4. Delete pagePtr2 from linklist
+    auto prev = getPrevPage(pagePtr2);
+    auto next = getNextPage(pagePtr2);
+    if (prev == nullptr)
+        _schemaMap[sid].headPage = getNextPage(pagePtr2);
+    else 
+        setNextPage(prev, next);
+    
+    if (next != nullptr)
+        setPrevPage(next, prev);
 
     return true;
 }

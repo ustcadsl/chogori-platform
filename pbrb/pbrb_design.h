@@ -453,7 +453,7 @@ public:
     //split a full page into two pages
     bool splitPage(BufferPage *pagePtr);
 
-    //merge two pages into one page, and recliam a page
+    //merge pagePtr2 into pagePtr1, reclaim pagePtr2
     bool mergePage(BufferPage *pagePtr1, BufferPage *pagePtr2);
 
     //allocate a free page from the freePageList to store hot rows
