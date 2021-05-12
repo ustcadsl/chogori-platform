@@ -2,7 +2,7 @@
 topname=$(dirname "$0")
 cd ${topname}/../..
 set -e
-CPODIR=/tmp/___cpo_integ_test
+CPODIR=cpo_test_tmp
 rm -rf ${CPODIR}
 EPS="tcp+k2rpc://0.0.0.0:10000 tcp+k2rpc://0.0.0.0:10001 tcp+k2rpc://0.0.0.0:10002"
 

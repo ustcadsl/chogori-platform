@@ -29,6 +29,7 @@ Copyright(c) 2020 Futurewei Cloud
 
 #include <seastar/core/temporary_buffer.hh>
 #include <seastar/core/shared_ptr.hh>
+#include <seastar/core/when_all.hh>
 
 #include <iostream>
 

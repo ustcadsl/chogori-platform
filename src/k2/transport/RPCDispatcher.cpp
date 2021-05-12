@@ -75,9 +75,11 @@ RPCDispatcher::registerProtocol(seastar::reference_wrapper<RPCProtocolFactory::D
     auto serverep = proto->getServerEndpoint();
     if (serverep){
         std::pair<String, int> url_core;
-        url_core = std::make_pair(serverep->getURL(), seastar::engine().cpu_id());
+        url_core = std::make_pair(serverep->getURL(), seastar::this_shard_id());
         K2DEBUG("BroadCast URL and Core ID" << serverep->getURL());
-        return RPCDist().invoke_on_all(&k2::RPCDispatcher::setAddressCore, url_core);
+        return RPCDist().invoke_on_all([url_core](RPCDispatcher& disp) {
+            return disp.setAddressCore(url_core);
+        });
     }
     return seastar::make_ready_future<>();
 }

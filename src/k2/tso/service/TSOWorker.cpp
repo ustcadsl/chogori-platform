@@ -82,7 +82,7 @@ void TSOService::TSOWorker::UpdateWorkerControlInfo(const TSOWorkerControlInfo& 
     }
     else if (!_curControlInfo.IsReadyToIssueTS && controlInfo.IsReadyToIssueTS)
     {
-        K2INFO("StartWorker: worker core:" << seastar::engine().cpu_id());
+        K2INFO("StartWorker: worker core:" << seastar::this_shard_id());
 
         // step 1/3 TODO: validate other member in controlInfo
 
@@ -93,7 +93,7 @@ void TSOService::TSOWorker::UpdateWorkerControlInfo(const TSOWorkerControlInfo& 
     }
     else if (_curControlInfo.IsReadyToIssueTS && !controlInfo.IsReadyToIssueTS)
     {
-        K2INFO("StopWorker: worker core:" << seastar::engine().cpu_id());
+        K2INFO("StopWorker: worker core:" << seastar::this_shard_id());
 
         // step 1/3 TODO: validate other member in controlInfo
 
@@ -158,10 +158,10 @@ void TSOService::TSOWorker::AdjustWorker(const TSOWorkerControlInfo& controlInfo
         {
             // TODO: warning if sleep more than 10 microsecond
             auto sleepNanoSecCount = _lastRequestTBEMicroSecRounded + timeToPauseWorkerNanoSec - curTBEMicroSecRounded;  
-            K2INFO("Due to TSOWorkerControlInfo change, worker core:" << seastar::engine().cpu_id() << " going to sleep "<< sleepNanoSecCount << " nanosec.");
+            K2INFO("Due to TSOWorkerControlInfo change, worker core:" << seastar::this_shard_id() << " going to sleep "<< sleepNanoSecCount << " nanosec.");
             if (sleepNanoSecCount >  10 * 1000)
             {
-                K2WARN("TSOWorkerControlInfo change trigger long sleep. Worker core:" << seastar::engine().cpu_id() << " going to sleep "<< sleepNanoSecCount << " nanosec.");
+                K2WARN("TSOWorkerControlInfo change trigger long sleep. Worker core:" << seastar::this_shard_id() << " going to sleep "<< sleepNanoSecCount << " nanosec.");
             }
 
             // busy sleep
@@ -198,7 +198,7 @@ TimestampBatch TSOService::TSOWorker::GetTimestampFromTSO(uint16_t batchSizeRequ
     {
         uint16_t batchSizeToIssue = std::min(batchSizeRequested, (uint16_t)(1000/_curControlInfo.TBENanoSecStep));
 
-        result.TBEBase = curTBEMicroSecRounded + seastar::engine().cpu_id() - 1;
+        result.TBEBase = curTBEMicroSecRounded + seastar::this_shard_id() - 1;
         result.TSOId = _tsoId;
         result.TsDelta = _curControlInfo.TsDelta;
         result.TTLNanoSec = _curControlInfo.BatchTTL;
@@ -230,7 +230,7 @@ TimestampBatch TSOService::TSOWorker::GetTimeStampFromTSOLessFrequentHelper(uint
     // step 1/4 sanity check, check IsReadyToIssueTS and possible issued timestamp is within ReservedTimeShreshold
     if (!_curControlInfo.IsReadyToIssueTS)
     {
-        K2WARN("Not ready to issue timestamp batch due to IsReadyToIssueTS, worker core:" << seastar::engine().cpu_id());
+        K2WARN("Not ready to issue timestamp batch due to IsReadyToIssueTS, worker core:" << seastar::this_shard_id());
 
         // TODO: consider giving more detail information on why IsReadyToIssueTS is false, e.g. the instance is not master, not init, or wait/sleep
         throw TSONotReadyException();
@@ -240,7 +240,7 @@ TimestampBatch TSOService::TSOWorker::GetTimeStampFromTSOLessFrequentHelper(uint
     if (curTBEMicroSecRounded + 1000 > _curControlInfo.ReservedTimeShreshold)
     {
         // this is really a bug if ReservedTimeShreshold is not updated promptly.
-         K2WARN("Not ready to issue timestamp batch due to ReservedTimeShreshold, worker core:" << seastar::engine().cpu_id());
+         K2WARN("Not ready to issue timestamp batch due to ReservedTimeShreshold, worker core:" << seastar::this_shard_id());
 
         // TODO: consider giving more detail information
         throw TSONotReadyException();
@@ -275,7 +275,7 @@ TimestampBatch TSOService::TSOWorker::GetTimeStampFromTSOLessFrequentHelper(uint
     K2ASSERT(curTBEMicroSecRounded == _lastRequestTBEMicroSecRounded, "last and this requests are in same microsecond!");
 
     TimestampBatch result;
-    result.TBEBase = curTBEMicroSecRounded + seastar::engine().cpu_id() - 1 + _lastRequestTimeStampCount * _curControlInfo.TBENanoSecStep;
+    result.TBEBase = curTBEMicroSecRounded + seastar::this_shard_id() - 1 + _lastRequestTimeStampCount * _curControlInfo.TBENanoSecStep;
     result.TSOId = _tsoId;
     result.TsDelta = _curControlInfo.TsDelta;
     result.TTLNanoSec = _curControlInfo.BatchTTL;

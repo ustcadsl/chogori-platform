@@ -57,7 +57,7 @@ private:
 
 inline LogEntry StartLogStream() {
     LogEntry entry;
-    auto id = seastar::engine_is_ready() ? seastar::engine().cpu_id() : pthread_self();
+    auto id = seastar::engine_is_ready() ? seastar::this_shard_id() : pthread_self();
     entry.out << "[" << printTime(Clock::now()) << "]-" << LogEntry::procName << "-(" << id <<") ";
     return entry;
 }

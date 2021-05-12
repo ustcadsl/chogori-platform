@@ -88,12 +88,12 @@ private:
         future<> district_update = districtUpdate();
         future<> customer_update = customerUpdate();
 
-        future<> history_update = when_all_succeed(std::move(warehouse_update), std::move(district_update))
+        future<> history_update = when_all_succeed(std::move(warehouse_update), std::move(district_update)).discard_result()
         .then([this] () {
             return historyUpdate();
         });
 
-        return when_all_succeed(std::move(customer_update), std::move(history_update))
+        return when_all_succeed(std::move(customer_update), std::move(history_update)).discard_result()
         .then_wrapped([this] (auto&& fut) {
             if (fut.failed()) {
                 _failed = true;
@@ -295,7 +295,7 @@ private:
             return when_all_succeed(std::move(line_updates), std::move(order_update), std::move(new_order_update), std::move(district_update)).discard_result();
         });
 
-        return when_all_succeed(std::move(main_f), std::move(customer_f), std::move(warehouse_f))
+        return when_all_succeed(std::move(main_f), std::move(customer_f), std::move(warehouse_f)).discard_result()
         .then_wrapped([this] (auto&& fut) {
             if (fut.failed()) {
                 _failed = true;

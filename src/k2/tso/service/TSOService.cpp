@@ -45,23 +45,23 @@ seastar::future<> TSOService::gracefulStop() {
     K2INFO("stop");
 
     // Always use core 0 as controller and the rest as workers
-    if (seastar::engine().cpu_id() == 0)
+    if (seastar::this_shard_id() == 0)
     {
         K2ASSERT(_controller != nullptr, "_controller null!");
-        K2INFO("TSOController stops on core:" <<seastar::engine().cpu_id());
+        K2INFO("TSOController stops on core:" <<seastar::this_shard_id());
         return _controller->gracefulStop();
     }
     else
     {
         K2ASSERT(_worker != nullptr, "_controller null!");
-        K2INFO("TSOWorder stops on core:" <<seastar::engine().cpu_id());
+        K2INFO("TSOWorder stops on core:" <<seastar::this_shard_id());
         return _worker->gracefulStop();
     }
 }
 
 seastar::future<> TSOService::start()
 {
-    K2INFO("TSOService starts on core:" <<seastar::engine().cpu_id());
+    K2INFO("TSOService starts on core:" <<seastar::this_shard_id());
 
     // At least two cores, one controller and one worker is required
     if (seastar::smp::count < 2)
@@ -71,15 +71,15 @@ seastar::future<> TSOService::start()
     }
 
     // Always use core 0 as controller and the rest as workers
-    if (seastar::engine().cpu_id() == 0)
+    if (seastar::this_shard_id() == 0)
     {
-        K2INFO("TSOController starts on core:" <<seastar::engine().cpu_id());
+        K2INFO("TSOController starts on core:" <<seastar::this_shard_id());
         _controller = std::make_unique<TSOService::TSOController>(*this);
         return _controller->start();
     }
     else
     {
-        K2INFO("TSOWorder starts on core:" <<seastar::engine().cpu_id());
+        K2INFO("TSOWorder starts on core:" <<seastar::this_shard_id());
         _worker = std::make_unique<TSOService::TSOWorker>(*this);
         return _worker->start();
     }
@@ -87,7 +87,7 @@ seastar::future<> TSOService::start()
 
 void TSOService::UpdateWorkerControlInfo(const TSOWorkerControlInfo& controlInfo)
 {
-    K2ASSERT(seastar::engine().cpu_id() != 0 && _worker != nullptr, "UpdateWorkerControlInfo should be on worker core only!");
+    K2ASSERT(seastar::this_shard_id() != 0 && _worker != nullptr, "UpdateWorkerControlInfo should be on worker core only!");
 
     return _worker->UpdateWorkerControlInfo(controlInfo);
 }
@@ -96,7 +96,7 @@ std::vector<k2::String> TSOService::GetWorkerURLs()
 {
     // NOTE: this fn is called by controller during start() on worker after the transport is initialized
     // so directly return the transport config info
-    K2ASSERT(seastar::engine().cpu_id() != 0, "GetWorkerURLs should be on worker core only!");
+    K2ASSERT(seastar::this_shard_id() != 0, "GetWorkerURLs should be on worker core only!");
     K2INFO("GetWorkerURLs on worker core. tcp url is:" <<k2::RPC().getServerEndpoint(k2::TCPRPCProtocol::proto)->getURL());
 
     std::vector<k2::String> result;
@@ -120,7 +120,7 @@ std::vector<k2::String> TSOService::GetWorkerURLs()
             (void)request;  // TODO do something with the request
         });
 
-    K2INFO("Core Id:" << seastar::engine().cpu_id());
+    K2INFO("Core Id:" << seastar::this_shard_id());
 
     // call msgReceiver method on core#0
     return _baseApp.getDist<k2::TSOService>().invoke_on(0, &TSOService::msgReceiver);
@@ -131,7 +131,7 @@ std::vector<k2::String> TSOService::GetWorkerURLs()
 seastar::future<> TSOService::msgReceiver()
 {
     K2INFO("Message received");
-    K2INFO("Core 0 Id:" << seastar::engine().cpu_id());
+    K2INFO("Core 0 Id:" << seastar::this_shard_id());
     return seastar::make_ready_future<>();
 } */
 

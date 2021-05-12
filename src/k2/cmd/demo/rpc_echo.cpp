@@ -73,7 +73,7 @@ private:
             Echo_Message request{.message = "Hello World!"}; 
             return RPC().callRPC<Echo_Message, Echo_Message>(MessageVerbs::MES, request, *RPC().getServerEndpoint(TCPRPCProtocol::proto), 1s)
             .then([] (auto&& resp) {
-                K2INFO("CPU_ID: " << seastar::engine().cpu_id() << " Received MEG response with status: " << std::get<0>(resp) << ", value=" << std::get<1>(resp).message);
+                K2INFO("CPU_ID: " << seastar::this_shard_id() << " Received MEG response with status: " << std::get<0>(resp) << ", value=" << std::get<1>(resp).message);
             });
         });
     }

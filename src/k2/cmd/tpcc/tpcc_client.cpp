@@ -148,7 +148,7 @@ private:
     seastar::future<> _data_load() {
         K2INFO("Creating DataLoader");
         int cpus = seastar::smp::count;
-        int id = seastar::engine().cpu_id();
+        int id = seastar::this_shard_id();
         int share = _max_warehouses() / cpus;
         if (_max_warehouses() % cpus != 0) {
             K2WARN("CPUs must divide evenly into num warehouses!");
@@ -184,7 +184,7 @@ private:
             [this] { return _stopped; },
             [this] {
                 uint32_t txn_type = _random.UniformRandom(1, 100);
-                uint32_t w_id = (seastar::engine().cpu_id() % _max_warehouses()) + 1;
+                uint32_t w_id = (seastar::this_shard_id() % _max_warehouses()) + 1;
                 TPCCTxn* curTxn = txn_type <= 43 ? (TPCCTxn*) new PaymentT(_random, _client, w_id, _max_warehouses())
                                                  : (TPCCTxn*) new NewOrderT(_random, _client, w_id, _max_warehouses());
                 auto txn_start = k2::Clock::now();
@@ -226,7 +226,7 @@ private:
 
             _timer.arm(_testDuration);
             _start = k2::Clock::now();
-            _random = RandomContext(seastar::engine().cpu_id());
+            _random = RandomContext(seastar::this_shard_id());
             for (int i=0; i < _num_concurrent_txns(); ++i) {
                 _tpcc_futures.emplace_back(_tpcc());
             }

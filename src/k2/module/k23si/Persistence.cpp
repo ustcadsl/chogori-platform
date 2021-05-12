@@ -26,7 +26,7 @@ Copyright(c) 2020 Futurewei Cloud
 namespace k2 {
 
 Persistence::Persistence() {
-    int id = seastar::engine().cpu_id();
+    int id = seastar::this_shard_id();
     String endpoint = _config.persistenceEndpoint()[id % _config.persistenceEndpoint().size()];
     _remoteEndpoint = RPC().getTXEndpoint(endpoint);
     K2INFO("ctor with endpoint: " << _remoteEndpoint->getURL());

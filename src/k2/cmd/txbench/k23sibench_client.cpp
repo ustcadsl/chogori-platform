@@ -83,7 +83,7 @@ public:  // application lifespan
             ", with testDuration=" << _testDuration());
         _data.data = k2::String('.', _dataSize());
         _stopped = false;
-        auto myid = seastar::engine().cpu_id();
+        auto myid = seastar::this_shard_id();
 
         _gen.seed(myid);
 
