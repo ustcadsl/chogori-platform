@@ -27,7 +27,6 @@ Copyright(c) 2020 Futurewei Cloud
 
 namespace k2
 {
-
 template <typename ValueType>
 class Indexer<std::map<dto::Key, k2::KeyValueNode>, ValueType>
 {

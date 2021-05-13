@@ -35,6 +35,7 @@ namespace k2
 //  K2 internal MVCC representation
 //
 
+<<<<<<< HEAD
 class KeyValueNode
 {
 private:
@@ -153,6 +154,8 @@ public:
 	}
 }
 
+=======
+>>>>>>> 2cd05b59ef0f95c87044ee5246debcf033a4dc11
 template<typename IndexerType, typename ValueType>
 class Indexer
 {
@@ -171,7 +174,11 @@ public:
 
 template<typename IndexerType, typename ValueType>
 inline typename IndexerType::iterator Indexer<IndexerType, ValueType>::insert(dto::Key key) {
+<<<<<<< HEAD
     auto ret = idx.insert(std::pair<dto::Key, k2::KeyValueNode>(key, k2::KeyValueNode()));
+=======
+    auto ret = idx.insert(std::pair<dto::Key, std::deque<ValueType>>(key, std::deque<ValueType>()));
+>>>>>>> 2cd05b59ef0f95c87044ee5246debcf033a4dc11
     return ret.first;
 }
 

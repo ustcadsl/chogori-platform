@@ -666,9 +666,6 @@ K23SIPartitionModule::handleInspectWIs(dto::K23SIInspectWIsRequest&& request) {
 
         records.push_back(std::move(copy));
     	}
-
-	
-        
     }
 
     dto::K23SIInspectWIsResponse response { std::move(records) };
