@@ -1,0 +1,2 @@
+/usr/bin/ar qc libdto.a  CMakeFiles/dto.dir/Collection.cpp.o CMakeFiles/dto.dir/ControlPlaneOracle.cpp.o CMakeFiles/dto.dir/FieldTypes.cpp.o CMakeFiles/dto.dir/K23SI.cpp.o CMakeFiles/dto.dir/SKVRecord.cpp.o CMakeFiles/dto.dir/Timestamp.cpp.o
+/usr/bin/ranlib libdto.a

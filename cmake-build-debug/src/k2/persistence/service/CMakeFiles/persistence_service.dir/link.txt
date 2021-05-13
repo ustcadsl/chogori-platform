@@ -1,0 +1,2 @@
+/usr/bin/ar qc libpersistence_service.a  CMakeFiles/persistence_service.dir/PersistenceService.cpp.o
+/usr/bin/ranlib libpersistence_service.a

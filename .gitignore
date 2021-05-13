@@ -1,0 +1,11 @@
+.idea/
+.editorconfig
+.vscode/
+build/
+deps/
+*.rpm
+*.deb
+*.changes
+*.iml
+k2b
+cluster/__pycache__/

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libcollection_metadata_cache.a  CMakeFiles/collection_metadata_cache.dir/CollectionMetadataCache.cpp.o
+/usr/bin/ranlib libcollection_metadata_cache.a

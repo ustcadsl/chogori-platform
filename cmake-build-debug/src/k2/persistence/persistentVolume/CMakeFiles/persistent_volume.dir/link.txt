@@ -1,0 +1,2 @@
+/usr/bin/ar qc libpersistent_volume.a  CMakeFiles/persistent_volume.dir/PersistentVolume.cpp.o
+/usr/bin/ranlib libpersistent_volume.a

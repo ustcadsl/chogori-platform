@@ -1,0 +1,2 @@
+/usr/bin/ar qc libk23si.a  CMakeFiles/k23si.dir/Module.cpp.o CMakeFiles/k23si.dir/Persistence.cpp.o CMakeFiles/k23si.dir/TxnManager.cpp.o
+/usr/bin/ranlib libk23si.a

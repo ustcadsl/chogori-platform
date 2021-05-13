@@ -1,0 +1,2 @@
+/usr/bin/ar qc libnode_pool_monitor.a  CMakeFiles/node_pool_monitor.dir/NodePoolMonitor.cpp.o
+/usr/bin/ranlib libnode_pool_monitor.a

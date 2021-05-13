@@ -1,0 +1,2 @@
+/usr/bin/ar qc libassignment_manager.a  CMakeFiles/assignment_manager.dir/AssignmentManager.cpp.o
+/usr/bin/ranlib libassignment_manager.a

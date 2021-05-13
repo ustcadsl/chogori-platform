@@ -1,0 +1,2 @@
+/usr/bin/ar qc libcpo_service.a  CMakeFiles/cpo_service.dir/CPOService.cpp.o
+/usr/bin/ranlib libcpo_service.a

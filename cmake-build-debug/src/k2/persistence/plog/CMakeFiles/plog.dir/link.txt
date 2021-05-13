@@ -1,0 +1,2 @@
+/usr/bin/ar qc libplog.a  CMakeFiles/plog.dir/PlogMock.cpp.o
+/usr/bin/ranlib libplog.a
