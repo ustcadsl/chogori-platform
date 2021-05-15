@@ -127,7 +127,7 @@ struct DataRecord {
         Committed     // the record has been committed and we should use the key/value
         // aborted WIs don't need state - as soon as we learn that a WI has been aborted, we remove it
     } status;
-    K2_PAYLOAD_FIELDS(key, value, isTombstone, prevVersion, txnId, status);
+    K2_PAYLOAD_FIELDS(key, value, isTombstone, txnId, status);
 };
 
 enum class TxnRecordState : uint8_t {

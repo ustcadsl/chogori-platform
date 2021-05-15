@@ -135,7 +135,7 @@ private: // methods
     bool _validateStaleWrite(dto::K23SIWriteRequest<Payload>& request, KeyValueNode& kvnode);
 
     // helper method used to create and persist a WriteIntent
-    seastar::future<> _createWI(dto::K23SIWriteRequest<Payload>&& request, std::deque<dto::DataRecord>& versions, FastDeadline deadline);
+    seastar::future<> _createWI(dto::K23SIWriteRequest<Payload>&& request, KeyValueNode& kvnode, FastDeadline deadline);
 
     // recover data upon startup
     seastar::future<> _recovery();

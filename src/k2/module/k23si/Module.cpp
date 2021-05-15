@@ -183,8 +183,8 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, dto::K23SI_MTR
         return _makeReadOK(nullptr);
     }
     k2::KeyValueNode& kvnode = fiter->second;
-    auto viter = kvnode.get_datarecord(request.mtr.timestamp)
-    if (viter == 0) {
+    auto viter = kvnode.get_datarecord(request.mtr.timestamp);
+    if (viter == nullptr) {
         // happy case: we either had no versions, or all versions were newer than the requested timestamp
         return _makeReadOK(nullptr);
     }
@@ -294,7 +294,7 @@ K23SIPartitionModule::handleWrite(dto::K23SIWriteRequest<Payload>&& request, dto
         fiter = _indexer.insert(request.key);
     }
 	k2::KeyValueNode& kvnode = fiter->second;
-    auto viter = kvnode.get_datarecord(request.mtr.timestamp)
+    //auto viter = kvnode.get_datarecord(request.mtr.timestamp);
     if (!_validateStaleWrite(request, kvnode)) {
         K2DEBUG("Partition: " << _partition << ", request too old for key " << request.key);
         return RPCResponse(dto::K23SIStatus::AbortRequestTooOld("request too old in write"), dto::K23SIWriteResponse{});
@@ -587,14 +587,14 @@ K23SIPartitionModule::handleInspectRecords(dto::K23SIInspectRecordsRequest&& req
     if (it == _indexer.end()) {
         return RPCResponse(dto::K23SIStatus::KeyNotFound("Key not found in indexer"), dto::K23SIInspectRecordsResponse{});
     }
-	k2::KeyValueNode& kvnode = fiter->second;
+	k2::KeyValueNode& kvnode = it->second;
 
     std::vector<dto::DataRecord> records;
 	int kvnodesize=kvnode.size();
     records.reserve(kvnodesize);
 	dto::DataRecord* lastscan=nullptr;
 	for(int i=0;i<kvnodesize;i++){
-		if(i<3) lastscan=kvnode._getpointer(i)
+		if(i<3) lastscan=kvnode._getpointer(i);
 			else lastscan=lastscan->prevVersion;
         dto::DataRecord copy {
             lastscan->key,
@@ -649,7 +649,7 @@ K23SIPartitionModule::handleInspectWIs(dto::K23SIInspectWIsRequest&& request) {
 		int kvnodesize=kvnode.size();
 		dto::DataRecord* lastscan=nullptr;
 		for(int i=0;i<kvnodesize;i++){
-			if(i<3) lastscan=kvnode._getpointer(i)
+			if(i<3) lastscan=kvnode._getpointer(i);
 				else lastscan=lastscan->prevVersion;
 
 			if (lastscan->status != dto::DataRecord::Status::WriteIntent) {

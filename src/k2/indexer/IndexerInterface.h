@@ -35,14 +35,13 @@ namespace k2
 //  K2 internal MVCC representation
 //
 
-<<<<<<< HEAD
 class KeyValueNode
 {
 private:
 	uint64_t flags;
 	dto::DataRecord* keypointer;
 	typedef struct{
-		uint64_t timestamp;
+		dto::Timestamp timestamp;
 		dto::DataRecord* valuepointer;
 		} _valuedata;
 	_valuedata valuedata[3];//8type for ts and 8 byte for pointer
@@ -51,10 +50,10 @@ public:
 	KeyValueNode() {
 		flags=0;
 		keypointer=0;
-		for(int i=0;i<2;i++)
+		for(int i=0;i<3;i++)
 		{
-			valuedata[i].timestamp=0;
-			valuedata[i].valuepointer=0;
+			valuedata[i].timestamp = dto::Timestamp();
+			valuedata[i].valuepointer = nullptr;
 		}
 	}
 	dto::Key get_key(){
@@ -62,8 +61,8 @@ public:
 		return valuedata[0].valuepointer->key;
 	}
 	void set_zero(int order){
-		valuedata[order].timestamp=0;
-		valuedata[order].valuepointer=0;
+		valuedata[order].timestamp = dto::Timestamp();
+		valuedata[order].valuepointer = nullptr;
 	}
 	dto::DataRecord* get_datarecord(const dto::Timestamp& timestamp){
 		for(int i=0;i<3;++i)
@@ -72,16 +71,16 @@ public:
 		dto::DataRecord* viter=valuedata[2].valuepointer;
 		while (viter != nullptr && timestamp.compareCertain(viter->txnId.mtr.timestamp) < 0) {
          // skip newer records
-        	viter=viter->prevVersion;
+        	viter = viter->prevVersion;
    	 	}
 		return viter;
 	}
 	int insert_datarecord(dto::DataRecord* datarecord){
-		datarecord->prevVersion=valuedata[0].valuepointer;
+		datarecord->prevVersion = valuedata[0].valuepointer;
 		for(int i=2;i>0;i--)
-			valuedata[i]=valuedata[i-1];
-		valuedata[0].valuepointer=datarecord;
-		valuedata[0].timestamp=datarecord->txnId.mtr.timestamp.tEndTSECount();
+			valuedata[i] = valuedata[i-1];
+		valuedata[0].valuepointer = datarecord;
+		valuedata[0].timestamp = datarecord->txnId.mtr.timestamp;
 		return 0;
 	}
 	int remove_datarecord(const dto::Timestamp& timestamp){
@@ -94,15 +93,20 @@ public:
 				{
 					valuedata[i-1].valuepointer->prevVersion=valuedata[i].valuepointer->prevVersion;
 				}
-				for(int j=i;j<2;j++)
-					valuedata[j]=valuedata[j+1];
+				for(int j=i;j<2;++j)
+					valuedata[j] = valuedata[j+1];
 				set_zero(2);
 				delete toremove;
 				return 0;
 			}
 		return 1;
 	}
+
 	int remove_datarecord(dto::DataRecord* datarecord){
+	    if(datarecord == nullptr) {
+	        return 1;
+	    }
+
 		dto::DataRecord* toremove;
 		for(int i=0;i<3;++i)
 			if(valuedata[i].valuepointer==datarecord){
@@ -112,7 +116,7 @@ public:
 		dto::DataRecord* viter=valuedata[2].valuepointer;
 		while (viter->prevVersion != nullptr && viter->prevVersion != datarecord) {
          // skip newer records
-        	viter=viter->prevVersion;
+        	viter = viter->prevVersion;
    	 	}
 		if(viter->prevVersion == nullptr)
 			return 1;
@@ -121,7 +125,11 @@ public:
 		delete toremove;
 		return 0;
 	}
+
 	int remove_datarecord(int order){
+	    if(order >= 3 || valuedata[order].valuepointer == nullptr) {
+	        return 1;
+	    }
 		int i=order;
 		dto::DataRecord* toremove=valuedata[i].valuepointer;
 		if(i>0)
@@ -142,20 +150,25 @@ public:
 		return this->_getpointer(0);
 	}
 	int size(){
-		int i=0;
-		for(int j=0;j<2;++i) if(valuedata[j].valuepointer!=0) i++;
-		dto::DataRecord* viter=valuedata[2].valuepointer;
-		while (viter->prevVersion != nullptr) {
-         // skip newer records
-        	viter=viter->prevVersion;
-		 	i++;
-   	 	}
+		int i = 0;
+		while(i < 3 && valuedata[i].valuepointer != nullptr) {
+            i++;
+        }
+		if(i > 0) {
+            dto::DataRecord* viter  = valuedata[i-1].valuepointer;
+            while(viter->prevVersion != nullptr) {
+                //skip newer records
+                viter = viter->prevVersion;
+                i++;
+            }
+		}
 		return i;
 	}
-}
+	bool empty() {
+	    return valuedata[0].valuepointer == nullptr;
+	}
+};
 
-=======
->>>>>>> 2cd05b59ef0f95c87044ee5246debcf033a4dc11
 template<typename IndexerType, typename ValueType>
 class Indexer
 {
@@ -174,11 +187,7 @@ public:
 
 template<typename IndexerType, typename ValueType>
 inline typename IndexerType::iterator Indexer<IndexerType, ValueType>::insert(dto::Key key) {
-<<<<<<< HEAD
     auto ret = idx.insert(std::pair<dto::Key, k2::KeyValueNode>(key, k2::KeyValueNode()));
-=======
-    auto ret = idx.insert(std::pair<dto::Key, std::deque<ValueType>>(key, std::deque<ValueType>()));
->>>>>>> 2cd05b59ef0f95c87044ee5246debcf033a4dc11
     return ret.first;
 }
 

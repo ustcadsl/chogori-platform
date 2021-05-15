@@ -9,7 +9,4 @@ deps/
 *.iml
 k2b
 cluster/__pycache__/
-<<<<<<< HEAD
-=======
 /cmake-build-debug/
->>>>>>> 2cd05b59ef0f95c87044ee5246debcf033a4dc11
