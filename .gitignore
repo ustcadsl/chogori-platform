@@ -10,3 +10,5 @@ deps/
 k2b
 cluster/__pycache__/
 *.log
+.clangd/
+compile_commands.json
