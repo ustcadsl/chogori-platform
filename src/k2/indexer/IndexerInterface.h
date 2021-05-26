@@ -85,60 +85,67 @@ public:
 	}
 	int remove_datarecord(const dto::Timestamp& timestamp){
 		dto::DataRecord* toremove;
-		for(int i=0;i<3;++i)
-			if(timestamp.compareCertain(valuedata[i].timestamp)==0)
-			{
-				toremove=valuedata[i].valuepointer;
-				if(i>0)
-				{
-					valuedata[i-1].valuepointer->prevVersion=valuedata[i].valuepointer->prevVersion;
-				}
-				for(int j=i;j<2;++j)
-					valuedata[j] = valuedata[j+1];
-				set_zero(2);
-				delete toremove;
-				return 0;
-			}
+		for(int i = 0; i < 3; ++i) {
+            if(timestamp.compareCertain(valuedata[i].timestamp)==0) {
+                toremove=valuedata[i].valuepointer;
+                if(i>0)
+                {
+                    valuedata[i-1].valuepointer->prevVersion=valuedata[i].valuepointer->prevVersion;
+                }
+                for(int j = i; j < 2; ++j) {
+                    valuedata[j] = valuedata[j+1];
+                }
+                if(valuedata[2].valuepointer != nullptr){
+                    valuedata[2].valuepointer = valuedata[2].valuepointer->prevVersion;
+                }
+                delete toremove;
+                return 0;
+            }
+		}
 		return 1;
 	}
-
 	int remove_datarecord(dto::DataRecord* datarecord){
 	    if(datarecord == nullptr) {
 	        return 1;
 	    }
 
 		dto::DataRecord* toremove;
-		for(int i=0;i<3;++i)
-			if(valuedata[i].valuepointer==datarecord){
-				this->remove_datarecord(i);
-				return 0;
-			}
+	    for (int i = 0; i < 3; ++i) {
+	        if(valuedata[i].valuepointer == nullptr) {
+	            return 1;
+	        }
+	        if(valuedata[i].valuepointer == datarecord) {
+	            return this->remove_datarecord(i);
+            }
+	    }
+
 		dto::DataRecord* viter=valuedata[2].valuepointer;
 		while (viter->prevVersion != nullptr && viter->prevVersion != datarecord) {
          // skip newer records
         	viter = viter->prevVersion;
    	 	}
-		if(viter->prevVersion == nullptr)
-			return 1;
-		toremove=viter->prevVersion;
-		viter->prevVersion=toremove->prevVersion;
+		if(viter->prevVersion == nullptr) {
+		    return 1;
+		}
+		toremove = viter->prevVersion;
+		viter->prevVersion = toremove->prevVersion;
 		delete toremove;
 		return 0;
 	}
-
 	int remove_datarecord(int order){
 	    if(order >= 3 || valuedata[order].valuepointer == nullptr) {
 	        return 1;
 	    }
-		int i=order;
-		dto::DataRecord* toremove=valuedata[i].valuepointer;
-		if(i>0)
-		{
-			valuedata[i-1].valuepointer->prevVersion=valuedata[i].valuepointer->prevVersion;
+		dto::DataRecord* toremove=valuedata[order].valuepointer;
+		if(order>0) {
+			valuedata[order-1].valuepointer->prevVersion=valuedata[order].valuepointer->prevVersion;
 		}
-		for(int j=i;j<2;++j)
-			valuedata[j]=valuedata[j+1];
-		set_zero(2);
+        for(int j = order; j < 2; ++j) {
+            valuedata[j] = valuedata[j+1];
+        }
+        if(valuedata[2].valuepointer != nullptr){
+            valuedata[2].valuepointer = valuedata[2].valuepointer->prevVersion;
+        }
 		delete toremove;
 		return 0;
 	}

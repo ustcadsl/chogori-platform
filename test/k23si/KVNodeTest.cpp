@@ -77,6 +77,6 @@ REQUIRE(kvNode.remove_datarecord(3) == 1);// Q
 //remove with datarecord ptr
 REQUIRE(kvNode.remove_datarecord(nullptr) == 1);// Q
 REQUIRE(kvNode.remove_datarecord(dataPtr2) == 0);
-// REQUIRE(kvNode.remove_datarecord(dataPtr1) == 0);// Q
-// REQUIRE(kvNode.size() == 1);
+REQUIRE(kvNode.remove_datarecord(dataPtr1) == 0);// Q
+REQUIRE(kvNode.size() == 0);
 }
