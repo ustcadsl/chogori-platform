@@ -1,2 +1,0 @@
-/usr/bin/ar qc libpartition_manager.a  CMakeFiles/partition_manager.dir/PartitionManager.cpp.o
-/usr/bin/ranlib libpartition_manager.a

@@ -1,2 +1,0 @@
-/usr/bin/ar qc libk23si_client.a  CMakeFiles/k23si_client.dir/k23si_client.cpp.o
-/usr/bin/ranlib libk23si_client.a

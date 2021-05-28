@@ -1,2 +1,0 @@
-/usr/bin/ar qc libcpo_client.a  CMakeFiles/cpo_client.dir/CPOClient.cpp.o
-/usr/bin/ranlib libcpo_client.a

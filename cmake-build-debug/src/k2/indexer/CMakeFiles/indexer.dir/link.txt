@@ -1,2 +1,0 @@
-/usr/bin/ar qc libindexer.a  
-/usr/bin/ranlib libindexer.a

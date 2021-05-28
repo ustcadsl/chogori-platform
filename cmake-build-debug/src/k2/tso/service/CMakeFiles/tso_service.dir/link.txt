@@ -1,2 +1,0 @@
-/usr/bin/ar qc libtso_service.a  CMakeFiles/tso_service.dir/TSOController.cpp.o CMakeFiles/tso_service.dir/TSOService.cpp.o CMakeFiles/tso_service.dir/TSOWorker.cpp.o
-/usr/bin/ranlib libtso_service.a

@@ -1,2 +1,0 @@
-/usr/bin/ar qc libtso_client.a  CMakeFiles/tso_client.dir/tso_clientlib.cpp.o
-/usr/bin/ranlib libtso_client.a

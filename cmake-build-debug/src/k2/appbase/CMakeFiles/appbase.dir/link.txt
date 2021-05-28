@@ -1,2 +1,0 @@
-/usr/bin/ar qc libappbase.a  CMakeFiles/appbase.dir/Appbase.cpp.o
-/usr/bin/ranlib libappbase.a

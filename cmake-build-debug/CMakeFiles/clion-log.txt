@@ -1,9 +1,0 @@
-/usr/bin/cmake -DCMAKE_BUILD_TYPE=Debug -G "CodeBlocks - Unix Makefiles" /home/kvgroup/lcy/chogori-platform-indexer-tmp
--- Found Boost: /usr/include (found suitable version "1.71.0", minimum required is "1.64")  
--- Found Boost: /usr/include (found suitable version "1.71.0", minimum required is "1.64.0") found components: program_options thread unit_test_framework chrono date_time atomic 
--- Could NOT find dpdk (missing: dpdk_INCLUDE_DIR dpdk_PMD_VMXNET3_UIO_LIBRARY dpdk_PMD_I40E_LIBRARY dpdk_PMD_IXGBE_LIBRARY dpdk_PMD_E1000_LIBRARY dpdk_PMD_BNXT_LIBRARY dpdk_PMD_RING_LIBRARY dpdk_PMD_CXGBE_LIBRARY dpdk_PMD_ENA_LIBRARY dpdk_PMD_ENIC_LIBRARY dpdk_PMD_MLX5_LIBRARY dpdk_PMD_NFP_LIBRARY dpdk_PMD_QEDE_LIBRARY dpdk_RING_LIBRARY dpdk_KVARGS_LIBRARY dpdk_MEMPOOL_LIBRARY dpdk_MEMPOOL_RING_LIBRARY dpdk_HASH_LIBRARY dpdk_CMDLINE_LIBRARY dpdk_MBUF_LIBRARY dpdk_CFGFILE_LIBRARY dpdk_EAL_LIBRARY dpdk_ETHDEV_LIBRARY dpdk_NET_LIBRARY dpdk_TIMER_LIBRARY dpdk_PCI_LIBRARY dpdk_BUS_PCI_LIBRARY dpdk_BUS_VDEV_LIBRARY dpdk_PMD_FM10K_LIBRARY dpdk_PMD_SFC_EFX_LIBRARY) 
--- Found yaml-cpp: /usr/lib/x86_64-linux-gnu/libyaml-cpp.so (found suitable version "0.6.2", minimum required is "0.5.1") 
--- Found yaml-cpp: /usr/lib/x86_64-linux-gnu/libyaml-cpp.so (found version "0.6.2") 
--- Configuring done
--- Generating done
--- Build files have been written to: /home/kvgroup/lcy/chogori-platform-indexer-tmp/cmake-build-debug
