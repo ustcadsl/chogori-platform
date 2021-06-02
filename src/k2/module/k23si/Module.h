@@ -150,7 +150,8 @@ private: // members
     // to store data. The deque contains versions of a key, sorted in decreasing order of their ts.end.
     // (newest item is at front of the deque)
     // Duplicates are not allowed
-    k2::Indexer<std::map<dto::Key, k2::KeyValueNode>, k2::KeyValueNode> _indexer;
+    //k2::Indexer<std::map<dto::Key, k2::KeyValueNode>, k2::KeyValueNode> _indexer;
+    Indexer* _indexer;
 
     // to store transactions
     TxnManager _txnMgr;

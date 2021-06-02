@@ -56,6 +56,7 @@ K23SIPartitionModule::K23SIPartitionModule(dto::CollectionMetadata cmeta, dto::P
 
 seastar::future<> K23SIPartitionModule::start() {
     K2DEBUG("Starting for partition: " << _partition);
+	_indexer=new mapindexer();
     RPC().registerRPCObserver<dto::K23SIReadRequest, dto::K23SIReadResponse<Payload>>(dto::Verbs::K23SI_READ, [this](dto::K23SIReadRequest&& request) {
         return handleRead(std::move(request), dto::K23SI_MTR_ZERO, FastDeadline(_config.readTimeout()));
     });
@@ -133,6 +134,7 @@ seastar::future<> K23SIPartitionModule::start() {
 }
 
 K23SIPartitionModule::~K23SIPartitionModule() {
+	delete _indexer;
     K2INFO("dtor for cname=" << _cmeta.name <<", part=" << _partition);
 }
 
@@ -178,12 +180,12 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, dto::K23SI_MTR
     }
 
     // find the version deque for the key
-    auto fiter = _indexer.find(request.key);
-    if (fiter == _indexer.end()) {
+    KeyValueNode* kvnodep = _indexer->find(request.key);
+    if (kvnodep == nullptr) {
         return _makeReadOK(nullptr);
-    }
-    k2::KeyValueNode& kvnode = fiter->second;
-    auto viter = kvnode.get_datarecord(request.mtr.timestamp);
+    }	
+	KeyValueNode& kvnode=*kvnodep;
+    auto viter = kvnode.get_datarecord(request.mtr.timestamp)
     if (viter == nullptr) {
         // happy case: we either had no versions, or all versions were newer than the requested timestamp
         return _makeReadOK(nullptr);
@@ -216,7 +218,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, dto::K23SI_MTR
     // remove the WI from cache and queue it up for cleanup
     _queueWICleanup(std::move(*viter));
     kvnode.remove_datarecord(0);
-    return _makeReadOK(kvnode.begin() == 0 ? nullptr : kvnode.begin()) ;
+    return _makeReadOK(kvnode.begin() == nullptr ? nullptr : kvnode.begin()) ;
 }
 
 bool K23SIPartitionModule::_validateStaleWrite(dto::K23SIWriteRequest<Payload>& request, KeyValueNode& kvnode) {
@@ -288,13 +290,13 @@ K23SIPartitionModule::handleWrite(dto::K23SIWriteRequest<Payload>&& request, dto
         });
     }
 
-    auto fiter = _indexer.find(request.key);
-    if (fiter == _indexer.end()) {
+    KeyValueNode* fiter = _indexer.find(request.key);
+    if (fiter == nullptr) {
         // Entry does not exist, create an empty entry
         fiter = _indexer.insert(request.key);
     }
-	k2::KeyValueNode& kvnode = fiter->second;
-    //auto viter = kvnode.get_datarecord(request.mtr.timestamp);
+	k2::KeyValueNode& kvnode = *fiter;
+    auto viter = kvnode.get_datarecord(request.mtr.timestamp)
     if (!_validateStaleWrite(request, kvnode)) {
         K2DEBUG("Partition: " << _partition << ", request too old for key " << request.key);
         return RPCResponse(dto::K23SIStatus::AbortRequestTooOld("request too old in write"), dto::K23SIWriteResponse{});
@@ -504,8 +506,8 @@ seastar::future<std::tuple<Status, dto::K23SITxnFinalizeResponse>>
 K23SIPartitionModule::handleTxnFinalize(dto::K23SITxnFinalizeRequest&& request) {
     // find the version deque for the key
     K2DEBUG("Partition: " << _partition << ", txn finalize: " << request);
-    auto fiter = _indexer.find(request.key);
-    if (fiter == _indexer.end() || fiter->second.empty()) {
+    KeyValueNode* fiter = _indexer.find(request.key);
+    if (fiter == nullptr || fiter->size()==0 ) {
         if (request.action == dto::EndAction::Abort) {
             // we don't have it but it was an abort anyway
             K2DEBUG("Partition: " << _partition << ", abort for missing key " << request.key << ", in txn " << request.mtr);
@@ -515,7 +517,7 @@ K23SIPartitionModule::handleTxnFinalize(dto::K23SITxnFinalizeRequest&& request) 
         K2DEBUG("Partition: " << _partition << ", rejecting commit for missing key " << request.key << ", in txn " << request.mtr);
         return RPCResponse(dto::K23SIStatus::OperationNotAllowed("cannot commit missing key"), dto::K23SITxnFinalizeResponse());
     }
-	k2::KeyValueNode& kvnode = fiter->second;
+	k2::KeyValueNode& kvnode = *fiter;
     dto::DataRecord* viter = kvnode.get_datarecord(request.mtr.timestamp);
     // position the version iterator at the version we should be converting
     
@@ -556,7 +558,7 @@ K23SIPartitionModule::handleTxnFinalize(dto::K23SITxnFinalizeRequest&& request) 
         kvnode.remove_datarecord(viter);
         if (kvnode.size()==0) {
             // if there are no versions left, erase the key from indexer
-            _indexer.erase(fiter);
+            _indexer.erase(request.key);
         }
     }
     // send a partiall update
@@ -583,18 +585,18 @@ seastar::future<std::tuple<Status, dto::K23SIInspectRecordsResponse>>
 K23SIPartitionModule::handleInspectRecords(dto::K23SIInspectRecordsRequest&& request) {
     K2DEBUG("handleInspectRecords for: " << request.key);
 
-    auto it = _indexer.find(request.key);
-    if (it == _indexer.end()) {
+    KeyValueNode* it = _indexer.find(request.key);
+    if (it == nullptr ) {
         return RPCResponse(dto::K23SIStatus::KeyNotFound("Key not found in indexer"), dto::K23SIInspectRecordsResponse{});
     }
-	k2::KeyValueNode& kvnode = it->second;
+	k2::KeyValueNode& kvnode = *it;
 
     std::vector<dto::DataRecord> records;
 	int kvnodesize=kvnode.size();
     records.reserve(kvnodesize);
 	dto::DataRecord* lastscan=nullptr;
 	for(int i=0;i<kvnodesize;i++){
-		if(i<3) lastscan=kvnode._getpointer(i);
+		if(i<3) lastscan=kvnode._getpointer(i)
 			else lastscan=lastscan->prevVersion;
         dto::DataRecord copy {
             lastscan->key,
@@ -644,12 +646,12 @@ K23SIPartitionModule::handleInspectWIs(dto::K23SIInspectWIsRequest&& request) {
     K2DEBUG("handleInspectWIs");
     std::vector<dto::DataRecord> records;
 
-    for (auto it = _indexer.begin(); it != _indexer.end(); ++it) {
-        k2::KeyValueNode& kvnode = it->second;
+    for (KeyValueNode* it = _indexer.beginiter(); it != nullptr; it=_indexer.inciter()) {
+        k2::KeyValueNode& kvnode = *it;
 		int kvnodesize=kvnode.size();
 		dto::DataRecord* lastscan=nullptr;
 		for(int i=0;i<kvnodesize;i++){
-			if(i<3) lastscan=kvnode._getpointer(i);
+			if(i<3) lastscan=kvnode._getpointer(i)
 				else lastscan=lastscan->prevVersion;
 
 			if (lastscan->status != dto::DataRecord::Status::WriteIntent) {
@@ -705,8 +707,8 @@ K23SIPartitionModule::handleInspectAllKeys(dto::K23SIInspectAllKeysRequest&& req
     std::vector<dto::Key> keys;
     keys.reserve(_indexer.size());
 
-    for (auto it = _indexer.begin(); it != _indexer.end(); ++it) {
-        keys.push_back(it->first);
+    for (KeyValueNode* it = _indexer.beginiter(); it != nullptr; it=_indexer.inciter()){
+        keys.push_back(it->get_key());
     }
 
     dto::K23SIInspectAllKeysResponse response { std::move(keys) };

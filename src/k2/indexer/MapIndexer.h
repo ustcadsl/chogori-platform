@@ -27,6 +27,84 @@ Copyright(c) 2020 Futurewei Cloud
 
 namespace k2
 {
+
+class mapindexer : public Indexer{
+private:
+    std::map<dto::Key, k2::KeyValueNode> idx;
+	std::map<dto::Key, k2::KeyValueNode>::iterator scanit;
+public: 
+	KeyValueNode* insert(dto::Key key);
+    KeyValueNode* find(dto::Key &key);
+    KeyValueNode* begin();
+    KeyValueNode* end();
+	KeyValueNode* getiter();
+	KeyValueNode* setiter(dto::Key &key);
+	KeyValueNode* beginiter();
+	KeyValueNode* inciter();
+
+    void erase(dto::Key key);
+    size_t size();
+};
+
+KeyValueNode* mapindexer::insert(dto::Key key)
+{
+	KeyValueNode newkvnode(key);
+	auto ret = idx.insert(std::pair<dto::Key , k2::KeyValueNode>(key, newkvnode));
+    return &(ret->first.second);
+}
+KeyValueNode* mapindexer::find(dto::Key& key)
+{
+	auto kit=idx.find(key);
+	if (kit==idx.end()) return nullptr;
+	return &(kit->second);
+}
+KeyValueNode* mapindexer::begin()
+{
+	auto kit=idx.begin();
+	return &(kit->second);
+}
+KeyValueNode* mapindexer::end()
+{
+	return nullptr;
+}
+KeyValueNode* mapindexer::getiter()
+{
+	if(scanit==idx.end()) return nullptr;
+	return &(scanit->second);
+}
+KeyValueNode* mapindexer::setiter(dto::Key &key)
+{
+	scanit=idx.find(key);
+	if (scanit==idx.end()) return nullptr;
+	return &(scanit->second);
+}
+KeyValueNode* mapindexer::beginiter()
+{
+	scanit==idx.begin();
+	if(scanit==idx.end()) return nullptr;
+	return &(scanit->second);
+}
+KeyValueNode* mapindexer::inciter()
+{
+	scanit++;
+	if(scanit==idx.end()) return nullptr;
+	return &(scanit->second);
+}
+void mapindexer::erase(dto::Key key)
+{
+	auto kit=idx.find(key);
+	if (kit==idx.end()) return;
+	idx.erase(kit);
+}
+
+inline size_t mapindexer::size()
+{
+	return idx.size();
+}
+
+
+
+/*
 template <typename ValueType>
 class Indexer<std::map<dto::Key, k2::KeyValueNode>, ValueType>
 {
@@ -45,7 +123,7 @@ public:
 
 template <typename ValueType>
 inline typename std::map<dto::Key, k2::KeyValueNode>::iterator Indexer<std::map<dto::Key, k2::KeyValueNode>, ValueType>::insert(dto::Key key) {
-    auto ret = idx.insert(std::pair<dto::Key , k2::KeyValueNode>(key, k2::KeyValueNode()));
+    auto ret = idx.insert(std::pair<dto::Key , k2::KeyValueNode>(key, k2::KeyValueNode(key)));
     return ret.first;
 }
 
@@ -72,5 +150,6 @@ inline typename std::map<dto::Key, k2::KeyValueNode>::iterator Indexer<std::map<
 template <typename ValueType>
 inline size_t Indexer<std::map<dto::Key, k2::KeyValueNode>, ValueType>::size() {
     return idx.size();
-}
+}*/
+
 }
