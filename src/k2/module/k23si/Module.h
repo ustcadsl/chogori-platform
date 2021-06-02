@@ -132,7 +132,7 @@ private: // methods
 
     // validate writes are not stale - older than the newest committed write or past a recent read.
     // return true if request is valid
-    bool _validateStaleWrite(dto::K23SIWriteRequest<Payload>& request, std::deque<dto::DataRecord>& versions);
+    bool _validateStaleWrite(dto::K23SIWriteRequest<Payload>& request, KeyValueNode& kvnode);
 
     // helper method used to create and persist a WriteIntent
     seastar::future<> _createWI(dto::K23SIWriteRequest<Payload>&& request, std::deque<dto::DataRecord>& versions, FastDeadline deadline);
@@ -150,7 +150,8 @@ private: // members
     // to store data. The deque contains versions of a key, sorted in decreasing order of their ts.end.
     // (newest item is at front of the deque)
     // Duplicates are not allowed
-    k2::Indexer<std::map<dto::Key, std::deque<dto::DataRecord>>, dto::DataRecord> _indexer;
+    //k2::Indexer<std::map<dto::Key, k2::KeyValueNode>, k2::KeyValueNode> _indexer;
+    Indexer* _indexer;
 
     // to store transactions
     TxnManager _txnMgr;

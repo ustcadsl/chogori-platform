@@ -56,6 +56,7 @@ K23SIPartitionModule::K23SIPartitionModule(dto::CollectionMetadata cmeta, dto::P
 
 seastar::future<> K23SIPartitionModule::start() {
     K2DEBUG("Starting for partition: " << _partition);
+	_indexer=new mapindexer();
     RPC().registerRPCObserver<dto::K23SIReadRequest, dto::K23SIReadResponse<Payload>>(dto::Verbs::K23SI_READ, [this](dto::K23SIReadRequest&& request) {
         return handleRead(std::move(request), dto::K23SI_MTR_ZERO, FastDeadline(_config.readTimeout()));
     });
@@ -133,6 +134,7 @@ seastar::future<> K23SIPartitionModule::start() {
 }
 
 K23SIPartitionModule::~K23SIPartitionModule() {
+	delete _indexer;
     K2INFO("dtor for cname=" << _cmeta.name <<", part=" << _partition);
 }
 
@@ -178,17 +180,13 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, dto::K23SI_MTR
     }
 
     // find the version deque for the key
-    auto fiter = _indexer.find(request.key);
-    if (fiter == _indexer.end()) {
+    KeyValueNode* kvnodep = _indexer->find(request.key);
+    if (kvnodep == nullptr) {
         return _makeReadOK(nullptr);
-    }
-    auto& versions = fiter->second;
-    auto viter = versions.begin();
-    // position the version iterator at the version we should be returning
-    while(viter != versions.end() && request.mtr.timestamp.compareCertain(viter->txnId.mtr.timestamp) < 0) {
-        ++viter;
-    }
-    if (viter == versions.end()) {
+    }	
+	KeyValueNode& kvnode=*kvnodep;
+    auto viter = kvnode.get_datarecord(request.mtr.timestamp)
+    if (viter == nullptr) {
         // happy case: we either had no versions, or all versions were newer than the requested timestamp
         return _makeReadOK(nullptr);
     }
@@ -215,15 +213,15 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, dto::K23SI_MTR
     // this is a read after a push and we still find a WI. This WI must be the exact same one we pushed against,
     // or else our read cache was not used correctly in code.
     K2ASSERT(sitMTR == viter->txnId.mtr, "bug in code: found WI after push");
-    K2ASSERT(viter == versions.begin(), "must be at newest version if we found a write intent")
+    K2ASSERT(viter == kvnode.begin(), "must be at newest version if we found a write intent")
 
     // remove the WI from cache and queue it up for cleanup
     _queueWICleanup(std::move(*viter));
-    versions.pop_front();
-    return _makeReadOK(versions.begin() == versions.end() ? nullptr : &(versions[0]));
+    kvnode.remove_datarecord(0);
+    return _makeReadOK(kvnode.begin() == nullptr ? nullptr : kvnode.begin()) ;
 }
 
-bool K23SIPartitionModule::_validateStaleWrite(dto::K23SIWriteRequest<Payload>& request, std::deque<dto::DataRecord>& versions) {
+bool K23SIPartitionModule::_validateStaleWrite(dto::K23SIWriteRequest<Payload>& request, KeyValueNode& kvnode) {
     if (!_validateRetentionWindow(request)) {
         // the request is outside the retention window
         return false;
@@ -245,14 +243,14 @@ bool K23SIPartitionModule::_validateStaleWrite(dto::K23SIWriteRequest<Payload>& 
     // if a txn committed a value at time T5, then we must also assume they did a read at time T5
     // NB(3) if we encounter a WI, we check the second oldest version to see if there is a need to push.
     // If the second oldest is newer than we are, then we won't commit even if we win a PUSH against the WI.
-    if (versions.size() > 0 && versions[0].status == dto::DataRecord::Committed &&
-        request.mtr.timestamp.compareCertain(versions[0].txnId.mtr.timestamp) <= 0) {
+    if (kvnode.size() > 0 && kvnode.begin()->status == dto::DataRecord::Committed &&
+        request.mtr.timestamp.compareCertain(kvnode.begin()->txnId.mtr.timestamp) <= 0) {
         // newest version is the latest committed and its newer than the request
         K2DEBUG("Partition: " << _partition << ", failing write older than latest commit for key " << request.key);
         return false;
     }
-    else if (versions.size() > 1 && versions[0].status == dto::DataRecord::WriteIntent &&
-        request.mtr.timestamp.compareCertain(versions[1].txnId.mtr.timestamp) <= 0) {
+    else if (kvnode.size() > 1 && kvnode.begin()->status == dto::DataRecord::WriteIntent &&
+        request.mtr.timestamp.compareCertain(kvnode._getpointer(1)->txnId.mtr.timestamp) <= 0) {
         // second newest version is the latest committed and its newer than the request.
         // no need to push since this request would fail anyway against the committed value
         K2DEBUG("Partition: " << _partition << ", failing write older than latest commit for key " << request.key);
@@ -292,27 +290,28 @@ K23SIPartitionModule::handleWrite(dto::K23SIWriteRequest<Payload>&& request, dto
         });
     }
 
-    auto fiter = _indexer.find(request.key);
-    if (fiter == _indexer.end()) {
+    KeyValueNode* fiter = _indexer.find(request.key);
+    if (fiter == nullptr) {
         // Entry does not exist, create an empty entry
         fiter = _indexer.insert(request.key);
     }
-    auto& versions = fiter->second;
-    if (!_validateStaleWrite(request, versions)) {
+	k2::KeyValueNode& kvnode = *fiter;
+    auto viter = kvnode.get_datarecord(request.mtr.timestamp)
+    if (!_validateStaleWrite(request, kvnode)) {
         K2DEBUG("Partition: " << _partition << ", request too old for key " << request.key);
         return RPCResponse(dto::K23SIStatus::AbortRequestTooOld("request too old in write"), dto::K23SIWriteResponse{});
     }
 
     // check to see if we should push or if we're coming after a push and the WI is still here
-    if (versions.size() > 0 && versions[0].status == dto::DataRecord::WriteIntent) {
-        auto& rec = versions[0];
+    if (kvnode.size() > 0 && kvnode.begin()->status == dto::DataRecord::WriteIntent) {
+        dto::DataRecord& rec = *(kvnode.begin());
         auto& rqmtr = request.mtr;
 
         if (sitMTR == rec.txnId.mtr) {
             K2DEBUG("Partition: " << _partition << ", post-push winner for key " << request.key);
             // this is a post-PUSH request which won over the siting WI and we still have the WI in cache
             _queueWICleanup(std::move(rec));
-            versions.pop_front();
+            kvnode.remove_datarecord(0);
         }
         else if (rec.txnId.mtr != rqmtr) {
             // this is a write request finding a WI from a different transaction. Do another push with the remaining
@@ -334,7 +333,7 @@ K23SIPartitionModule::handleWrite(dto::K23SIWriteRequest<Payload>&& request, dto
     }
 
     // all checks passed - we're ready to place this WI as the latest version(at head of versions deque)
-    return _createWI(std::move(request), versions, deadline).then([this]() mutable {
+    return _createWI(std::move(request), kvnode, deadline).then([this]() mutable {
         K2DEBUG("Partition: " << _partition << ", WI created");
         return RPCResponse(dto::K23SIStatus::Created("wi created"), dto::K23SIWriteResponse{});
     });
@@ -488,27 +487,27 @@ void K23SIPartitionModule::_queueWICleanup(dto::DataRecord&& rec) {
 }
 
 seastar::future<>
-K23SIPartitionModule::_createWI(dto::K23SIWriteRequest<Payload>&& request, std::deque<dto::DataRecord>& versions, FastDeadline deadline) {
+K23SIPartitionModule::_createWI(dto::K23SIWriteRequest<Payload>&& request, KeyValueNode& kvnode, FastDeadline deadline) {
     K2DEBUG("Partition: " << _partition << ", creating WI: " << request);
-    dto::DataRecord rec;
-    rec.key = std::move(request.key);
+	dto::DataRecord* prec=new dto::DataRecord();
+    prec->key = std::move(request.key);
     // we need to copy this data into a new memory block so that we don't hold onto and fragment the transport memory
-    rec.value.val = request.value.val.copy();
-    rec.isTombstone = request.isDelete;
-    rec.txnId = dto::TxnId{.trh = std::move(request.trh), .mtr = std::move(request.mtr)};
-    rec.status = dto::DataRecord::WriteIntent;
-
-    versions.push_front(std::move(rec));
+    prec->value.val = request.value.val.copy();
+    prec->isTombstone = request.isDelete;
+    prec->txnId = dto::TxnId{.trh = std::move(request.trh), .mtr = std::move(request.mtr)};
+    prec->status = dto::DataRecord::WriteIntent;
+	
+    kvnode.insert_datarecord(prec);
     // TODO write to WAL
-    return _persistence.makeCall(versions.front(), deadline);
+    return _persistence.makeCall(*prec, deadline);
 }
 
 seastar::future<std::tuple<Status, dto::K23SITxnFinalizeResponse>>
 K23SIPartitionModule::handleTxnFinalize(dto::K23SITxnFinalizeRequest&& request) {
     // find the version deque for the key
     K2DEBUG("Partition: " << _partition << ", txn finalize: " << request);
-    auto fiter = _indexer.find(request.key);
-    if (fiter == _indexer.end() || fiter->second.empty()) {
+    KeyValueNode* fiter = _indexer.find(request.key);
+    if (fiter == nullptr || fiter->size()==0 ) {
         if (request.action == dto::EndAction::Abort) {
             // we don't have it but it was an abort anyway
             K2DEBUG("Partition: " << _partition << ", abort for missing key " << request.key << ", in txn " << request.mtr);
@@ -518,15 +517,12 @@ K23SIPartitionModule::handleTxnFinalize(dto::K23SITxnFinalizeRequest&& request) 
         K2DEBUG("Partition: " << _partition << ", rejecting commit for missing key " << request.key << ", in txn " << request.mtr);
         return RPCResponse(dto::K23SIStatus::OperationNotAllowed("cannot commit missing key"), dto::K23SITxnFinalizeResponse());
     }
-    auto& versions = fiter->second;
-    auto viter = versions.begin();
+	k2::KeyValueNode& kvnode = *fiter;
+    dto::DataRecord* viter = kvnode.get_datarecord(request.mtr.timestamp);
     // position the version iterator at the version we should be converting
-    while (viter != versions.end() && request.mtr.timestamp.compareCertain(viter->txnId.mtr.timestamp) < 0) {
-        ++viter;
-    }
-
+    
     dto::TxnId txnId{.trh=std::move(request.trh), .mtr=std::move(request.mtr)};
-    if (viter == versions.end() || viter->txnId != txnId) {
+    if (viter == nullptr || viter->txnId != txnId) {
         // we don't have a record from this transaction
         if (request.action == dto::EndAction::Abort) {
             // we don't have it but it was an abort anyway
@@ -559,10 +555,10 @@ K23SIPartitionModule::handleTxnFinalize(dto::K23SITxnFinalizeRequest&& request) 
     else {
         K2DEBUG("Partition: " << _partition << ", aborting " << request.key << ", in txn " << request.mtr);
         // erase from version list
-        versions.erase(viter);
-        if (versions.empty()) {
+        kvnode.remove_datarecord(viter);
+        if (kvnode.size()==0) {
             // if there are no versions left, erase the key from indexer
-            _indexer.erase(fiter);
+            _indexer.erase(request.key);
         }
     }
     // send a partiall update
@@ -589,22 +585,26 @@ seastar::future<std::tuple<Status, dto::K23SIInspectRecordsResponse>>
 K23SIPartitionModule::handleInspectRecords(dto::K23SIInspectRecordsRequest&& request) {
     K2DEBUG("handleInspectRecords for: " << request.key);
 
-    auto it = _indexer.find(request.key);
-    if (it == _indexer.end()) {
+    KeyValueNode* it = _indexer.find(request.key);
+    if (it == nullptr ) {
         return RPCResponse(dto::K23SIStatus::KeyNotFound("Key not found in indexer"), dto::K23SIInspectRecordsResponse{});
     }
-    auto& versions = it->second;
+	k2::KeyValueNode& kvnode = *it;
 
     std::vector<dto::DataRecord> records;
-    records.reserve(versions.size());
-
-    for (dto::DataRecord& rec : versions) {
+	int kvnodesize=kvnode.size();
+    records.reserve(kvnodesize);
+	dto::DataRecord* lastscan=nullptr;
+	for(int i=0;i<kvnodesize;i++){
+		if(i<3) lastscan=kvnode._getpointer(i)
+			else lastscan=lastscan->prevVersion;
         dto::DataRecord copy {
-            rec.key,
-            rec.value.val.share(),
-            rec.isTombstone,
-            rec.txnId,
-            rec.status
+            lastscan->key,
+            lastscan->value.val.share(),
+            lastscan->isTombstone,
+            lastscan->prevVersion,
+            lastscan->txnId,
+            lastscan->status
         };
 
         records.push_back(std::move(copy));
@@ -646,23 +646,31 @@ K23SIPartitionModule::handleInspectWIs(dto::K23SIInspectWIsRequest&& request) {
     K2DEBUG("handleInspectWIs");
     std::vector<dto::DataRecord> records;
 
-    for (auto it = _indexer.begin(); it != _indexer.end(); ++it) {
-        auto& versions = it->second;
-        for (dto::DataRecord& rec : versions) {
-            if (rec.status != dto::DataRecord::Status::WriteIntent) {
+    for (KeyValueNode* it = _indexer.beginiter(); it != nullptr; it=_indexer.inciter()) {
+        k2::KeyValueNode& kvnode = *it;
+		int kvnodesize=kvnode.size();
+		dto::DataRecord* lastscan=nullptr;
+		for(int i=0;i<kvnodesize;i++){
+			if(i<3) lastscan=kvnode._getpointer(i)
+				else lastscan=lastscan->prevVersion;
+
+			if (lastscan->status != dto::DataRecord::Status::WriteIntent) {
                 continue;
             }
+        	dto::DataRecord copy {
+            	lastscan->key,
+          	  	lastscan->value.val.share(),
+            	lastscan->isTombstone,
+            	lastscan->prevVersion,
+            	lastscan->txnId,
+            	lastscan->status
+        	};
 
-            dto::DataRecord copy {
-                rec.key,
-                rec.value.val.share(),
-                rec.isTombstone,
-                rec.txnId,
-                rec.status
-            };
+        records.push_back(std::move(copy));
+    	}
 
-            records.push_back(std::move(copy));
-        }
+	
+        
     }
 
     dto::K23SIInspectWIsResponse response { std::move(records) };
@@ -702,8 +710,8 @@ K23SIPartitionModule::handleInspectAllKeys(dto::K23SIInspectAllKeysRequest&& req
     std::vector<dto::Key> keys;
     keys.reserve(_indexer.size());
 
-    for (auto it = _indexer.begin(); it != _indexer.end(); ++it) {
-        keys.push_back(it->first);
+    for (KeyValueNode* it = _indexer.beginiter(); it != nullptr; it=_indexer.inciter()){
+        keys.push_back(it->get_key());
     }
 
     dto::K23SIInspectAllKeysResponse response { std::move(keys) };
