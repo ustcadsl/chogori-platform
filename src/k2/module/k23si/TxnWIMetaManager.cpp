@@ -130,7 +130,7 @@ void TxnWIMetaManager::updateRetentionTimestamp(dto::Timestamp rts) {
     _retentionTs = rts;
 }
 
-Status TxnWIMetaManager::addWrite(dto::K23SI_MTR&& mtr, dto::Key&& key, dto::Key&& trh, String&& trhCollection) {
+Status TxnWIMetaManager::addWrite(dto::K23SI_MTR mtr, dto::Key key, dto::Key trh, String trhCollection) {
     K2LOG_D(log::skvsvr, "Adding write for mtr={}, key={}, trh={}, trhCollection={}", mtr, key, trh, trhCollection);
     auto& rec = _twims[mtr.timestamp];
     if (rec.state == dto::TxnWIMetaState::Created) {
@@ -246,7 +246,12 @@ Status TxnWIMetaManager::_onAction(Action action, TxnWIMeta& twim) {
                 return _aborted(twim);
             }
             case Action::onAbort: {
-                return _inProgressPIPAborted(twim);
+                // ---------------------------------> timeline
+                // w1x     e1(a) 
+                //     w2x       e2(c)
+                // T1 state:       inProgress -> ForceAborted(finalization async) -> AbortedPIP -> Aborted -> FinalizedPIP
+                // T1 wi state:    inProgressPIP -> inProgressPIPAborted -> inProgressPIPAborted -> Action onFinalize not supported in state InProgressPIPAborted 
+                return _aborted(twim);
             }
             case Action::onCreate:
             case Action::onCommit:

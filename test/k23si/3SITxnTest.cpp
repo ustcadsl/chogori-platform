@@ -107,11 +107,12 @@ public: // application
 
         _cpoEndpoint = RPC().getTXEndpoint(_cpoConfigEp());
         _testTimer.set_callback([this] {
-            _testFuture = testScenario00()
+            _testFuture = seastar::make_ready_future()
+            .then([this] {return testScenario00(); })
             .then([this] { return testScenario01(); })
             .then([this] { return testScenario02(); })
             .then([this] { return testScenario03(); })
-            .then([this] { return testScenario04(); })
+            .then([this] { return testScenario04(); })  
             .then([this] { return testScenario05(); })
             .then([this] { return testScenario06(); })
             .then([this] { return testScenario07(); })
@@ -156,12 +157,13 @@ private:
 
     dto::PartitionGetter _pgetter;
 
+    uint32_t id = 0; // request_id
+
     // injection parameters for error cases
     dto::Key wrongkey{.schemaName = "schema", .partitionKey = "SC00_wrong_pKey1", .rangeKey = "SC00_wrong_rKey1"}; // wrong partition: id(p1) against p2
 
     seastar::future<std::tuple<Status, dto::K23SIWriteResponse>>
-    doWrite(const dto::Key& key, const DataRec& data, const dto::K23SI_MTR mtr, const dto::Key& trh, const String& cname, bool isDelete, bool isTRH, ErrorCaseOpt errOpt) {
-        static uint32_t id = 0;
+    doWrite(const dto::Key& key, const DataRec& data, const dto::K23SI_MTR mtr, const dto::Key& trh, const String& cname, bool isDelete, bool isTRH, ErrorCaseOpt errOpt, bool writeAsync=false) {
 
         SKVRecord record(cname, std::make_shared<k2::dto::Schema>(_schema));
         record.serializeNext<String>(key.partitionKey);
@@ -182,7 +184,8 @@ private:
             .request_id = id++,
             .key = key,
             .value = std::move(record.storage),
-            .fieldsForPartialUpdate = std::vector<uint32_t>()
+            .fieldsForPartialUpdate = std::vector<uint32_t>(),
+            .writeAsync = writeAsync
         };
 
         switch (errOpt) {
@@ -206,6 +209,33 @@ private:
             break;
         } // end default
         } // end switch
+
+        if (writeAsync) {
+            auto& trhPart = _pgetter.getPartitionForKey(trh);
+            dto::K23SIWriteKeyRequest writeKeyRequest {
+                .pvid = trhPart.partition->keyRangeV.pvid,
+                .collectionName = cname,
+                .mtr = mtr,
+                .key = trh,
+                .writeKey = key,
+                .writeRange = part.partition->keyRangeV,
+                .request_id = request.request_id
+            };
+            return seastar::when_all(
+                RPC().callRPC<dto::K23SIWriteRequest, dto::K23SIWriteResponse>(dto::Verbs::K23SI_WRITE, request, *part.preferredEndpoint, 100ms),
+                RPC().callRPC<dto::K23SIWriteKeyRequest, dto::K23SIWriteKeyResponse>(dto::Verbs::K23SI_WRITE_KEY, writeKeyRequest, *trhPart.preferredEndpoint, 100ms)
+            ).then([this, request=std::move(request), &key] (auto&& response) {
+                auto& [writeResp, writeKeyResp] = response;
+                auto [writeKeyStatus, _] = writeKeyResp.get0();
+
+                if (!writeKeyStatus.is2xxOK()) {
+                    K2LOG_W(log::k23si, "write key failed with key {}, status {}", key, writeKeyStatus);
+                }
+
+                return writeResp.get0();
+            });
+        }
+
         return RPC().callRPC<dto::K23SIWriteRequest, dto::K23SIWriteResponse>
                 (dto::Verbs::K23SI_WRITE, request, *part.preferredEndpoint, 100ms);
     }
@@ -486,7 +516,8 @@ seastar::future<> testScenario00() {
                         .request_id=0,
                         .key = key,
                         .value{},
-                        .fieldsForPartialUpdate{}
+                        .fieldsForPartialUpdate{},
+                        .writeAsync = false
                     };
                     return RPC().callRPC<dto::K23SIWriteRequest, dto::K23SIWriteResponse>(dto::Verbs::K23SI_WRITE, request, *_k2Endpoints[0], 100ms)
                     .then([this](auto&& response) {
@@ -1002,7 +1033,8 @@ seastar::future<> testScenario01() {
             [this](dto::K23SI_MTR& mtr, DataRec& rec) {
                 dto::Key missPartKey;
                 missPartKey.rangeKey = "SC01_rKey1";
-                return doWrite(missPartKey, rec, mtr, missPartKey, collname, false, true, ErrorCaseOpt::NoInjection)
+                // throw exception [std::bad_alloc] if write async
+                return doWrite(missPartKey, rec, mtr, missPartKey, collname, false, true, ErrorCaseOpt::NoInjection, false)
                 .then([](auto&& response) {
                     auto& [status, resp] = response;
                     K2EXPECT(log::k23si, status, dto::K23SIStatus::BadParameter);
@@ -1044,6 +1076,7 @@ seastar::future<> testScenario01() {
                 .then([](auto&& response) {
                     auto& [status, resp] = response;
                     K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
+                    return seastar::sleep(10ms);
                 })
                 .then([this, &mtr] {
                     dto::Key onlyPartKey;
@@ -1083,6 +1116,7 @@ seastar::future<> testScenario01() {
                 .then([](auto&& response) {
                     auto& [status, resp] = response;
                     K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
+                    return seastar::sleep(100ms);
                 })
                 .then([this, &key, &mtr] {
                     return doRead(key, mtr, collname, ErrorCaseOpt::NoInjection)
@@ -1116,7 +1150,8 @@ seastar::future<> testScenario01() {
                 // case"wrong partition"  --> OP:WRITE
                 dto::Key missPartKey;
                 missPartKey.rangeKey = "SC01_rKey1";
-                return doWrite(missPartKey, rec, mtr, trh, badCname, false, true, ErrorCaseOpt::NoInjection)
+                // throw exception [std::bad_alloc] if write async
+                return doWrite(missPartKey, rec, mtr, trh, badCname, false, true, ErrorCaseOpt::NoInjection, false)
                 .then([](auto&& response) {
                     auto& [status, resp] = response;
                     K2EXPECT(log::k23si, status, dto::K23SIStatus::RefreshCollection);
@@ -1835,6 +1870,7 @@ seastar::future<> testScenario04() {
                     .then([&](auto&& response) {
                         auto& [status, val] = response;
                         K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
+                        return seastar::sleep(100ms);   // fix the warn: Action onFinalize not supported in state InProgressPIPAborted
                     })
                     .then([&] {
                         // this aborts the incumbent (mtrB) and so we should just see a KeyNotFound after the abort is cleaned
@@ -2163,6 +2199,7 @@ seastar::future<> testScenario06() {
                 .then([](auto&& response) mutable {
                     auto& [status, val] = response;
                     K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
+                    return seastar::sleep(100ms);
                 });
             })
             .then([&] {
@@ -2220,6 +2257,7 @@ seastar::future<> testScenario06() {
                 auto [status2, val2] = resp2.get0();
                 K2EXPECT(log::k23si, status1, dto::K23SIStatus::Created);
                 K2EXPECT(log::k23si, status2, dto::K23SIStatus::Created);
+                return seastar::sleep(100ms);
             })
             .then([&] {
                 return doFinalize(k2, mtr, collname, true, ErrorCaseOpt::NoInjection)
@@ -2285,6 +2323,7 @@ seastar::future<> testScenario06() {
                 auto [status2, val2] = resp2.get0();
                 K2EXPECT(log::k23si, status1, dto::K23SIStatus::Created);
                 K2EXPECT(log::k23si, status2, dto::K23SIStatus::Created);
+                return seastar::sleep(100ms);
             })
             .then([&] {
                 return doFinalize(k4, mtr, collname, false, ErrorCaseOpt::NoInjection)
@@ -2362,6 +2401,7 @@ seastar::future<> testScenario06() {
                 auto [status2, val2] = resp2.get0();
                 K2EXPECT(log::k23si, status1, dto::K23SIStatus::Created);
                 K2EXPECT(log::k23si, status2, dto::K23SIStatus::Created);
+                return seastar::sleep(100ms);
             })
             .then([&] {
                 return doFinalize(k4, mtr, collname, false, ErrorCaseOpt::NoInjection)
@@ -2445,6 +2485,8 @@ seastar::future<> testScenario06() {
 seastar::future<> testScenario07() {
     K2LOG_I(log::k23si, "+++++++ TestScenario 07: client-initiated txn abort +++++++");
 
+    // Note: here we should set writeAsync var because of the different behavior of ending request
+
     return seastar::make_ready_future()
     .then([] {
         return getTimeNow();
@@ -2461,7 +2503,8 @@ seastar::future<> testScenario07() {
             dto::Key {.schemaName = "schema", .partitionKey = "SC07_pkey1", .rangeKey = "rKey1"},
             dto::Key {.schemaName = "schema", .partitionKey = "SC07_pkey4", .rangeKey = "rKey2"},
             DataRec {.f1="SC05_f1_zero", .f2="SC04_f2_zero"},
-            [this](auto& mtr, auto& mtr2, auto& mtr3, auto& mtr4, auto& mtr5, auto& mtr6, auto& k1, auto& k2, auto& v0) {
+            false,
+            [this](auto& mtr, auto& mtr2, auto& mtr3, auto& mtr4, auto& mtr5, auto& mtr6, auto& k1, auto& k2, auto& v0, bool& writeAsync) {
             K2LOG_I(log::k23si, "------- SC07.case01 ( Commit-End a transaction before it has any operations ) -------");
             return doEnd(k1, mtr, collname, true, {k1}, Duration{0s}, ErrorCaseOpt::NoInjection)
             .then([](auto&& response)  {
@@ -2518,7 +2561,11 @@ seastar::future<> testScenario07() {
                                 break;
                             }
                         }
-                        K2EXPECT(log::k23si, found, true);
+                        if (writeAsync) {
+                            K2EXPECT(log::k23si, found, false);
+                        } else {
+                            K2EXPECT(log::k23si, found, true);
+                        }
                     });
                 });
             })
@@ -2555,9 +2602,14 @@ seastar::future<> testScenario07() {
                                 break;
                             }
                         }
-                        K2EXPECT(log::k23si, found, true);
+                        if (writeAsync) {
+                            K2EXPECT(log::k23si, found, false);
+                            K2EXPECT(log::k23si, val2.records.size(), 2);
+                        } else {
+                            K2EXPECT(log::k23si, found, true);
+                            K2EXPECT(log::k23si, val2.records.size(), 1);                            
+                        }
                         K2EXPECT(log::k23si, status2, dto::K23SIStatus::OK);
-                        K2EXPECT(log::k23si, val2.records.size(), 1);
                     });
                 });
             })
@@ -2572,6 +2624,7 @@ seastar::future<> testScenario07() {
                     auto [status2, val2] = resp2.get0();
                     K2EXPECT(log::k23si, status1, dto::K23SIStatus::Created);
                     K2EXPECT(log::k23si, status2, dto::K23SIStatus::Created);
+                    return seastar::sleep(10ms);
                 })
                 .then([&] {
                     return doEnd(k1, mtr3, collname, false, {k1}, Duration{0s}, ErrorCaseOpt::NoInjection)
@@ -2588,7 +2641,6 @@ seastar::future<> testScenario07() {
                         auto [status2, val2] = resp2.get0();
 
                         K2EXPECT(log::k23si, status2, dto::K23SIStatus::OK);
-                        K2EXPECT(log::k23si, val1.records.size(), 1);
 
                         K2EXPECT(log::k23si, status1, dto::K23SIStatus::OK);
                         bool found = false;
@@ -2598,8 +2650,13 @@ seastar::future<> testScenario07() {
                                 break;
                             }
                         }
-                        K2EXPECT(log::k23si, found, true);
-
+                        if (writeAsync) {
+                            K2EXPECT(log::k23si, found, false);
+                            K2EXPECT(log::k23si, val1.records.size(), 2);
+                        } else {
+                            K2EXPECT(log::k23si, found, true);
+                            K2EXPECT(log::k23si, val1.records.size(), 1);
+                        }
                     });
                 });
             })
@@ -2637,9 +2694,14 @@ seastar::future<> testScenario07() {
                                 break;
                             }
                         }
-                        K2EXPECT(log::k23si, found, true);
+                        if (writeAsync) {
+                            K2EXPECT(log::k23si, found, false);
+                            K2EXPECT(log::k23si, val2.records.size(), 2);
+                        } else {
+                            K2EXPECT(log::k23si, found, true);
+                            K2EXPECT(log::k23si, val2.records.size(), 1);
+                        }
                         K2EXPECT(log::k23si, status2, dto::K23SIStatus::OK);
-                        K2EXPECT(log::k23si, val2.records.size(), 1);
                     });
                 });
             })
@@ -2653,6 +2715,7 @@ seastar::future<> testScenario07() {
                     auto [status2, val2] = resp2.get0();
                     K2EXPECT(log::k23si, status1, dto::K23SIStatus::Created);
                     K2EXPECT(log::k23si, status2, dto::K23SIStatus::Created);
+                    return seastar::sleep(10ms);
                 })
                 .then([&] {
                     return seastar::when_all(doFinalize(k1, mtr5, collname, false, ErrorCaseOpt::NoInjection), \
@@ -2744,6 +2807,8 @@ seastar::future<> testScenario08() {
                 .then([](auto&& response)  {
                     auto& [status, val] = response;
                     K2EXPECT(log::k23si, status, dto::K23SIStatus::OK);
+                    // if writeAsync, wait the async fainalization task completed and erase the transaction record
+                    return seastar::sleep(3s);
                 });
             })
             .then([&] {
@@ -2760,6 +2825,7 @@ seastar::future<> testScenario08() {
                 .then([&](auto&& response) {
                     auto& [status, val] = response;
                     K2EXPECT(log::k23si, status, dto::K23SIStatus::AbortRequestTooOld);
+                    return seastar::sleep(100ms);
                 })
                 .then([&] {
                     return doInspectTxn(k1, mtr1, collname)
