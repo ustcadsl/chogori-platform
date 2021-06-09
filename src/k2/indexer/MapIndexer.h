@@ -46,51 +46,51 @@ public:
     size_t size();
 };
 
-KeyValueNode* mapindexer::insert(dto::Key key)
+inline KeyValueNode* mapindexer::insert(dto::Key key)
 {
 	KeyValueNode newkvnode(key);
 	auto ret = idx.insert(std::pair<dto::Key , k2::KeyValueNode>(key, newkvnode));
-    return &(ret->first.second);
+    return &(ret.first->second);
 }
-KeyValueNode* mapindexer::find(dto::Key& key)
+inline KeyValueNode* mapindexer::find(dto::Key& key)
 {
 	auto kit=idx.find(key);
 	if (kit==idx.end()) return nullptr;
 	return &(kit->second);
 }
-KeyValueNode* mapindexer::begin()
+inline KeyValueNode* mapindexer::begin()
 {
 	auto kit=idx.begin();
 	return &(kit->second);
 }
-KeyValueNode* mapindexer::end()
+inline KeyValueNode* mapindexer::end()
 {
 	return nullptr;
 }
-KeyValueNode* mapindexer::getiter()
+inline KeyValueNode* mapindexer::getiter()
 {
 	if(scanit==idx.end()) return nullptr;
 	return &(scanit->second);
 }
-KeyValueNode* mapindexer::setiter(dto::Key &key)
+inline KeyValueNode* mapindexer::setiter(dto::Key &key)
 {
 	scanit=idx.find(key);
 	if (scanit==idx.end()) return nullptr;
 	return &(scanit->second);
 }
-KeyValueNode* mapindexer::beginiter()
+inline KeyValueNode* mapindexer::beginiter()
 {
-	scanit==idx.begin();
-	if(scanit==idx.end()) return nullptr;
+	scanit = idx.begin();
+	if(scanit == idx.end()) return nullptr;
 	return &(scanit->second);
 }
-KeyValueNode* mapindexer::inciter()
+inline KeyValueNode* mapindexer::inciter()
 {
 	scanit++;
 	if(scanit==idx.end()) return nullptr;
 	return &(scanit->second);
 }
-void mapindexer::erase(dto::Key key)
+inline void mapindexer::erase(dto::Key key)
 {
 	auto kit=idx.find(key);
 	if (kit==idx.end()) return;

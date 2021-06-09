@@ -41,7 +41,7 @@ namespace k2 {
         uint64_t flags;
         dto::Key *keypointer;
         typedef struct {
-            dto::Timestamp timestamp;
+            u_int64_t timestamp;
             dto::DataRecord *valuepointer;
         } _valuedata;
         _valuedata valuedata[3];//8type for ts and 8 byte for pointer
@@ -51,7 +51,7 @@ namespace k2 {
             flags = 0;
             keypointer = nullptr;
             for (int i = 0; i < 3; ++i) {
-                valuedata[i].timestamp = dto::Timestamp();
+                valuedata[i].timestamp = 0;
                 valuedata[i].valuepointer = nullptr;
             }
         }
@@ -59,9 +59,11 @@ namespace k2 {
         KeyValueNode(dto::Key key) {
             flags = 0;
             keypointer = new dto::Key();
-            *keypointer = key;
+            if(keypointer != nullptr) {
+                *keypointer = key;
+            }
             for (int i = 0; i < 3; ++i) {
-                valuedata[i].timestamp = dto::Timestamp();
+                valuedata[i].timestamp = 0;
                 valuedata[i].valuepointer = nullptr;
             }
         }
@@ -72,7 +74,7 @@ namespace k2 {
 
         dto::Key get_key() {
             //assert(keypointer!=0);
-            return valuedata[0].valuepointer->key;
+            return *keypointer;
         }
 
         inline bool _get_flag_i(int i) {
@@ -144,13 +146,13 @@ namespace k2 {
         }
 
         void set_zero(int order) {
-            valuedata[order].timestamp = dto::Timestamp();
+            valuedata[order].timestamp = 0;
             valuedata[order].valuepointer = nullptr;
         }
 
         dto::DataRecord *get_datarecord(const dto::Timestamp &timestamp) {
             for (int i = 0; i < 3; ++i)
-                if (timestamp.compareCertain(valuedata[i].timestamp) >= 0)
+                if (timestamp.tEndTSECount() >= valuedata[i].timestamp)
                     return valuedata[i].valuepointer;
             dto::DataRecord *viter = valuedata[2].valuepointer;
             while (viter != nullptr && timestamp.compareCertain(viter->txnId.mtr.timestamp) < 0) {
@@ -169,7 +171,7 @@ namespace k2 {
                 set_inmem(i, is_inmem(i - 1));
             }
             valuedata[0].valuepointer = datarecord;
-            valuedata[0].timestamp = datarecord->txnId.mtr.timestamp;
+            valuedata[0].timestamp = datarecord->txnId.mtr.timestamp.tEndTSECount();
             size_inc();
             set_tombstone(0, datarecord->isTombstone);
             set_exist(0, 1);
@@ -179,7 +181,7 @@ namespace k2 {
 
         int insert_hot_datarecord(const dto::Timestamp &timestamp, dto::DataRecord *datarecord) {
             for (int i = 0; i < 3; ++i)
-                if (timestamp.compareCertain(valuedata[i].timestamp) == 0) {
+                if (timestamp.tEndTSECount() == valuedata[i].timestamp) {
                     set_inmem(i, 1);
                     datarecord->prevVersion = valuedata[i].valuepointer;
                     valuedata[i].valuepointer = datarecord;
@@ -190,7 +192,7 @@ namespace k2 {
 
         int evict_hot_datarecord(const dto::Timestamp &timestamp, dto::DataRecord *datarecord) {
             for (int i = 0; i < 3; ++i)
-                if (timestamp.compareCertain(valuedata[i].timestamp) == 0) {
+                if (timestamp.tEndTSECount() == valuedata[i].timestamp) {
                     if (is_inmem(i) == false) return 1;
                     set_inmem(i, 0);
                     valuedata[i].valuepointer = datarecord;
@@ -202,7 +204,7 @@ namespace k2 {
         int remove_datarecord(const dto::Timestamp &timestamp) {
             dto::DataRecord *toremove;
             for (int i = 0; i < 3; ++i) {
-                if (timestamp.compareCertain(valuedata[i].timestamp) == 0) {
+                if (timestamp.tEndTSECount() == valuedata[i].timestamp) {
                     toremove = valuedata[i].valuepointer;
                     if (i > 0) {
                         valuedata[i - 1].valuepointer->prevVersion = valuedata[i].valuepointer->prevVersion;

@@ -22,8 +22,8 @@ Copyright(c) 2020 Futurewei Cloud
 #include "IndexerInterface.h"
 
 #include <k2/common/Common.h>
-#include <hot/singlethreaded/HOTSingleThreaded.hpp>
-#include <idx/contenthelpers/IdentityKeyExtractor.hpp>
+#include <hot/singlethreaded/include/hot/singlethreaded/HOTSingleThreaded.hpp>
+#include <hot/contenthelpers/include/idx/contenthelpers/IdentityKeyExtractor.hpp>
 
 using namespace std;
 
@@ -61,14 +61,14 @@ public:
     size_t size();
 };
 
-KeyValueNode* HOTindexer::insert(dto::Key key)
+inline KeyValueNode* HOTindexer::insert(dto::Key key)
 {
-	KeyValueNode* newkvnode=new KeyValueNode(key);
+	KeyValueNode* newkvnode = new KeyValueNode(key);
 	bool ret = idx.insert(newkvnode);
 	if (ret) return newkvnode;
     return nullptr;
 }
-KeyValueNode* HOTindexer::find(dto::Key& key)
+inline KeyValueNode* HOTindexer::find(dto::Key& key)
 {
 	String s=key.partitionKey+key.rangeKey;
 	auto kit=idx.lookup(s.c_str());
@@ -77,40 +77,40 @@ KeyValueNode* HOTindexer::find(dto::Key& key)
 	}
 	return kit.mValue;
 }
-KeyValueNode* HOTindexer::begin()
+inline KeyValueNode* HOTindexer::begin()
 {
 	auto kit=idx.begin();
 	return *kit;
 }
-KeyValueNode* HOTindexer::end()
+inline KeyValueNode* HOTindexer::end()
 {
 	return nullptr;
 }
-KeyValueNode* HOTindexer::getiter()
+inline KeyValueNode* HOTindexer::getiter()
 {
 	if(scanit==idx.end()) return nullptr;
 	return *scanit;
 }
-KeyValueNode* HOTindexer::setiter(dto::Key &key)
+inline KeyValueNode* HOTindexer::setiter(dto::Key &key)
 {
 	String s=key.partitionKey+key.rangeKey;
 	scanit=idx.find(s.c_str());
 	if (scanit==idx.end()) return nullptr;
 	return *scanit;
 }
-KeyValueNode* HOTindexer::beginiter()
+inline KeyValueNode* HOTindexer::beginiter()
 {
 	scanit==idx.begin();
 	if(scanit==idx.end()) return nullptr;
 	return *scanit;
 }
-KeyValueNode* HOTindexer::inciter()
+inline KeyValueNode* HOTindexer::inciter()
 {
 	scanit++;
 	if(scanit==idx.end()) return nullptr;
 	return *scanit;
 }
-void HOTindexer::erase(dto::Key key)
+inline void HOTindexer::erase(dto::Key key)
 {
 	String s=key.partitionKey+key.rangeKey;
 	auto kit=idx.lookup(s.c_str());
@@ -124,7 +124,7 @@ void HOTindexer::erase(dto::Key key)
 
 inline size_t HOTindexer::size()
 {
-	return 0;
+	return idx.getStatistics().second["numberValues"];
 }
 
 }

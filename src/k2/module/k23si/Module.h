@@ -35,6 +35,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include <k2/cpo/client/CPOClient.h>
 #include <k2/tso/client/tso_clientlib.h>
 #include <k2/indexer/MapIndexer.h>
+#include <k2/indexer/HOTIndexer.h>
 
 #include "ReadCache.h"
 #include "TxnManager.h"
