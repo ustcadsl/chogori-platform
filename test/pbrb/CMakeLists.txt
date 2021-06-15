@@ -1,7 +1,7 @@
 file(GLOB HEADERS "*.h")
 file(GLOB SOURCES "*.cpp")
 
-add_executable (pbrb_test ${HEADERS} PbrbTest.cpp)
+add_executable (pbrb_test ${HEADERS} PbrbTest2.cpp)
 
 target_link_libraries (pbrb_test PRIVATE appbase pbrb dto)
 

@@ -83,10 +83,10 @@ struct SchemaMetaData
 
         // Set Metadata
         for (size_t i = 0;i < schema->fields.size();i++) {
-            FieldType currFT = schema->fields[i].type;
+            k2::dto::FieldType currFT = schema->fields[i].type;
             fieldMetaData fieldObj;
             
-            fieldObj.fieldSize = FTSize[currFT];
+            fieldObj.fieldSize = FTSize[static_cast<int>(currFT)];
             fieldObj.fieldOffset = currRowOffset;
             fieldObj.isNullable = false;
             fieldObj.isVariable = false;
@@ -144,6 +144,8 @@ private:
     std::map<SchemaId, SchemaMetaData> _schemaMap;
 
     Index *_indexer;
+
+    uint32_t splitCnt = 0, evictCnt = 0;
 public:
 
     int *watermark;
@@ -295,12 +297,12 @@ public:
             readFromPage(pagePtr, rowOffsetInPage + smd.fieldsInfo[idx].fieldOffset, 
                 rowOffsetInPage + smd.fieldsInfo[idx].fieldSize, buf);
             auto t = smd.schema->fields[idx].type;
-            if (t == STRING)
+            if (t == k2::dto::FieldType::STRING)
                 std::cout << "(index, field name, data): " << idx << ", "
                           << smd.schema->fields[idx].name << ", "
                           << buf << std::endl;
-            else if (t == INT32T)
-                std::cout << "(index, field name, data): " << idx << ", "
+            else if (t == k2::dto::FieldType::INT32T)
+                std::cout << std::dec << "(index, field name, data): " << idx << ", "
                           << smd.schema->fields[idx].name << ", "
                           << *(int *)buf << std::endl;
         }
@@ -504,5 +506,10 @@ public:
                                   _schemaMap[sid].rowSize * offset;
         void *address = (void *) ((uint8_t *)pagePtr + byteOffsetInPage);
         return address;
+    }
+
+    void printStats() {
+        std::cout << std::dec << "Evict Count(s): " << evictCnt << std::endl <<
+                     "Split Count(s): " << splitCnt << std::endl;
     }
 };

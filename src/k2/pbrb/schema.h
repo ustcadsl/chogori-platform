@@ -5,19 +5,16 @@
 #include <string>
 #include <unordered_map>
 
+#include <k2/dto/ControlPlaneOracle.h>
+
 using String = std::string;
 using SchemaId = uint32_t;
 using SchemaVer = uint16_t;
 
 // Field Types
-enum FieldType : uint8_t {
-    NULL_T = 0,
-    STRING,
-    INT32T,
-};
 
 struct SchemaField {
-    FieldType type;
+    k2::dto::FieldType type;
     String name;
 };
 

@@ -2,7 +2,7 @@
 #include<cstdlib>
 #include<new>
 
-const int plogSize = 4 * 1024;
+const int plogSize = 8 * 1024 * 1024;
 
 using PLogAddr = void *;
 using SchemaId = uint32_t;

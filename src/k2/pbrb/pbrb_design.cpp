@@ -101,7 +101,7 @@ void *PBRB::cacheColdRow(PLogAddr pAddress, String key)
         }
     }
 
-    // found a address to replace.
+    // found an address to replace.
     if (replaceAddr != nullptr) {
         auto retVal = findRowByAddr(replaceAddr);
         BufferPage *pagePtr = retVal.first;
@@ -115,6 +115,16 @@ void *PBRB::cacheColdRow(PLogAddr pAddress, String key)
     auto retPair = findCacheRowPosition(schemaId, key);
     BufferPage *pagePtr = retPair.first;
     RowOffset rowOffset = retPair.second;
+    
+    // split
+    std::cout << getHotRowsNumPage(pagePtr) << " " << 0.8 * _schemaMap[schemaId].maxRowCnt << std::endl;
+    if (getHotRowsNumPage(pagePtr) > 0.8 * _schemaMap[schemaId].maxRowCnt) {
+        splitPage(pagePtr);
+        auto retPair = findCacheRowPosition(schemaId, key);
+        pagePtr = retPair.first;
+        rowOffset = retPair.second;
+    }
+
     void *hotAddr = cacheRowFromPlog(pagePtr, rowOffset, pAddress);
     if (hotAddr != nullptr) {
         kvNode.insertRow(hotAddr, getTimestamp(hotAddr), true, this);
@@ -316,6 +326,7 @@ PLogAddr PBRB::evictRow(void *rowAddr) {
               << " (Page: " << pagePtr 
               << ", Row Offset: " << rowOff << ")" << std::endl;
 
+    evictCnt++;
     removeHotRow(pagePtr, rowOff);
     PLogAddr pAddr;
     memcpy(&pAddr, (uint8_t *)rowAddr + 20, 8);
@@ -345,6 +356,7 @@ bool PBRB::splitPage(BufferPage *pagePtr) {
     SchemaMetaData smd = _schemaMap[sid];
 
     BufferPage *newPage = _freePageList.front();
+    _freePageList.pop_front();
     initializePage(newPage);
     setSchemaIDPage(newPage, sid);
     
@@ -365,10 +377,19 @@ bool PBRB::splitPage(BufferPage *pagePtr) {
     if (nextPage != nullptr) 
         setPrevPage(nextPage, newPage);
     
+    splitCnt++;
+    
+    auto p = _schemaMap[sid].headPage;
+    while (p) {
+        std::cout << p << std::endl;
+        auto q = getNextPage(p);
+        if (q == p) break;
+        p = q;
+    }
     // 4. copy rows in offVec;
 
     // NOTE: support only field[0] as key and type == INT32_T
-    assert(smd.schema->fields[0].type == INT32T);
+    assert(smd.schema->fields[0].type == k2::dto::FieldType::INT32T);
 
     for (RowOffset offset: offVec) {
         // 4.1: got key info from schema
@@ -398,6 +419,8 @@ bool PBRB::splitPage(BufferPage *pagePtr) {
         assert(isBitmapSet(pagePtr, offset));
         removeHotRow(pagePtr, offset);
     }
+
+
 
     return true;
 }
@@ -431,6 +454,10 @@ bool PBRB::mergePage(BufferPage *pagePtr1, BufferPage *pagePtr2) {
     assert(offVec2.size() == rowNum2);
 
     // 3. Copy rows from pagePtr2
+
+    // NOTE: support only field[0] as key and type == INT32_T
+    assert(smd.schema->fields[0].type == k2::dto::FieldType::INT32T);
+
     for (size_t i = 0; i < offVec1.size(); i++) {
         RowOffset offset1 = offVec1[i];
         RowOffset offset2 = offVec2[i];

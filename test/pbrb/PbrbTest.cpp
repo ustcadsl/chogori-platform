@@ -42,14 +42,14 @@ int insert_test_case_1() {
     // Schema
     SimpleSchema S1({
         "S001", 0, {
-            {INT32T, "uid"},
-            {STRING, "str"}
+            {k2::dto::FieldType::INT32T, "uid"},
+            {k2::dto::FieldType::STRING, "str"}
         }
     });
     auto sid1 = schemaUMap.addSchema(&S1);
     initPlog(Plog1, sid1);
 
-    PBRB pbrb(8, &wm, &indexer);
+    PBRB pbrb(100, &wm, &indexer);
 
     auto page2 = pbrb.createCacheForSchema(sid1);
     auto page1 = pbrb.AllocNewPageForSchema(sid1);
@@ -100,8 +100,8 @@ int insert_test_case_2() {
     // Schema
     SimpleSchema S1({
         "S001", 0, {
-            {INT32T, "uid"},
-            {STRING, "str"}
+            {k2::dto::FieldType::INT32T, "uid"},
+            {k2::dto::FieldType::STRING, "str"}
         }
     });
     auto sid1 = schemaUMap.addSchema(&S1);
@@ -158,8 +158,8 @@ int insert_test_case_3() {
     // Schema
     SimpleSchema S1({
         "S001", 0, {
-            {INT32T, "uid"},
-            {STRING, "str"}
+            {k2::dto::FieldType::INT32T, "uid"},
+            {k2::dto::FieldType::STRING, "str"}
         }
     });
     auto sid1 = schemaUMap.addSchema(&S1);
@@ -214,8 +214,8 @@ int test3() {
     // Schema
     SimpleSchema S1({
         "S001", 0, {
-            {INT32T, "uid"},
-            {STRING, "str"}
+            {k2::dto::FieldType::INT32T, "uid"},
+            {k2::dto::FieldType::STRING, "str"}
         }
     });
     auto sid1 = schemaUMap.addSchema(&S1);
@@ -270,8 +270,8 @@ int test4() {
     // Schema
     SimpleSchema S1({
         "S001", 0, {
-            {INT32T, "uid"},
-            {STRING, "str"}
+            {k2::dto::FieldType::INT32T, "uid"},
+            {k2::dto::FieldType::STRING, "str"}
         }
     });
     auto sid1 = schemaUMap.addSchema(&S1);
@@ -331,8 +331,8 @@ int test5() {
     // Schema
     SimpleSchema S1({
         "S001", 0, {
-            {INT32T, "uid"},
-            {STRING, "str"}
+            {k2::dto::FieldType::INT32T, "uid"},
+            {k2::dto::FieldType::STRING, "str"}
         }
     });
     auto sid1 = schemaUMap.addSchema(&S1);
@@ -391,8 +391,8 @@ int test6() {
     // Schema
     SimpleSchema S1({
         "S001", 0, {
-            {INT32T, "uid"},
-            {STRING, "str"}
+            {k2::dto::FieldType::INT32T, "uid"},
+            {k2::dto::FieldType::STRING, "str"}
         }
     });
     auto sid1 = schemaUMap.addSchema(&S1);
@@ -455,8 +455,8 @@ int split_test() {
     // Schema
     SimpleSchema S1({
         "S001", 0, {
-            {INT32T, "uid"},
-            {STRING, "str"}
+            {k2::dto::FieldType::INT32T, "uid"},
+            {k2::dto::FieldType::STRING, "str"}
         }
     });
     auto sid1 = schemaUMap.addSchema(&S1);
@@ -504,8 +504,8 @@ int merge_test() {
     // Schema
     SimpleSchema S1({
         "S001", 0, {
-            {INT32T, "uid"},
-            {STRING, "str"}
+            {k2::dto::FieldType::INT32T, "uid"},
+            {k2::dto::FieldType::STRING, "str"}
         }
     });
     auto sid1 = schemaUMap.addSchema(&S1);
