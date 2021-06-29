@@ -28,7 +28,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include <k2/dto/MessageVerbs.h>
 #include "Config.h"
 #include "Log.h"
-
+#include "InstancePlog.h"
 namespace k2 {
 class Persistence {
 public:
@@ -80,6 +80,7 @@ public:
 private:
     bool _stopped{false};
     std::unique_ptr<Payload> _buffer;
+    std::unique_ptr<LocalPlog> _localplog;
     std::unique_ptr<TXEndpoint> _remoteEndpoint;
     K23SIConfig _config;
     seastar::future<Status> _flushFut = seastar::make_ready_future<Status>(dto::K23SIStatus::OK);
