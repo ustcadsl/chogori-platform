@@ -13,15 +13,15 @@ using SchemaVer = uint16_t;
 
 // Field Types
 
-struct SchemaField {
+/*struct SchemaField {
     k2::dto::FieldType type;
     String name;
-};
+};*/
 
-struct SimpleSchema {
+/*struct SimpleSchema {
     String name;
     uint32_t version = 0;
-    std::vector<SchemaField> fields;
+    std::vector<k2::dto::SchemaField> fields;
     String getKey(int id);
 };
 
@@ -33,4 +33,4 @@ struct SchemaUMap {
         umap.insert({currIdx++, schemaPtr});
         return retVal;
     }
-};
+};*/

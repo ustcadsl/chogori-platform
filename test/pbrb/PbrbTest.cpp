@@ -33,7 +33,8 @@ void initPlog(SimplePlog &Plog1, SchemaId sid) {
 // Tests for findEmptyRow.
 int insert_test_case_1() {
     Index indexer;
-    int wm = 0;
+    //int wm = 0;
+    k2::dto::Timestamp wm;
 
     // Plog
     SimplePlog Plog1;
@@ -91,7 +92,8 @@ int insert_test_case_1() {
 
 int insert_test_case_2() {
     Index indexer;
-    int wm = 0;
+    //int wm = 0;
+    k2::dto::Timestamp wm;
 
     // Plog
     SimplePlog Plog1;
@@ -149,7 +151,8 @@ int insert_test_case_2() {
 
 int insert_test_case_3() {
     Index indexer;
-    int wm = 0;
+    //int wm = 0;
+    k2::dto::Timestamp wm;
 
     // Plog
     SimplePlog Plog1;
@@ -205,7 +208,8 @@ int insert_test_case_3() {
 
 int test3() {
     Index indexer;
-    int wm = 0;
+    //int wm = 0;
+    k2::dto::Timestamp wm;
 
     // Plog
     SimplePlog Plog1;
@@ -261,7 +265,8 @@ int test3() {
 
 int test4() {
     Index indexer;
-    int wm = 0;
+    //int wm = 0;
+    k2::dto::Timestamp wm;
 
     // Plog
     SimplePlog Plog1;
@@ -322,7 +327,8 @@ int test4() {
 
 int test5() {
     Index indexer;
-    int wm = 0;
+    //int wm = 0;
+    k2::dto::Timestamp wm;
 
     // Plog
     SimplePlog Plog1;
@@ -382,7 +388,8 @@ int test5() {
 
 int test6() {
     Index indexer;
-    int wm = 0;
+    //int wm = 0;
+    k2::dto::Timestamp wm;
 
     // Plog
     SimplePlog Plog1;
@@ -446,7 +453,8 @@ int test6() {
 
 int split_test() {
     Index indexer;
-    int wm = 0;
+    //int wm = 0;
+    k2::dto::Timestamp wm;
 
     // Plog
     SimplePlog Plog1;
@@ -495,7 +503,8 @@ int split_test() {
 
 int merge_test() {
     Index indexer;
-    int wm = 0;
+    //int wm = 0;
+    k2::dto::Timestamp wm;
 
     // Plog
     SimplePlog Plog1;

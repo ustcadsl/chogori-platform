@@ -87,7 +87,8 @@ void *PBRB::cacheColdRow(PLogAddr pAddress, String key)
     // 1. has hot row:
     if (kvNode.hasCachedVer()) {
         for (int i = kvNode.rowNum - 1;i >= 0;i--) {
-            if (kvNode.isCached[i] && kvNode.timestamp[i] < *watermark) {
+            if (kvNode.isCached[i] && kvNode.timestamp[i] < (int) watermark->tStartTSECount()) {
+            //if (kvNode.isCached[i] && kvNode.timestamp[i] < *watermark) {
                 replaceAddr = kvNode.addr[i];
                 PLogAddr coldAddr = evictRow(kvNode.addr[i]);
                 kvNode.hotToCold(i, coldAddr);

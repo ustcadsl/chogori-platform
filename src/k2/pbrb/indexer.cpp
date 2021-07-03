@@ -17,6 +17,7 @@ bool KVN::insertRow(void *newAddr, int ts, bool isHot, PBRB *pbrb)
 
     for (insertPos = 0; insertPos < rowNum; insertPos++)
         if (ts > timestamp[insertPos])
+        //if (ts.compareCertain(timestamp[insertPos]) > 0)
             break;
 
     if (insertPos >= 3)

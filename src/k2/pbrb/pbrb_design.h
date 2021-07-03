@@ -14,19 +14,67 @@
 
 #include "plog.h"
 #include "schema.h"
+#include <k2/dto/Timestamp.h>
 
 const int pageSize = 1024;
 const long long mask = 0x00000000000003FF;
+
+//using String = std::string;
+using SchemaId = uint32_t;
+using SchemaVer = uint16_t;
+using RowOffset = uint32_t;
+
+// Field Types
+
+/*struct SchemaField {
+    k2::dto::FieldType type;
+    String name;
+};*/
+
+struct SimpleSchema {
+    String name;
+    uint32_t version = 0;
+    std::vector<k2::dto::SchemaField> fields;
+    String getKey(int id){
+        char buf[256];
+        sprintf(buf, "%s_%04d", name.c_str(), id);
+        return buf;
+    };
+};
+
+struct SchemaUMap {
+    std::unordered_map<SchemaId, SimpleSchema *> umap; 
+    uint32_t currIdx = 0;
+    uint32_t addSchema(SimpleSchema *schemaPtr) {
+        uint32_t retVal = currIdx;
+        umap.insert({currIdx++, schemaPtr});
+        return retVal;
+    }
+};
+
+static uint32_t FTSize[256] = {
+    0,      // NULL_T = 0,
+    116,    // STRING, // NULL characters in string is OK
+    sizeof(int16_t),  // INT16T,
+    sizeof(int32_t),  // INT32T,
+    sizeof(int64_t),  // INT64T,
+    sizeof(float),    // FLOAT, // Not supported as key field for now
+    sizeof(double),   // DOUBLE,  // Not supported as key field for now
+    sizeof(bool),     // BOOL,
+    sizeof(std::decimal::decimal64),  // DECIMAL64, // Provides 16 decimal digits of precision
+    sizeof(std::decimal::decimal128), // DECIMAL128, // Provides 34 decimal digits of precision
+    1,      // FIELD_TYPE, // The value refers to one of these types. Used in query filters.
+    // NOT_KNOWN = 254,
+    // NULL_LAST = 255
+};
+
+static SchemaUMap schemaUMap;
 
 struct BufferPage
 {
     uint8_t content[pageSize];
 };
 
-using String = std::string;
-using SchemaId = uint32_t;
-using SchemaVer = uint16_t;
-using RowOffset = uint32_t;
 
 struct fieldMetaData
 {
@@ -36,8 +84,8 @@ struct fieldMetaData
     bool isVariable;
 };
 
-extern SchemaUMap schemaUMap;
-extern uint32_t FTSize[];
+//extern SchemaUMap schemaUMap;
+//extern uint32_t FTSize[];
 
 struct SchemaMetaData
 {
@@ -147,10 +195,12 @@ private:
 
     uint32_t splitCnt = 0, evictCnt = 0;
 public:
-
-    int *watermark;
+    //SchemaMetaData tempSmeta;
+    //int *watermark;
+    k2::dto::Timestamp *watermark;
     //Initialize a PBRB cache
-    PBRB(int maxPageNumber, int *wm, Index *indexer)
+    //PBRB(int maxPageNumber, int *wm, Index *indexer)
+    PBRB(int maxPageNumber, k2::dto::Timestamp *wm, Index *indexer)
     {
         watermark = wm;
         this->_maxPageNumber = maxPageNumber;
@@ -512,4 +562,19 @@ public:
         std::cout << std::dec << "Evict Count(s): " << evictCnt << std::endl <<
                      "Split Count(s): " << splitCnt << std::endl;
     }
+
+    bool mapCachedSchema(String schemaName, uint32_t schemaVer){
+        for (const auto& mapItem : schemaUMap.umap) {
+            if(mapItem.second->name == schemaName && mapItem.second->version==schemaVer){
+            //mapItem.second->name.equals(request.key.schemaName) &&
+                return true;
+            }
+        }
+        return false;
+    }
+
+    uint32_t addSchemaUMap(SimpleSchema *schemaPtr){
+        return schemaUMap.addSchema(schemaPtr);
+    }
+
 };

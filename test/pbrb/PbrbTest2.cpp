@@ -45,7 +45,8 @@ void initPlog(SimplePlog &Plog1, SchemaId sid) {
 // Tests for 100 rows.
 int test() {
     Index indexer;
-    int wm = 0;
+    //int wm = 0;
+    k2::dto::Timestamp wm;
 
     // Plog
     SimplePlog Plog1;
@@ -71,7 +72,7 @@ int test() {
         std::string newKey = S1.getKey(uid[i]);
         std::cout << "Insert Key: " << newKey << " into indexer." << std::endl;
         
-        *(pbrb.watermark) = i - 40;
+        //*(pbrb.watermark) = i - 40;
         if (indexer.find(newKey) == indexer.end()) {
             KVN kvn;
             indexer.insert({newKey, kvn});

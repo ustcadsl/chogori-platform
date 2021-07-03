@@ -42,6 +42,9 @@ Copyright(c) 2020 Futurewei Cloud
 #include "Persistence.h"
 #include "Log.h"
 
+#include <k2/pbrb/indexer.h>
+#include <k2/pbrb/pbrb_design.h>
+
 namespace k2 {
 
 
@@ -189,6 +192,8 @@ private: // methods
     // judge whether fieldIdx is in fieldsForPartialUpdate. return true if yes(is in fieldsForPartialUpdate).
     bool _isUpdatedField(uint32_t fieldIdx, std::vector<uint32_t> fieldsForPartialUpdate);
 
+    void _getFieldsValue(const dto::SchemaField& field, Payload& payload, bool& success);
+
     // Helper for iterating over the indexer, modifies it to end() if iterator would go past the target schema
     // or if it would go past begin() for reverse scan. Starting iterator must not be end() and must
     // point to a record with the target schema
@@ -254,6 +259,10 @@ private:  // members
     // (newest item is at front of the deque)
     // Duplicates are not allowed
     IndexerT _indexer;
+
+    PBRB *pbrb; //////
+  
+    Index indexer; //////
 
     // manage transaction records as a coordinator
     TxnManager _txnMgr;
