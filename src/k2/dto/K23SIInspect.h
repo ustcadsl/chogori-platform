@@ -95,7 +95,7 @@ struct K23SIInspectWIsRequest {
 };
 
 struct K23SIInspectWIsResponse {
-    std::vector<WriteIntent> WIs;
+    std::vector<DataRecord> WIs;
     K2_PAYLOAD_FIELDS(WIs);
 };
 

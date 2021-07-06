@@ -320,6 +320,7 @@ private:
             K2LOG_I(log::tpcc, "read ops {} per sec", readpsec);
             K2LOG_I(log::tpcc, "write ops {} per sec", writepsec);
             K2LOG_I(log::tpcc, "query ops {} per sec", querypsec);
+            K2LOG_I(log::tpcc, "", )
             return make_ready_future();
         });
     }

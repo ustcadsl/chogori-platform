@@ -34,6 +34,8 @@ Copyright(c) 2020 Futurewei Cloud
 #include <k2/common/Chrono.h>
 #include <k2/cpo/client/CPOClient.h>
 #include <k2/tso/client/tso_clientlib.h>
+#include <k2/indexer/IndexerInterface.h>
+#include <k2/indexer/MapIndexer.h>
 
 #include "ReadCache.h"
 #include "TxnManager.h"
@@ -44,7 +46,7 @@ Copyright(c) 2020 Futurewei Cloud
 
 namespace k2 {
 
-
+/*
 // the type holding multiple committed versions of a key
 typedef std::deque<dto::DataRecord> VersionsT;
 
@@ -68,10 +70,11 @@ struct VersionSet {
         return !WI.has_value() && committed.empty();
     }
 };
+*/
 
 // the type holding versions for all keys, i.e. the indexer
-typedef std::map<dto::Key, VersionSet> IndexerT;
-typedef IndexerT::iterator IndexerIterator;
+typedef mapindexer IndexerT;
+typedef std::map<dto::Key, k2::KeyValueNode>::iterator IndexerIterator;
 
 class K23SIPartitionModule {
 public: // lifecycle
@@ -160,16 +163,16 @@ private: // methods
     // validate writes are not stale - older than the newest committed write or past a recent read.
     // return true if request is valid
     template <typename RequestT>
-    Status _validateStaleWrite(const RequestT& req, const VersionSet& versions);
+    Status _validateStaleWrite(const RequestT& req, KeyValueNode versions);
 
     // validate an incoming write request
-    Status _validateWriteRequest(const dto::K23SIWriteRequest& request, const VersionSet& versions);
+    Status _validateWriteRequest(const dto::K23SIWriteRequest& request, const KeyValueNode& versions);
 
     template <class RequestT>
     Status _validateReadRequest(const RequestT& request) const;
 
     // helper method used to create and persist a WriteIntent
-    Status _createWI(dto::K23SIWriteRequest&& request, VersionSet& versions);
+    Status _createWI(dto::K23SIWriteRequest&& request, KeyValueNode& KVNode);
 
     // helper method used to make a projection SKVRecord payload
     bool _makeProjection(dto::SKVRecord::Storage& fullRec, dto::K23SIQueryRequest& request, dto::SKVRecord::Storage& projectionRec);
@@ -211,10 +214,10 @@ private: // methods
     // The returned pointer is invalid if any modifications are made to the indexer. Will also
     // return the current WI if it matches exactly the given timestamp. In other words, it
     // returns a record that is valid to return for to a read request for the given timestamp.
-    dto::DataRecord* _getDataRecordForRead(VersionSet& versions, dto::Timestamp& timestamp);
+    // dto::DataRecord* _getDataRecordForRead(VersionSet& versions, dto::Timestamp& timestamp);
 
     // For a given challenger timestamp and key, check if a push is needed against a WI
-    bool _checkPushForRead(const VersionSet& versions, const dto::Timestamp& timestamp);
+    // bool _checkPushForRead(const VersionSet& versions, const dto::Timestamp& timestamp);
 
     // Helper to remove a WI and delete the key from the indexer of there are no committed records
     void _removeWI(IndexerIterator it);

@@ -131,7 +131,7 @@ public:
 
     // the global (per-thread) log level. This should be initialized at start of process and
     // can be modified while the process is running to affect the current log level
-    static inline thread_local LogLevel threadLocalLogLevel = LogLevel::INFO;
+    static inline thread_local LogLevel threadLocalLogLevel = LogLevel::DEBUG;
 
     // the per-module (per-thread) log levels. These are the values which have been set either at
     // process start time, or dynamically at runtime. The reason we need a separate map just for the levels is

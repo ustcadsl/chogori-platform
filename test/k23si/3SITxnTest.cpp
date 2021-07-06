@@ -2510,8 +2510,8 @@ seastar::future<> testScenario07() {
                         K2EXPECT(log::k23si, val1.records.size(), 1);
                         K2EXPECT(log::k23si, status2, dto::K23SIStatus::OK);
                         bool found = false;
-                        for (const k2::dto::WriteIntent& WI : val2.WIs) {
-                            if (WI.data.timestamp == mtr.timestamp) {
+                        for (const k2::dto::DataRecord& rec : val2.WIs) {
+                            if (rec.timestamp == mtr.timestamp) {
                                 found = true;
                                 break;
                             }
@@ -2547,8 +2547,8 @@ seastar::future<> testScenario07() {
                         auto [status2, val2] = resp2.get0();
                         K2EXPECT(log::k23si, status1, dto::K23SIStatus::OK);
                         bool found = false;
-                        for (const k2::dto::WriteIntent& WI : val1.WIs) {
-                            if (WI.data.timestamp == mtr2.timestamp) {
+                        for (const k2::dto::DataRecord& rec : val1.WIs) {
+                            if (rec.timestamp == mtr2.timestamp) {
                                 found = true;
                                 break;
                             }
@@ -2590,8 +2590,8 @@ seastar::future<> testScenario07() {
 
                         K2EXPECT(log::k23si, status1, dto::K23SIStatus::OK);
                         bool found = false;
-                        for (const k2::dto::WriteIntent& WI : val2.WIs) {
-                            if (WI.data.timestamp == mtr3.timestamp) {
+                        for (const k2::dto::DataRecord& rec : val2.WIs) {
+                            if (rec.timestamp == mtr3.timestamp) {
                                 found = true;
                                 break;
                             }
@@ -2629,8 +2629,8 @@ seastar::future<> testScenario07() {
 
                         K2EXPECT(log::k23si, status1, dto::K23SIStatus::OK);
                         bool found = false;
-                        for (const k2::dto::WriteIntent& WI : val1.WIs) {
-                            if (WI.data.timestamp == mtr4.timestamp) {
+                        for (const k2::dto::DataRecord& rec : val1.WIs) {
+                            if (rec.timestamp == mtr4.timestamp) {
                                 found = true;
                                 break;
                             }

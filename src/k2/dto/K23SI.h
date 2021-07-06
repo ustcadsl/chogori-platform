@@ -88,18 +88,32 @@ namespace k2::dto {
 // committed records. It is split into a separate struct so that code can more easily
 // be written to handle both write intents and committed records.
 struct DataRecord {
+    //dto::Key key;
+
     // the user data for the record
     SKVRecord::Storage value;
-
-    // the record transaction id/ timestamp
-    Timestamp timestamp;
 
     // marked for tombstones
     bool isTombstone = false;
 
-    K2_PAYLOAD_FIELDS(value, timestamp, isTombstone);
-    K2_DEF_FMT(DataRecord, value, timestamp, isTombstone);
-};
+    // the record transaction id/ timestamp
+    Timestamp timestamp;
+
+    DataRecord *prevVersion;
+    enum Status : uint8_t {
+        WriteIntent,  // the record hasn't been committed/aborted yet
+        Committed     // the record has been committed and we should use the key/value
+        // aborted WIs don't need state - as soon as we learn that a WI has been aborted, we remove it
+    } status;
+
+    // TODO KEEP IN KVNode
+    // The request_id as given to the server by the client, it is used to
+    // provide idempotent behavior in the case of retries
+    uint64_t request_id = 0;
+
+    K2_PAYLOAD_FIELDS(value, timestamp, isTombstone, status, request_id);
+    K2_DEF_FMT(DataRecord, value, timestamp, isTombstone, status, request_id);
+    };
 
 // A write intent. This is separate from the DataRecord structure which is used for
 // committed records because a write intent needs to store more information.

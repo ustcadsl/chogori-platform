@@ -1,15 +1,11 @@
 /*
 MIT License
-
 Copyright(c) 2020 Futurewei Cloud
-
     Permission is hereby granted,
     free of charge, to any person obtaining a copy of this software and associated documentation files(the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions :
-
     The above copyright notice and this permission notice shall be included in all copies
     or
     substantial portions of the Software.
-
     THE SOFTWARE IS PROVIDED "AS IS",
     WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
@@ -26,109 +22,109 @@ Copyright(c) 2020 Futurewei Cloud
 #include "IndexerInterface.h"
 
 #include <k2/common/Common.h>
-#include <hot/singlethreaded/HOTSingleThreaded.hpp>
-#include <idx/contenthelpers/IdentityKeyExtractor.hpp>
+#include <hot/singlethreaded/include/hot/singlethreaded/HOTSingleThreaded.hpp>
+#include <hot/contenthelpers/include/idx/contenthelpers/IdentityKeyExtractor.hpp>
 
 using namespace std;
 
 namespace k2
 {
 
-template <typename ValueType>
-struct KeyValuePair {
-    String key;
-    std::unique_ptr<VersionedTreeNode<ValueType>> value;
-};
+    template<typename ValueType>
+    struct KeyValueNodeKeyExtractor {
+        inline size_t getKeyLength(ValueType const &value) const {
+            dto::Key tempkey=value->get_key();
+            return tempkey.rangeKey.size()+tempkey.partitionKey.size();
+        }
+        inline const char* operator()(ValueType const &value) const {
+            dto::Key tempkey=value->get_key();
+            String s=tempkey.partitionKey+tempkey.rangeKey;
+            return s.c_str();
+        }
+    };
 
-template<typename ValueType>
-struct KeyValuePairKeyExtractor {
-    inline size_t getKeyLength(ValueType const &value) const {
-        return value->key.length();
-    }
-    inline const char* operator()(ValueType const &value) const {
-        return value->key.c_str();
-    }
-};
+    class HOTindexer : public Indexer{
+    private:
+        hot::singlethreaded::HOTSingleThreaded<k2::KeyValueNode*, KeyValueNodeKeyExtractor> idx;
+        hot::singlethreaded::HOTSingleThreadedIterator<k2::KeyValueNode*> scanit;
+    public:
+        KeyValueNode* insert(dto::Key key);
+        KeyValueNode* find(dto::Key &key);
+        KeyValueNode* begin();
+        KeyValueNode* end();
+        KeyValueNode* getiter();
+        KeyValueNode* setiter(dto::Key &key);
+        KeyValueNode* beginiter();
+        KeyValueNode* inciter();
 
-template <typename ValueType>
-class HOTIndexer {
-    using KeyValuePairTrieType = hot::singlethreaded::HOTSingleThreaded<KeyValuePair<ValueType>*, KeyValuePairKeyExtractor>;
-    KeyValuePairTrieType m_keyValuePairTrie;
-public:
- void insert(String key, ValueType value, uint64_t version);
+        void erase(dto::Key key);
+        size_t size();
+    };
 
- VersionedTreeNode<ValueType>* find(const String& key, uint64_t version);
-
- void trim(const String& key, uint64_t version);
-};
-
-template <typename ValueType>
-inline void HOTIndexer<ValueType>::insert(String key, ValueType value, uint64_t version) {
-    std::unique_ptr < VersionedTreeNode<ValueType>> newNode(new VersionedTreeNode<ValueType>());
-    newNode->value = std::move(value);
-    newNode->version = version;
-
-    KeyValuePair<ValueType>* keyValuePair = new KeyValuePair<ValueType>();
-    keyValuePair->key = std::move(key);
-    keyValuePair->value = std::move(newNode);
-
-    auto inserted = m_keyValuePairTrie.insert(keyValuePair, keyValuePair->key.length());
-    //  Value already exists
-    if (!inserted) {
-        auto exist = m_keyValuePairTrie.lookup(keyValuePair->key.c_str(), keyValuePair->key.length());
-        newNode->next = std::move(exist.mValue->value);
-        exist.mValue->value = std::move(newNode);
-    }
-}
-
-template <typename ValueType>
-inline VersionedTreeNode<ValueType>* HOTIndexer<ValueType>::find(const String& key, uint64_t version) {
-    //
-    // Bug: sometimes find() cannot find existing key
-    //
-    // auto it = m_keyValuePairTrie.find(key.c_str());
-    // if (it == m_keyValuePairTrie.end()) {
-    //     return nullptr;
-    // }
-
-    // VersionedTreeNode* node = (*it)->value.get();
-
-    auto it = m_keyValuePairTrie.lookup(key.c_str(), key.length());
-    if (!it.mIsValid) {
+    inline KeyValueNode* HOTindexer::insert(dto::Key key)
+    {
+        KeyValueNode* newkvnode = new KeyValueNode(key);
+        bool ret = idx.insert(newkvnode);
+        if (ret) return newkvnode;
         return nullptr;
     }
-
-    VersionedTreeNode<ValueType>* node = it.mValue->value.get();
-    while (node && node->version > version) {
-        node = node->next.get();
+    inline KeyValueNode* HOTindexer::find(dto::Key& key)
+    {
+        String s=key.partitionKey+key.rangeKey;
+        auto kit=idx.lookup(s.c_str());
+        if (!kit.mIsValid) {
+            return nullptr;
+        }
+        return kit.mValue;
     }
-    return node;
-}
-
-template <typename ValueType>
-inline void HOTIndexer<ValueType>::trim(const String& key, uint64_t version) {
-    if (version == std::numeric_limits<uint64_t>::max()) {
-        auto it = m_keyValuePairTrie.lookup(key.c_str(), key.length());
-        if (!it.mIsValid) {
+    inline KeyValueNode* HOTindexer::begin()
+    {
+        auto kit=idx.begin();
+        return *kit;
+    }
+    inline KeyValueNode* HOTindexer::end()
+    {
+        return nullptr;
+    }
+    inline KeyValueNode* HOTindexer::getiter()
+    {
+        if(scanit==idx.end()) return nullptr;
+        return *scanit;
+    }
+    inline KeyValueNode* HOTindexer::setiter(dto::Key &key)
+    {
+        String s=key.partitionKey+key.rangeKey;
+        scanit=idx.find(s.c_str());
+        if (scanit==idx.end()) return nullptr;
+        return *scanit;
+    }
+    inline KeyValueNode* HOTindexer::beginiter()
+    {
+        scanit==idx.begin();
+        if(scanit==idx.end()) return nullptr;
+        return *scanit;
+    }
+    inline KeyValueNode* HOTindexer::inciter()
+    {
+        scanit++;
+        if(scanit==idx.end()) return nullptr;
+        return *scanit;
+    }
+    inline void HOTindexer::erase(dto::Key key)
+    {
+        String s=key.partitionKey+key.rangeKey;
+        auto kit=idx.lookup(s.c_str());
+        if (!kit.mIsValid) {
             return;
         }
-        m_keyValuePairTrie.remove(key.c_str(), key.length());
-        return;
+        KeyValueNode* tempkvn=kit.mValue;
+        delete tempkvn;
+        idx.remove(s.c_str());
     }
 
-    auto it = m_keyValuePairTrie.lookup(key.c_str(), key.length());
-    if (!it.mIsValid) {
-        return;
+    inline size_t HOTindexer::size()
+    {
+        return idx.getStatistics().second["numberValues"];
     }
-
-    VersionedTreeNode<ValueType>* node = it.mValue->value.get();
-    if (node) {
-        node = node->next.get();
-    }
-    while (node && node->version >= version) {
-        node = node->next.get();
-    }
-    node->next = nullptr;
-}
 
 }

@@ -1,15 +1,11 @@
 /*
 MIT License
-
 Copyright(c) 2020 Futurewei Cloud
-
     Permission is hereby granted,
     free of charge, to any person obtaining a copy of this software and associated documentation files(the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions :
-
     The above copyright notice and this permission notice shall be included in all copies
     or
     substantial portions of the Software.
-
     THE SOFTWARE IS PROVIDED "AS IS",
     WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
@@ -22,72 +18,144 @@ Copyright(c) 2020 Futurewei Cloud
 */
 
 #pragma once
-
+#include "log.h"
 #include "IndexerInterface.h"
-#include <map>
 
 namespace k2
 {
+    typedef std::map<dto::Key, k2::KeyValueNode> MapIndexer;
+
+    class mapindexer{
+    private:
+        MapIndexer idx;
+        MapIndexer::iterator scanit;
+    public:
+        MapIndexer::iterator insert(dto::Key key);
+        MapIndexer::iterator find(dto::Key &key);
+        MapIndexer::iterator begin();
+        MapIndexer::iterator end();
+        MapIndexer::iterator getiter();
+        MapIndexer::iterator setiter(dto::Key &key);
+        MapIndexer::iterator beginiter();
+        MapIndexer::iterator inciter();
+        MapIndexer::reverse_iterator rbegin();
+        MapIndexer::iterator lower_bound(const dto::Key &start);
+
+        void erase(dto::Key key);
+        size_t size();
+    };
+
+    inline MapIndexer::iterator mapindexer::insert(dto::Key key)
+    {
+        // TODO handle insert fail
+        KeyValueNode newkvnode(key);
+        auto ret = idx.insert(std::pair<dto::Key , k2::KeyValueNode>(key, newkvnode));
+        //return &(ret.first->second);
+        return ret.first;
+    }
+    inline MapIndexer::iterator mapindexer::find(dto::Key& key)
+    {
+        /*auto kit = idx.find(key);
+        if (kit == idx.end()) return nullptr;
+        return &(kit->second);*/
+        return idx.find(key);
+    }
+    inline MapIndexer::iterator mapindexer::begin()
+    {
+        /*auto kit = idx.begin();
+        return &(kit->second);*/
+        return idx.begin();
+    }
+    inline MapIndexer::iterator mapindexer::end()
+    {
+        /*return nullptr;*/
+        return idx.end();
+    }
+    inline MapIndexer::iterator mapindexer::getiter()
+    {
+        /*if (scanit == idx.end()) return nullptr;
+        return &(scanit->second);*/
+        return scanit;
+    }
+    inline MapIndexer::iterator mapindexer::setiter(dto::Key &key)
+    {
+        /*scanit = idx.find(key);
+        if (scanit == idx.end()) return nullptr;
+        return &(scanit->second)*/;
+        return idx.find(key);
+    }
+    inline MapIndexer::iterator mapindexer::beginiter()
+    {
+        /*scanit = idx.begin();
+        if(scanit == idx.end()) return nullptr;
+        return &(scanit->second);*/
+        return idx.begin();
+    }
+    inline MapIndexer::iterator mapindexer::inciter()
+    {
+        scanit++;
+        /*if (scanit == idx.end()) return nullptr;
+        return &(scanit->second);*/
+        return scanit;
+    }
+    inline MapIndexer::reverse_iterator mapindexer::rbegin()
+    {
+        return idx.rbegin();
+    }
+    inline MapIndexer::iterator mapindexer::lower_bound(const dto::Key &start)
+    {
+        return idx.lower_bound(start);
+    }
+
+    inline void mapindexer::erase(dto::Key key)
+    {
+        auto kit = idx.find(key);
+        if (kit == idx.end()) return;
+        idx.erase(kit);
+    }
+
+    inline size_t mapindexer::size()
+    {
+        return idx.size();
+    }
+/*
 template <typename ValueType>
-class MapIndexer {
-   private:
-    std::map < String, std::unique_ptr<VersionedTreeNode<ValueType>> > m_map;
-
-   public:
-    void insert(String key, ValueType value, uint64_t version);
-
-    VersionedTreeNode<ValueType>* find(const String& key, uint64_t version);
-
-    void trim(const String& key, uint64_t version);
+class Indexer<std::map<dto::Key, k2::KeyValueNode>, ValueType>
+{
+private:
+    std::map<dto::Key, k2::KeyValueNode> idx;
+public:
+    typename std::map<dto::Key, k2::KeyValueNode>::iterator insert(dto::Key key);
+    typename std::map<dto::Key, k2::KeyValueNode>::iterator find(dto::Key &key);
+    typename std::map<dto::Key, k2::KeyValueNode>::iterator begin();
+    typename std::map<dto::Key, k2::KeyValueNode>::iterator end();
+    void erase(typename std::map<dto::Key, k2::KeyValueNode>::iterator it);
+    size_t size();
 };
-
 template <typename ValueType>
-inline void MapIndexer<ValueType>::insert(String key, ValueType value, uint64_t version) {
-    std::unique_ptr<VersionedTreeNode<ValueType>> newNode(new VersionedTreeNode < ValueType>());
-    newNode->value = std::move(value);
-    newNode->version = version;
-
-    auto emplaceResult = m_map.try_emplace(std::move(key), std::move(newNode));
-    //  Value already exists
-    if (!emplaceResult.second) {
-        newNode->next = std::move(emplaceResult.first->second);
-        emplaceResult.first->second = std::move(newNode);
-    }
+inline typename std::map<dto::Key, k2::KeyValueNode>::iterator Indexer<std::map<dto::Key, k2::KeyValueNode>, ValueType>::insert(dto::Key key) {
+    auto ret = idx.insert(std::pair<dto::Key , k2::KeyValueNode>(key, k2::KeyValueNode(key)));
+    return ret.first;
 }
-
 template <typename ValueType>
-inline VersionedTreeNode<ValueType>* MapIndexer<ValueType>::find(const String& key, uint64_t version) {
-    auto it = m_map.find(key);
-    if (it == m_map.end()) {
-        return nullptr;
-    }
-
-    VersionedTreeNode<ValueType>* node = it->second.get();
-    while (node && node->version > version) {
-        node = node->next.get();
-    }
-    return node;
+inline typename std::map<dto::Key, k2::KeyValueNode>::iterator Indexer<std::map<dto::Key, k2::KeyValueNode>, ValueType>::find(dto::Key &key) {
+    return idx.find(key);
 }
-
 template <typename ValueType>
-inline void MapIndexer<ValueType>::trim(const String& key, uint64_t version) {
-    if (version == std::numeric_limits<uint64_t>::max()) {
-        m_map.erase(key);
-        return;
-    }
-
-    auto it = m_map.find(key);
-    if (it == m_map.end()) {
-        return;
-    }
-
-    VersionedTreeNode<ValueType>* node = it->second.get();
-    if (node) {
-        node = node->next.get();
-    }
-    while (node && node->version >= version) {
-        node = node->next.get();
-    }
-    node->next = nullptr;
+inline void Indexer<std::map<dto::Key, k2::KeyValueNode>, ValueType>::erase(typename std::map<dto::Key, k2::KeyValueNode>::iterator it) {
+    idx.erase(it);
 }
+template <typename ValueType>
+inline typename std::map<dto::Key, k2::KeyValueNode>::iterator Indexer<std::map<dto::Key, k2::KeyValueNode>, ValueType>::begin() {
+    return idx.begin();
+}
+template <typename ValueType>
+inline typename std::map<dto::Key, k2::KeyValueNode>::iterator Indexer<std::map<dto::Key, k2::KeyValueNode>, ValueType>::end() {
+    return idx.end();
+}
+template <typename ValueType>
+inline size_t Indexer<std::map<dto::Key, k2::KeyValueNode>, ValueType>::size() {
+    return idx.size();
+}*/
+
 }
