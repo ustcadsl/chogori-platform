@@ -16,7 +16,7 @@ COMMON_ARGS="--enable_tx_checksum true --thread-affinity false"
 cpo_child_pid=$!
 
 # start nodepool on 1 cores
-./build/src/k2/cmd/nodepool/nodepool -c1 --log_level DEBUG --tcp_endpoints ${EPS} --k23si_persistence_endpoint ${PERSISTENCE} ${COMMON_ARGS} --prometheus_port 63001 --k23si_cpo_endpoint ${CPO} --tso_endpoint ${TSO} --memory=3G --partition_request_timeout=6s &
+./build/src/k2/cmd/nodepool/nodepool -c1 --log_level INFO --tcp_endpoints ${EPS} --k23si_persistence_endpoint ${PERSISTENCE} ${COMMON_ARGS} --prometheus_port 63001 --k23si_cpo_endpoint ${CPO} --tso_endpoint ${TSO} --memory=3G --partition_request_timeout=6s &
 nodepool_child_pid=$!
 
 # start persistence on 1 cores
@@ -64,4 +64,4 @@ echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 echo ">>> Starting benchmark ..."
-./build/src/k2/cmd/tpcc/tpcc_client -c1 --log_level DEBUG --tcp_remotes ${EPS} --cpo ${CPO} --tso_endpoint ${TSO} --num_warehouses ${NUMWH} --districts_per_warehouse ${NUMDIST} --prometheus_port 63101 ${COMMON_ARGS} --memory=512M --partition_request_timeout=1s  --num_concurrent_txns=1 --do_verification false --delivery_txn_batch_size=10
+./build/src/k2/cmd/tpcc/tpcc_client -c1 --log_level INFO --tcp_remotes ${EPS} --cpo ${CPO} --tso_endpoint ${TSO} --num_warehouses ${NUMWH} --districts_per_warehouse ${NUMDIST} --prometheus_port 63101 ${COMMON_ARGS} --memory=512M --partition_request_timeout=1s  --num_concurrent_txns=1 --do_verification false --delivery_txn_batch_size=10

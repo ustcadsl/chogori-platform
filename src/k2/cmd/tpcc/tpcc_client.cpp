@@ -320,7 +320,12 @@ private:
             K2LOG_I(log::tpcc, "read ops {} per sec", readpsec);
             K2LOG_I(log::tpcc, "write ops {} per sec", writepsec);
             K2LOG_I(log::tpcc, "query ops {} per sec", querypsec);
-            K2LOG_I(log::tpcc, "", )
+            K2LOG_I(log::tpcc, "newOrderTxns={} ", _newOrderTxns);
+            //K2LOG_I(log::tpcc, "newOrderTxn latency={}", _newOrderLatency);
+            K2LOG_I(log::tpcc, "PaymentTxns={} ", _paymentTxns);
+            //K2LOG_I(log::tpcc, "PaymentTxn latency={}", _paymentLatency);
+            K2LOG_I(log::tpcc, "OrderstatusTxns={} ", _orderStatusTxns);
+            //K2LOG_I(log::tpcc, "orderstatus latency={}", _orderStatusLatency);
             return make_ready_future();
         });
     }
