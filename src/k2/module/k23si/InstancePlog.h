@@ -51,56 +51,27 @@ public:
        String chunkFileName = genNewChunkFileName();
        char * chunkFileAddr = createNewChunkFile(chunkFileName);
        struct ChunkInfo first_chunk = {._chunk_path=std::move(chunkFileName),._pmemaddr=chunkFileAddr};
-       K2LOG_D(log::skvsvr,"Created plog :{} ", plogid);
+       K2LOG_D(log::skvsvr,"Created plog :{} ", plog_id);
    }
-
-    void append(char *srcdata, size_t len){
-        size_t remaining_space = _chunk_max_size - _tail_offset%_chunk_max_size;
-        size_t write_size = remaining_space <= len? remaining_space : len;
-        char * pemaddr = _chunk_list[_active_chunk_id]._pmemaddr + _tail_offset%_chunk_max_size;
-
-        if (_is_pmem){
-            do_copy_to_pmem(pemaddr, srcdata, write_size);
-        }else{
-            do_copy_to_non_pmem(pemaddr, srcdata, write_size);
-        }
-
-        if (len > remaining_space){
-            size_t need_new_chunk= ceil((len-remaining_space)/_chunk_max_size);
-            for( size_t i = 0; i < need_new_chunk; i++){
-                String chunkFileName = genNewChunkFileName();
-                char * chunkFileAddr = createNewChunkFile(chunkFileName);
-                struct ChunkInfo tmp_chunk = {._chunk_path=std::move(chunkFileName),._pmemaddr=chunkFileAddr};
-                _chunk_list.push_back(std::move(tmp_chunk));
-                if( i == need_new_chunk-1){
-                    if (_is_pmem){
-                        do_copy_to_pmem(chunkFileAddr, srcdata+remaining_space + i*_chunk_max_size, (len-remaining_space)%_chunk_max_size);
-                    }else{
-                        do_copy_to_non_pmem(chunkFileAddr, srcdata+remaining_space + i*_chunk_max_size, (len-remaining_space)%_chunk_max_size);
-                    }
-                }else{
-                    if (_is_pmem){
-                        do_copy_to_pmem(chunkFileAddr, srcdata+remaining_space + i*_chunk_max_size, _chunk_max_size);
-                    }else{
-                        do_copy_to_non_pmem(chunkFileAddr, srcdata+remaining_space + i*_chunk_max_size, _chunk_max_size);
-                    }
-                }
-            }
-        }
-        _tail_offset += len;
+    void seal(){
+        _sealed = true;
     }
+    void append(std::unique_ptr<Payload> & request_payload);
+    void append(char *srcdata, size_t len);
+    
 
 private:
     char * createNewChunkFile(String newChunkFileName){
         char * pmemaddr;
         size_t mapped_len;
-        if ((pmemaddr = static_cast<char *>(pmem_map_file(newChunkFileName,
+        if ((pmemaddr = static_cast<char *>(pmem_map_file(newChunkFileName.c_str(),
             _chunk_max_size,
             PMEM_FILE_CREATE|PMEM_FILE_EXCL,
             0666, &mapped_len, &_is_pmem))) == NULL) {
             K2LOG_E(log::skvsvr,"pmem_map_file fail");
             exit(1);
         }
+        return pmemaddr;
     }
     String genNewChunkFileName(){
         return fmt::format("{}/{}_{}.plog",_plog_path,_plog_id,_active_chunk_id);
@@ -124,10 +95,10 @@ private:
     }
 
     int _is_pmem;
-    String _plog_path;
     uint64_t _plog_id;
+    String _plog_path;
     uint64_t _tail_offset = 0;
-    bool sealed = false;
+    bool _sealed = false;
 
     size_t _plog_max_size;
     size_t _chunk_max_size = 4096 * 1024;

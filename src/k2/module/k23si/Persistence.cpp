@@ -29,7 +29,7 @@ Persistence::Persistence() {
     int id = seastar::this_shard_id();
     String endpoint = _config.persistenceEndpoint()[id % _config.persistenceEndpoint().size()];
     _remoteEndpoint = RPC().getTXEndpoint(endpoint);
-    _localplog = std::make_unique<LocalPlog>(100);
+    _localplog = std::make_unique<LocalPlog>(100,"/mnt/pmem0/plog_data");
     _flushTimer.setCallback(
         [this] {
             if (Clock::now() - _lastFlush > _config.persistenceAutoflushDeadline()) {
@@ -71,12 +71,13 @@ seastar::future<Status> Persistence::flush() {
         K2ASSERT(log::skvsvr, _pendingProms.size() == 0, "There is no data to send but we have pending promises");
         return _chainFlushResponse();
     }
-
+    _localplog->append(_buffer);
     // move the buffered data into a single request and delete the buffer.
     // Any writes after this point will be appended to a new buffer/batch
     dto::K23SI_PersistenceRequest<Payload> request{};
     request.value.val = std::move(*_buffer);
     _buffer.reset(nullptr);
+    
     std::vector<seastar::promise<Status>> proms; // ditto for the pending promises
     proms.swap(_pendingProms);
 
