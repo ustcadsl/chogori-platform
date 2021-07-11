@@ -10,6 +10,7 @@ PERSISTENCE=tcp+k2rpc://0.0.0.0:12001
 CPO=tcp+k2rpc://0.0.0.0:9000
 TSO=tcp+k2rpc://0.0.0.0:13000
 
+
 # start CPO on 2 cores
 ./build/src/k2/cmd/controlPlaneOracle/cpo_main -c1 --tcp_endpoints ${CPO} 9001 --data_dir ${CPODIR} --enable_tx_checksum true --reactor-backend epoll --prometheus_port 63000 --assignment_timeout=1s &
 cpo_child_pid=$!

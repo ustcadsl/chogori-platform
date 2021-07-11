@@ -69,7 +69,7 @@ private:
             PMEM_FILE_CREATE|PMEM_FILE_EXCL,
             0666, &mapped_len, &_is_pmem))) == NULL) {
             K2LOG_E(log::skvsvr,"pmem_map_file fail");
-            exit(1);
+            // exit(1);
         }
         return pmemaddr;
     }
