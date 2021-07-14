@@ -1,6 +1,8 @@
 #include "indexer.h"
 #include "pbrb_design.h"
 
+namespace k2 {
+
 bool KVN::insertRow(void *newAddr, int ts, bool isHot, PBRB *pbrb)
 {
 
@@ -52,4 +54,6 @@ bool KVN::insertRow(void *newAddr, int ts, bool isHot, PBRB *pbrb)
         rowNum++;
 
     return true;
+}
+
 }

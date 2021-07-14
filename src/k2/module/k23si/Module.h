@@ -192,7 +192,7 @@ private: // methods
     // judge whether fieldIdx is in fieldsForPartialUpdate. return true if yes(is in fieldsForPartialUpdate).
     bool _isUpdatedField(uint32_t fieldIdx, std::vector<uint32_t> fieldsForPartialUpdate);
 
-    void _getFieldsValue(const dto::SchemaField& field, Payload& payload, bool& success);
+    void _cacheFieldValueToPBRB(const dto::SchemaField& field, Payload& payload, bool& success, BufferPage *pagePtr, RowOffset rowOffset, uint32_t fieldID);
 
     // Helper for iterating over the indexer, modifies it to end() if iterator would go past the target schema
     // or if it would go past begin() for reverse scan. Starting iterator must not be end() and must

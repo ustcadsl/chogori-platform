@@ -4,6 +4,9 @@
 #include<map>
 #include <k2/dto/Timestamp.h>
 
+namespace k2
+{
+
 class PBRB;
 
 struct KVN {
@@ -49,3 +52,5 @@ struct KVN {
 };
 
 typedef std::map<std::string, KVN> Index;
+
+}

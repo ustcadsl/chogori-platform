@@ -3,6 +3,8 @@
 #include <k2/pbrb/pbrb_design.h>
 #include <k2/pbrb/indexer.h>
 
+using namespace k2;
+
 int length = 100;
 int timestamp[1000] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
 char str[1000][124] = {
@@ -59,7 +61,7 @@ int test() {
             {k2::dto::FieldType::STRING, "str"}
         }
     });
-    auto sid1 = schemaUMap.addSchema(&S1);
+    auto sid1 = schemaUMap.addSchema(S1);
     initPlog(Plog1, sid1);
 
     PBRB pbrb(100, &wm, &indexer);

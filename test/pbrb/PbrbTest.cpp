@@ -3,6 +3,8 @@
 #include <k2/pbrb/pbrb_design.h>
 #include <k2/pbrb/indexer.h>
 
+using namespace k2;
+
 int length = 9;
 int timestamp[100] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
 char str[100][124] = {
@@ -47,7 +49,7 @@ int insert_test_case_1() {
             {k2::dto::FieldType::STRING, "str"}
         }
     });
-    auto sid1 = schemaUMap.addSchema(&S1);
+    auto sid1 = schemaUMap.addSchema(S1);
     initPlog(Plog1, sid1);
 
     PBRB pbrb(100, &wm, &indexer);
@@ -106,7 +108,7 @@ int insert_test_case_2() {
             {k2::dto::FieldType::STRING, "str"}
         }
     });
-    auto sid1 = schemaUMap.addSchema(&S1);
+    auto sid1 = schemaUMap.addSchema(S1);
     initPlog(Plog1, sid1);
 
     PBRB pbrb(8, &wm, &indexer);
@@ -165,7 +167,7 @@ int insert_test_case_3() {
             {k2::dto::FieldType::STRING, "str"}
         }
     });
-    auto sid1 = schemaUMap.addSchema(&S1);
+    auto sid1 = schemaUMap.addSchema(S1);
     initPlog(Plog1, sid1);
 
     PBRB pbrb(8, &wm, &indexer);
@@ -222,7 +224,7 @@ int test3() {
             {k2::dto::FieldType::STRING, "str"}
         }
     });
-    auto sid1 = schemaUMap.addSchema(&S1);
+    auto sid1 = schemaUMap.addSchema(S1);
     initPlog(Plog1, sid1);
 
     PBRB pbrb(8, &wm, &indexer);
@@ -279,7 +281,7 @@ int test4() {
             {k2::dto::FieldType::STRING, "str"}
         }
     });
-    auto sid1 = schemaUMap.addSchema(&S1);
+    auto sid1 = schemaUMap.addSchema(S1);
     initPlog(Plog1, sid1);
 
     PBRB pbrb(8, &wm, &indexer);
@@ -341,7 +343,7 @@ int test5() {
             {k2::dto::FieldType::STRING, "str"}
         }
     });
-    auto sid1 = schemaUMap.addSchema(&S1);
+    auto sid1 = schemaUMap.addSchema(S1);
     initPlog(Plog1, sid1);
 
     PBRB pbrb(8, &wm, &indexer);
@@ -402,7 +404,7 @@ int test6() {
             {k2::dto::FieldType::STRING, "str"}
         }
     });
-    auto sid1 = schemaUMap.addSchema(&S1);
+    auto sid1 = schemaUMap.addSchema(S1);
     initPlog(Plog1, sid1);
 
     PBRB pbrb(8, &wm, &indexer);
@@ -467,7 +469,7 @@ int split_test() {
             {k2::dto::FieldType::STRING, "str"}
         }
     });
-    auto sid1 = schemaUMap.addSchema(&S1);
+    auto sid1 = schemaUMap.addSchema(S1);
     initPlog(Plog1, sid1);
 
     PBRB pbrb(8, &wm, &indexer);
@@ -517,7 +519,7 @@ int merge_test() {
             {k2::dto::FieldType::STRING, "str"}
         }
     });
-    auto sid1 = schemaUMap.addSchema(&S1);
+    auto sid1 = schemaUMap.addSchema(S1);
     initPlog(Plog1, sid1);
 
     PBRB pbrb(8, &wm, &indexer);

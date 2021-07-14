@@ -2,6 +2,8 @@
 #include<cstdlib>
 #include<new>
 
+namespace k2 {
+
 const int plogSize = 8 * 1024 * 1024;
 
 using PLogAddr = void *;
@@ -52,4 +54,6 @@ T readFromPlog(const PLogAddr pAddr, size_t size)
     const void *sPtr = static_cast<const void *>(pAddr);
     memcpy(dPtr, sPtr, size);
     return result;
+}
+
 }

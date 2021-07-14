@@ -7,9 +7,9 @@
 
 #include <k2/dto/ControlPlaneOracle.h>
 
-using String = std::string;
-using SchemaId = uint32_t;
-using SchemaVer = uint16_t;
+//using String = std::string;
+//using SchemaId = uint32_t;
+//using SchemaVer = uint16_t;
 
 // Field Types
 
