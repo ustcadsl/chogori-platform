@@ -172,10 +172,6 @@ struct Expression {
 // helper builder: creates a value literal
 template <typename T>
 inline Value makeValueLiteral(T&& literal) {
-    if(isNan<T>(literal)){
-            throw NaNError("NaN type in serialization");
-    }
-
     Value result{};
     result.type = TToFieldType<T>();
     result.literal.write(literal);

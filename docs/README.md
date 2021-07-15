@@ -1,6 +1,19 @@
-Various documentation for the Chogori-Platform (a.k.a. K2) storage project.
+This folder contains various design documents and papers related to the K2 Platform.
 
-- Design docs are found in the `design` folder
-- Presentations which the team has done are in the `presentations` folder
-- The `papers` folder contains interesting and relevant papers published from other projects
-- The `RFC` folder is the landing area for new ideas which we may consider adopting. Once adopted, we would move them to the `design` folder
+## Transactions
+- [Design](./TXN.md)
+
+## TSO
+- [Design](./TSO.md)
+
+## Transport
+- [Design](./TRANSPORT.md)
+
+## Client
+- [Client](./TXN_CLIENT.md)
+
+## Coding guidelines
+- [Coding](./CODING_STYLE.md)
+
+## General notes
+- [Notes](./NOTES.md)
