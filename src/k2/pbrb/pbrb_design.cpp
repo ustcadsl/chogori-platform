@@ -361,12 +361,13 @@ bool PBRB::splitPage(BufferPage *pagePtr) {
     setSchemaIDPage(newPage, sid);
     
     // 2. Find offsets which need to move
-    std::vector<RowOffset> offVec;
     uint32_t maxRowNum = smd.maxRowCnt;
     uint32_t moveCnt = getHotRowsNumPage(pagePtr) / 2;
-    for (RowOffset i = 0; i < maxRowNum && offVec.size() < moveCnt; i++) {
-        if (isBitmapSet(pagePtr, i))
-            offVec.push_back(i);
+    std::vector<RowOffset> offVec(moveCnt);
+    int cursor = moveCnt - 1;
+    for (int idx = maxRowNum;idx >= 0 && cursor >= 0; idx--) {
+        if (isBitmapSet(pagePtr, idx))
+            offVec[cursor--] = idx;
     }
 
     // 3. insert newPage into LinkList.
@@ -391,6 +392,7 @@ bool PBRB::splitPage(BufferPage *pagePtr) {
     // NOTE: support only field[0] as key and type == INT32_T
     assert(smd.schema->fields[0].type == k2::dto::FieldType::INT32T);
 
+    RowOffset newOff = 0;
     for (RowOffset offset: offVec) {
         // 4.1: got key info from schema
         std::cout << "Move offset: " << offset << std::endl;
@@ -404,7 +406,10 @@ bool PBRB::splitPage(BufferPage *pagePtr) {
 
         // 4.2: Copy row 
         // (NOTE: just move to the same offset)
-        void *newRowAddr = copyRowInPages(pagePtr, offset, newPage, offset);
+        // void *newRowAddr = copyRowInPages(pagePtr, offset, newPage, offset);
+
+        // move from offset 0.
+        void *newRowAddr = copyRowInPages(pagePtr, offset, newPage, newOff++);
 
         // 4.3: update _indexer.
         KVN &kvNode = (*_indexer)[key];
