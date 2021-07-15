@@ -165,6 +165,15 @@ Status K23SIPartitionModule::_validateWriteRequest(const dto::K23SIWriteRequest&
         return dto::K23SIStatus::OperationNotAllowed("schema version does not exist");
     }
 
+    if (auto* twim = _twimMgr.getTxnWIMeta(request.mtr.timestamp); twim != nullptr) {
+        if (twim->isAborted()) {
+            return dto::K23SIStatus::AbortConflict("The transaction has been aborted");
+        }
+        else if (twim->isCommitted()) {
+            return dto::K23SIStatus::BadParameter("The transaction has been committed");
+        }
+    }
+
     return _validateStaleWrite(request, versions);
 }
 // ********************** Validators
@@ -390,7 +399,12 @@ IndexerIterator K23SIPartitionModule::_initializeScan(const dto::Key& start, boo
     // ELSE IF lower_bound returns a key bigger than start, find the first key not bigger than start;
     if (reverse) {
         if (start.partitionKey == "" || key_it == _indexer.end()) {
-            key_it = (++_indexer.rbegin()).base();
+            if(!_indexer.empty()){ // handle empty records
+                key_it = (++_indexer.rbegin()).base();
+            }
+            else{
+                key_it = _indexer.end();
+            }
         } else if (key_it->first == start && exclusiveKey) {
             _scanAdvance(key_it, reverse, start.schemaName);
         } else if (key_it->first > start) {
@@ -665,20 +679,14 @@ std::size_t K23SIPartitionModule::_findField(const dto::Schema schema, k2::Strin
 template <typename T>
 void _advancePayloadPosition(const dto::SchemaField& field, Payload& payload, bool& success) {
     (void) field;
-    T value{};
-    success = payload.read(value);
+    payload.skip<T>();
+    success = true;
 }
 
 template <typename T>
 void _copyPayloadBaseToUpdate(const dto::SchemaField& field, Payload& base, Payload& update, bool& success) {
     (void) field;
-    T value{};
-    success = base.read(value);
-    if (!success) {
-        return;
-    }
-
-    update.write(value);
+    success = base.copyToPayload<T>(update);
 }
 
 template <typename T>
@@ -1069,7 +1077,15 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
         head = &(vset.committed[0]);
     }
 
-    if (request.rejectIfExists && head && !head->isTombstone) {
+    // Exists precondition can be set by the user (e.g. with a delete to know if a record was actually
+    // delete) and it is set for partial updates
+    if (request.precondition == ExistencePrecondition::Exists && (!head || head->isTombstone)) {
+        K2LOG_D(log::skvsvr, "Request {} not accepted since Exists precondition failed", request);
+        _readCache->insertInterval(request.key, request.key, request.mtr.timestamp);
+        return RPCResponse(dto::K23SIStatus::ConditionFailed("Exists precondition failed"), dto::K23SIWriteResponse{});
+    }
+
+    if (request.precondition == ExistencePrecondition::NotExists && head && !head->isTombstone) {
         // Need to add to read cache to prevent an erase coming in before this requests timestamp
         // If the condition passes (ie, there was no previous version and the insert succeeds) then
         // we do not need to insert into the read cache because the write intent will handle conflicts
@@ -1084,15 +1100,11 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
 
     if (request.fieldsForPartialUpdate.size() > 0) {
         // parse the partial record to full record
-        if (!head || head->isTombstone) {
-            K2LOG_D(log::skvsvr, "partial update request {} not accepted since there is no previous version to update", request);
-            // cannot parse partial record without a version
-            return RPCResponse(dto::K23SIStatus::KeyNotFound("can not partial update with no/deleted version"), dto::K23SIWriteResponse{});
-        }
         if (!_parsePartialRecord(request, *head)) {
             K2LOG_D(log::skvsvr, "can not parse partial record for key {}", request.key);
             head->value.fieldData.seek(0);
-            return RPCResponse(dto::K23SIStatus::BadParameter("missing fields or can not interpret partialUpdate"), dto::K23SIWriteResponse{});
+            _readCache->insertInterval(request.key, request.key, request.mtr.timestamp);
+            return RPCResponse(dto::K23SIStatus::ConditionFailed("missing fields or can not interpret partialUpdate"), dto::K23SIWriteResponse{});
         }
     }
 
@@ -1109,13 +1121,15 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, VersionSet& ve
     // we need to copy this data into a new memory block so that we don't hold onto and fragment the transport memory
     dto::DataRecord rec{.value=request.value.copy(), .timestamp=request.mtr.timestamp, .isTombstone=request.isDelete};
 
-    versions.WI.emplace(std::move(rec), request.request_id);
-
     auto status = _twimMgr.addWrite(std::move(request.mtr), std::move(request.key), std::move(request.trh), std::move(request.trhCollection));
 
     if (!status.is2xxOK()) {
         return status;
     }
+
+    // the TWIM accepted the write. Add it as a WI now
+    versions.WI.emplace(std::move(rec), request.request_id);
+
     _persistence->append(versions.WI->data);
     return Statuses::S201_Created("WI created");
 }
