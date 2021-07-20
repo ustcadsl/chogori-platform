@@ -35,7 +35,8 @@ void initPlog(SimplePlog &Plog1, SchemaId sid) {
 // Tests for 100 rows.
 int test() {
     Index indexer;
-    int wm = 0;
+    //int wm = 0;
+    k2::dto::Timestamp wm;
 
     // Plog
     SimplePlog Plog1;
@@ -48,7 +49,7 @@ int test() {
             {k2::dto::FieldType::STRING, "str"}
         }
     });
-    auto sid1 = schemaUMap.addSchema(&S1);
+    auto sid1 = schemaUMap.addSchema(S1);
     initPlog(Plog1, sid1);
 
     PBRB pbrb(100, &wm, &indexer);
@@ -63,6 +64,7 @@ int test() {
         std::cout << "value: " << str[i] << std::endl;
         *(pbrb.watermark) = -1;
         
+        //*(pbrb.watermark) = i - 40;
         if (indexer.find(newKey) == indexer.end()) {
             std::cout << "Insert Key: " << newKey << " into indexer." << std::endl;
             KVN kvn;

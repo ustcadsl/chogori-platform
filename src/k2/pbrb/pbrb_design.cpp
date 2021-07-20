@@ -2,6 +2,87 @@
 #include "pbrb_design.h"
 #include "indexer.h"
 
+namespace k2
+{
+
+// Copy the header of row from DataRecord of query to (pagePtr, rowOffset)
+void *PBRB::cacheRowHeaderFrom(BufferPage *pagePtr, RowOffset rowOffset, dto::Timestamp& timestamp, void* PlogAddr) {
+    //K2LOG_I(log::pbrb, "function cacheRowFromPlog(BufferPage, RowOffset:{}, PlogAddr", rowOffset);
+    if (pagePtr == nullptr) {
+        K2LOG_I(log::pbrb, "Trying to cache row to nullptr!");
+        return nullptr;
+    }
+    if (rowOffset > _schemaMap[getSchemaIDPage(pagePtr)].maxRowCnt) {
+        K2LOG_I(log::pbrb, "Row Offset out of range!");
+        return nullptr;
+    }
+    if (isBitmapSet(pagePtr, rowOffset)) {
+        K2LOG_I(log::pbrb, "Conflict: move row to occupied slot, In page, offset:{}", rowOffset);
+        return nullptr;
+    }
+
+    SchemaId schemaId = getSchemaIDPage(pagePtr);
+    SchemaMetaData smd = _schemaMap[schemaId];
+    uint32_t byteOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
+                            smd.rowSize * rowOffset;
+
+    void *rowBasePtr = (uint8_t *)(pagePtr) + byteOffsetInPage;
+    K2LOG_I(log::pbrb, "^^^^^^schemaId:{}, RowOffset:{}, occuBitmapSize:{}, rowSize:{}, byteOffsetInPage:{}, rowBasePtr:{}", schemaId, rowOffset, smd.occuBitmapSize, smd.rowSize, byteOffsetInPage, rowBasePtr);
+
+    // Copy timestamp
+    uint32_t tsoId = timestamp.tsoId();
+    void *tsPtr = (void *) ((uint8_t *) rowBasePtr + 4);
+    memcpy(tsPtr, &tsoId, sizeof(uint32_t));
+
+    // Set PlogAddre in row.
+    void *plogAddr = (void *) ((uint8_t *) rowBasePtr + 20);
+    memcpy(plogAddr, PlogAddr, 8);
+
+    return rowBasePtr;
+}
+
+// Copy the field of row from DataRecord of query to (pagePtr, rowOffset)
+void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, void* field, size_t strSize, uint32_t fieldID)
+{
+    //K2LOG_I(log::pbrb, "function cacheRowFromPlog(BufferPage, RowOffset:{}, field:{}", rowOffset, field);
+    if (pagePtr == nullptr) {
+        K2LOG_I(log::pbrb, "Trying to cache row to nullptr!");
+        return nullptr;
+    }
+    if (rowOffset > _schemaMap[getSchemaIDPage(pagePtr)].maxRowCnt) {
+        K2LOG_I(log::pbrb, "Row Offset out of range!");
+        return nullptr;
+    }
+    if (isBitmapSet(pagePtr, rowOffset)) {
+        K2LOG_I(log::pbrb, "Conflict: move row to occupied slot, In page, offset:{}", rowOffset);
+        return nullptr;
+    }
+
+    SchemaId schemaId = getSchemaIDPage(pagePtr);
+    SchemaMetaData smd = _schemaMap[schemaId];
+    uint32_t byteOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
+                            smd.rowSize * rowOffset;
+
+    void *rowBasePtr = (uint8_t *)(pagePtr) + byteOffsetInPage;
+
+    // Copy a field to PBRB row
+    void *destPtr = (void *) ((uint8_t *) rowBasePtr + smd.fieldsInfo[fieldID].fieldOffset);
+    
+    if(strSize > 0) {
+        // Copy the size of String
+        memcpy(destPtr, &strSize, sizeof(size_t));
+        destPtr = (void *) ((uint8_t *) rowBasePtr + smd.fieldsInfo[fieldID].fieldOffset + sizeof(size_t));
+    }
+    //size_t copySize = smd.rowSize - smd.fieldsInfo[fieldID].fieldOffset;
+    size_t copySize = smd.fieldsInfo[fieldID].fieldSize;
+    K2LOG_I(log::pbrb, "fieldID:{}, fieldOffset:{}, destPtr:{}, copySize:{}, strSize:{}", fieldID, smd.fieldsInfo[fieldID].fieldOffset, destPtr, copySize, strSize);
+    // + 4 to move to the real address in simple plog
+    memcpy(destPtr, field, copySize);
+
+    return rowBasePtr;
+}
+
+
 // Copy memory from plog to (pagePtr, rowOffset)
 void *PBRB::cacheRowFromPlog(BufferPage *pagePtr, RowOffset rowOffset, PLogAddr pAddress)
 {
@@ -87,7 +168,8 @@ void *PBRB::cacheColdRow(PLogAddr pAddress, String key)
     // 1. has hot row:
     if (kvNode.hasCachedVer()) {
         for (int i = kvNode.rowNum - 1;i >= 0;i--) {
-            if (kvNode.isCached[i] && kvNode.timestamp[i] < *watermark) {
+            if (kvNode.isCached[i] && kvNode.timestamp[i] < (int) watermark->tStartTSECount()) {
+            //if (kvNode.isCached[i] && kvNode.timestamp[i] < *watermark) {
                 replaceAddr = kvNode.addr[i];
                 PLogAddr coldAddr = evictRow(kvNode.addr[i]);
                 kvNode.hotToCold(i, coldAddr);
@@ -177,9 +259,11 @@ RowOffset PBRB::findEmptySlotInPage(BufferPage *pagePtr)
     return 0xFFFFFFFF; //not find an empty slot
 }
 
+//find an empty slot by querying the page one by one in turn
 std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID)
 {
     BufferPage *pagePtr = _schemaMap[schemaID].headPage;
+    //K2LOG_I(log::pbrb, "^^^^^^^^findCacheRowPosition, schemaID:{}, pagePtr empty:{}", schemaID, pagePtr==nullptr);
     while (pagePtr != nullptr) {
         RowOffset rowOffset = findEmptySlotInPage(pagePtr);
         if (rowOffset & 0x80000000)
@@ -188,9 +272,13 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID)
         else
             return std::make_pair(pagePtr, rowOffset);
     }
-    return std::make_pair(nullptr, 0);
+    //all allocated pages for the schema are full, so allocate a new page
+    pagePtr = AllocNewPageForSchema(schemaID);
+    //return std::make_pair(nullptr, 0);
+    return std::make_pair(pagePtr, 0);
 }
 
+//find and empty slot that try to keep rows within/between pages as orderly as possible
 std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID, String key) {
     KVN &kvNode = (*_indexer)[key];
     BufferPage *pagePtr;
@@ -502,4 +590,6 @@ bool PBRB::mergePage(BufferPage *pagePtr1, BufferPage *pagePtr2) {
         setPrevPage(next, prev);
 
     return true;
+}
+
 }

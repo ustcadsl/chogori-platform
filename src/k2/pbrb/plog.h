@@ -2,7 +2,13 @@
 #include<cstdlib>
 #include<new>
 
+<<<<<<< HEAD
 const int plogSize = 256 * 1024 * 1024;
+=======
+namespace k2 {
+
+const int plogSize = 8 * 1024 * 1024;
+>>>>>>> c818902f9a2a1b00d52131263128532cd0f1549b
 
 using PLogAddr = void *;
 using SchemaId = uint32_t;
@@ -52,4 +58,6 @@ T readFromPlog(const PLogAddr pAddr, size_t size)
     const void *sPtr = static_cast<const void *>(pAddr);
     memcpy(dPtr, sPtr, size);
     return result;
+}
+
 }

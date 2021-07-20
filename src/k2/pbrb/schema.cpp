@@ -1,6 +1,6 @@
 #include "schema.h"
 
-uint32_t FTSize[256] = {
+/*uint32_t FTSize[256] = {
     0,      // NULL_T = 0,
     116,    // STRING, // NULL characters in string is OK
     sizeof(int16_t),  // INT16T,
@@ -22,4 +22,4 @@ String SimpleSchema::getKey(int id) {
     char buf[256];
     sprintf(buf, "%s_%04d", name.c_str(), id);
     return buf;
-}
+}*/

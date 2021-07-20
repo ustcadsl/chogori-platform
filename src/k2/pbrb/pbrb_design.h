@@ -14,19 +14,74 @@
 
 #include "plog.h"
 #include "schema.h"
+#include <k2/dto/Timestamp.h>
+#include <k2/common/Log.h>
 
-const int pageSize = 1024;
-const long long mask = 0x00000000000003FF;
+namespace k2::log {
+inline thread_local k2::logging::Logger pbrb("k2::pbrb");
+}
+
+namespace k2
+{
+
+const int pageSize = 64*1024; //64KB
+const long long mask = 0x000000000000FFFF; //0x00000000000003FF;
+
+using SchemaId = uint32_t;
+using SchemaVer = uint16_t;
+using RowOffset = uint32_t;
+
+// Field Types
+
+/*struct SchemaField {
+    k2::dto::FieldType type;
+    String name;
+};*/
+
+struct SimpleSchema {
+    String name;
+    uint32_t version = 0;
+    std::vector<k2::dto::SchemaField> fields;
+    String getKey(int id){
+        char buf[256];
+        sprintf(buf, "%s_%04d", name.c_str(), id);
+        return buf;
+    };
+};
+
+struct SchemaUMap {
+    std::unordered_map<SchemaId, SimpleSchema> umap; 
+    uint32_t currIdx = 0;
+    uint32_t addSchema(SimpleSchema schemaPtr) {
+        uint32_t retVal = currIdx;
+        umap.insert({currIdx++, schemaPtr});
+        return retVal;
+    }
+};
+
+static uint32_t FTSize[256] = {
+    0,      // NULL_T = 0,
+    116,    // STRING, // NULL characters in string is OK
+    sizeof(int16_t),  // INT16T,
+    sizeof(int32_t),  // INT32T,
+    sizeof(int64_t),  // INT64T,
+    sizeof(float),    // FLOAT, // Not supported as key field for now
+    sizeof(double),   // DOUBLE,  // Not supported as key field for now
+    sizeof(bool),     // BOOL,
+    sizeof(std::decimal::decimal64),  // DECIMAL64, // Provides 16 decimal digits of precision
+    sizeof(std::decimal::decimal128), // DECIMAL128, // Provides 34 decimal digits of precision
+    1,      // FIELD_TYPE, // The value refers to one of these types. Used in query filters.
+    // NOT_KNOWN = 254,
+    // NULL_LAST = 255
+};
+
+static SchemaUMap schemaUMap;
 
 struct BufferPage
 {
     uint8_t content[pageSize];
 };
 
-using String = std::string;
-using SchemaId = uint32_t;
-using SchemaVer = uint16_t;
-using RowOffset = uint32_t;
 
 struct fieldMetaData
 {
@@ -36,8 +91,8 @@ struct fieldMetaData
     bool isVariable;
 };
 
-extern SchemaUMap schemaUMap;
-extern uint32_t FTSize[];
+//extern SchemaUMap schemaUMap;
+//extern uint32_t FTSize[];
 
 struct SchemaMetaData
 {
@@ -66,6 +121,7 @@ struct SchemaMetaData
 
     void setHeadPage(BufferPage *pagePtr) {
         headPage = pagePtr;
+        K2LOG_I(log::pbrb, "^^^^^^^^^^^^^^^Set HeadPagePtr, pagePtr empty:{}", pagePtr==nullptr);
         std::cout << "Set HeadPagePtr: " << headPage << std::endl;
     }
 
@@ -75,7 +131,7 @@ struct SchemaMetaData
         if (schemaUMap.umap.find(schemaId) == schemaUMap.umap.end())
             return;
 
-        schema = schemaUMap.umap[schemaId];
+        schema = &(schemaUMap.umap[schemaId]);
 
         setNullBitmapSize(schema->fields.size());
 
@@ -147,10 +203,12 @@ private:
 
     uint32_t splitCnt = 0, evictCnt = 0;
 public:
-
-    int *watermark;
+    //SchemaMetaData tempSmeta;
+    //int *watermark;
+    k2::dto::Timestamp *watermark;
     //Initialize a PBRB cache
-    PBRB(int maxPageNumber, int *wm, Index *indexer)
+    //PBRB(int maxPageNumber, int *wm, Index *indexer)
+    PBRB(int maxPageNumber, k2::dto::Timestamp *wm, Index *indexer)
     {
         watermark = wm;
         this->_maxPageNumber = maxPageNumber;
@@ -169,6 +227,7 @@ public:
         // alloc maxPageNumber pages when initialize.
         BufferPage *basePtr = static_cast<BufferPage *>(operator new(maxPageNumber * sizeof(BufferPage), aligned_val));
         std::cout << std::dec << "\nPBRB: Allocated " << maxPageNumber << " Pages in " << basePtr << std::endl;
+        K2LOG_I(log::pbrb, "\nPBRB: Allocated: {} Pages in", maxPageNumber);
         for (int idx = 0; idx < maxPageNumber; idx++)
         {
             _freePageList.push_back(basePtr + idx);
@@ -367,10 +426,12 @@ public:
         _schemaMap.insert({schemaId, smd});
 
         // Initialize Page.
-        memset(pagePtr, 0, sizeof(BufferPage));
+        //memset(pagePtr, 0, sizeof(BufferPage));
 
         initializePage(pagePtr);
         setSchemaIDPage(pagePtr, schemaId);
+
+        K2LOG_I(log::pbrb, "\ncreateCacheForSchema, schemaId: {} pagePtr empty:{}, _freePageList size:{}", schemaId, pagePtr==nullptr,  _freePageList.size());
 
         _freePageList.pop_front();
 
@@ -388,14 +449,14 @@ public:
             BufferPage *newPage = _freePageList.front();
             
             // Initialize Page.
-            memset(newPage, 0, sizeof(BufferPage));
-
+            //memset(newPage, 0, sizeof(BufferPage));
             initializePage(newPage);
             setSchemaIDPage(newPage, schemaId);
             setNextPage(newPage, _schemaMap[schemaId].headPage);
 
             _schemaMap[schemaId].headPage = newPage;
             _freePageList.pop_front();
+            K2LOG_I(log::pbrb, "^^^^^^^^^^^^^^^in AllocNewPageForSchema, _freePageList size:{}", _freePageList.size());
             return newPage;
         }
     };
@@ -428,6 +489,12 @@ public:
     
     // Copy memory from plog to (pagePtr, rowOffset)
     void *cacheRowFromPlog(BufferPage *pagePtr, RowOffset rowOffset, PLogAddr pAddress);
+
+    // Copy the header of row from DataRecord of query to (pagePtr, rowOffset)
+    void *cacheRowHeaderFrom(BufferPage *pagePtr, RowOffset rowOffset, dto::Timestamp& timestamp, void* PlogAddr);
+
+    // Copy the field of row from DataRecord of query to (pagePtr, rowOffset)
+    void *cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, void* field, size_t strSize, uint32_t fieldID);
     
     // find an empty slot between the beginOffset and endOffset in the page
     RowOffset findEmptySlotInPage(BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset);
@@ -512,4 +579,21 @@ public:
         std::cout << std::dec << "Evict Count(s): " << evictCnt << std::endl <<
                      "Split Count(s): " << splitCnt << std::endl;
     }
+
+    uint32_t mapCachedSchema(String schemaName, uint32_t schemaVer){
+        for (auto& mapItem : schemaUMap.umap) {
+            //K2LOG_I(log::pbrb, "schemaName:{}, name:{}, schemaID:{}, version:{}, field size:{}", schemaName, mapItem.second.name, mapItem.first, mapItem.second.version, mapItem.second.fields.size());
+            if(mapItem.second.name == schemaName && mapItem.second.version == schemaVer) {
+                return mapItem.first + 1;
+            }
+        }
+        return 0;
+    }
+
+    uint32_t addSchemaUMap(SimpleSchema schemaPtr){
+        return schemaUMap.addSchema(schemaPtr);
+    }
+
 };
+
+}

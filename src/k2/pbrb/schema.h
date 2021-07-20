@@ -7,21 +7,21 @@
 
 #include <k2/dto/ControlPlaneOracle.h>
 
-using String = std::string;
-using SchemaId = uint32_t;
-using SchemaVer = uint16_t;
+//using String = std::string;
+//using SchemaId = uint32_t;
+//using SchemaVer = uint16_t;
 
 // Field Types
 
-struct SchemaField {
+/*struct SchemaField {
     k2::dto::FieldType type;
     String name;
-};
+};*/
 
-struct SimpleSchema {
+/*struct SimpleSchema {
     String name;
     uint32_t version = 0;
-    std::vector<SchemaField> fields;
+    std::vector<k2::dto::SchemaField> fields;
     String getKey(int id);
 };
 
@@ -33,4 +33,4 @@ struct SchemaUMap {
         umap.insert({currIdx++, schemaPtr});
         return retVal;
     }
-};
+};*/

@@ -172,6 +172,9 @@ Status K23SIPartitionModule::_validateWriteRequest(const dto::K23SIWriteRequest&
 K23SIPartitionModule::K23SIPartitionModule(dto::CollectionMetadata cmeta, dto::Partition partition) :
     _cmeta(std::move(cmeta)),
     _partition(std::move(partition), _cmeta.hashScheme) {
+    K2LOG_I(log::skvsvr, "---------Partition: {}", _partition);//////
+    pbrb = new PBRB(100, &_retentionTimestamp, &indexer);//////
+
     K2LOG_I(log::skvsvr, "ctor for cname={}, part={}", _cmeta.name, _partition);
 }
 
@@ -613,7 +616,8 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
 
 seastar::future<std::tuple<Status, dto::K23SIReadResponse>>
 K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline deadline) {
-    K2LOG_I(log::skvsvr, "Partition: {}, received read {}", _partition, request);
+    K2LOG_D(log::skvsvr, "Partition: {}, received read {}", _partition, request);
+    //K2LOG_I(log::skvsvr, "------Partition: {}, received read {}", _partition, request);
 
     Status validateStatus = _validateReadRequest(request);
     if (!validateStatus.is2xxOK()) {
@@ -627,7 +631,6 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     _readCache->insertInterval(request.key, request.key, request.mtr.timestamp);
 
     // find the record we should return
-
     auto IndexIt = _indexer.find(request.key);
     if (IndexIt == _indexer.end()) {
         return _makeReadOK(nullptr);
@@ -635,6 +638,51 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
 
     VersionSet& versions = IndexIt->second;
     DataRecord* rec = _getDataRecordForRead(versions, request.mtr.timestamp);
+
+    /////////////////////////////////////
+    auto schemaIt = _schemas.find(request.key.schemaName);
+    auto schemaVer = schemaIt->second.find(rec->value.schemaVersion);
+    dto::Schema& schema = *(schemaVer->second);
+    K2LOG_I(log::skvsvr, "------request.key: {}, schemaName: {}, schemaVer:{}", request.key, request.key.schemaName, schemaVer->first);
+
+    uint32_t SMapIndex = pbrb->mapCachedSchema(request.key.schemaName, schemaVer->first);
+    /*if(SMapIndex > 0){
+        K2LOG_I(log::skvsvr, "$$$$$$schemaName: {}, schemaVer:{}, SMapIndex:{}", request.key.schemaName, schemaVer->first, SMapIndex);
+    }*/
+    if(SMapIndex == 0){ //add a new schema to PBRB schema metadata
+        SimpleSchema S;
+        S.name = request.key.schemaName;
+        S.version = schemaVer->first;
+        for(uint32_t i = 0; i < schema.fields.size(); i++){
+            S.fields.push_back(schema.fields[i]);
+        }
+        auto sID = pbrb->addSchemaUMap(S);
+        pbrb->createCacheForSchema(sID);
+        SMapIndex = sID+1;
+    }
+
+    //insert the SKV record to the PBRB cache, return the RAM address of the ccahed slot
+    SMapIndex--;
+    std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex);
+    BufferPage *pagePtr = retVal.first;
+    RowOffset rowOffset = retVal.second;
+    auto rowAddr = pbrb->cacheRowHeaderFrom(pagePtr, rowOffset, request.mtr.timestamp, rec);
+    K2LOG_I(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
+    
+    for(uint32_t j=0; j < schema.fields.size(); j++){
+        if (rec->value.excludedFields.size() && rec->value.excludedFields[j]) {
+            // A value of NULL in the record is treated the same as if the field doesn't exist in the record
+            continue;
+        }
+        bool success = false;
+       _cacheFieldValueToPBRB(schema.fields[j], rec->value.fieldData, success, pagePtr, rowOffset, j);
+    }
+    pbrb->setRowBitMapPage(pagePtr, rowOffset);
+    rec->value.fieldData.seek(0);
+    //update the KVNode of indexer to record the RAM address for this cached version
+    //_indexer.insert(request.key, rowAddr, request.mtr.timestamp);
+    ////////////////////////////////////
+
     bool needPush = !rec ? _checkPushForRead(versions, request.mtr.timestamp) : false;
 
     // happy case: either committed, or txn is reading its own write, or there is no matching version
@@ -660,6 +708,15 @@ std::size_t K23SIPartitionModule::_findField(const dto::Schema schema, k2::Strin
         }
     }
     return fieldNumber;
+}
+
+template <typename T>
+void _getFieldData(const dto::SchemaField& field, Payload& payload, bool& success, BufferPage *pagePtr, RowOffset rowOffset, uint32_t fieldID) {
+    (void) field;
+    T value{};
+    success = payload.read(value);
+    K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
+    //pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, fieldID);
 }
 
 template <typename T>
@@ -701,6 +758,77 @@ void _getNextPayloadOffset<String>(const dto::SchemaField& field, Payload& base,
     if (!success) return;
     uint32_t tmpOffset = fieldsOffset[baseCursor] + sizeof(uint32_t) + strLen; // uint32_t for length; '\0' doesn't count
     fieldsOffset.push_back(tmpOffset);
+}
+
+void K23SIPartitionModule::_cacheFieldValueToPBRB(const dto::SchemaField& field, Payload& payload, bool& success, BufferPage *pagePtr, RowOffset rowOffset, uint32_t fieldID){
+    //K2_DTO_CAST_APPLY_FIELD_VALUE(_getFieldData, field, payload, success, pagePtr, rowOffset, fieldID);
+    switch (field.type) {
+        case k2::dto::FieldType::STRING: {
+            k2::String value{};
+            success = payload.read(value);
+            size_t strSize = value.size();
+            //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}, strSize:{}", field.type, field.name, value, strSize);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, strSize, fieldID);
+        } break;
+        case FieldType::INT16T: {
+            int16_t value{};
+            success = payload.read(value);
+            //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+        } break;
+        case FieldType::INT32T: {
+            int32_t value{};
+            success = payload.read(value);
+            //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+        } break;
+        case FieldType::INT64T: {
+            int64_t value{};
+            success = payload.read(value);
+            //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+        } break;
+        case FieldType::FLOAT: {
+            float value{};
+            success = payload.read(value);
+            //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+        } break;
+        case FieldType::DOUBLE: {
+            double value{};
+            success = payload.read(value);
+            //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+        } break;
+        case FieldType::BOOL: {
+            bool value{};
+            success = payload.read(value);
+            //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+        } break;
+        case FieldType::DECIMAL64: {
+            std::decimal::decimal64 value{};
+            success = payload.read(value);
+            //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+        } break;
+        case FieldType::DECIMAL128: {
+            std::decimal::decimal128 value{};
+            success = payload.read(value);
+            //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+        } break;
+        case FieldType::FIELD_TYPE: {
+            FieldType value{};
+            success = payload.read(value);
+            //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+        } break;
+        default:
+            auto msg = fmt::format(
+                "cannot apply field of type {}", field.type);
+            throw TypeMismatchException(msg);
+    }               
 }
 
 bool K23SIPartitionModule::_isUpdatedField(uint32_t fieldIdx, std::vector<uint32_t> fieldsForPartialUpdate) {
