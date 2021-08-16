@@ -22,11 +22,11 @@ Copyright(c) 2020 Futurewei Cloud
 #include "IndexerInterface.h"
 
 #include <k2/common/Common.h>
-#include <hot/singlethreaded/include/hot/singlethreaded/HOTSingleThreaded.hpp>
-#include <hot/contenthelpers/include/idx/contenthelpers/IdentityKeyExtractor.hpp>
+#include <hot/singlethreaded/HOTSingleThreaded.hpp>
+#include <idx/contenthelpers/IdentityKeyExtractor.hpp>
 
 using namespace std;
-
+/*
 namespace k2
 {
 
@@ -126,5 +126,5 @@ namespace k2
     {
         return idx.getStatistics().second["numberValues"];
     }
-
 }
+*/

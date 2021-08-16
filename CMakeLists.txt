@@ -14,12 +14,14 @@ endif()
 add_compile_definitions(K2_VERBOSE_LOGGING=${K2_VERBOSE_LOGGING})
 
 include_directories(src)
+include_directories(include)
 
 find_package (Seastar REQUIRED)
 find_package (fmt REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package (yaml-cpp REQUIRED) # required for configuration file parsing
 
+add_subdirectory(include)
 add_subdirectory (src)
 add_subdirectory (test)
 
