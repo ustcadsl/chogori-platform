@@ -44,14 +44,15 @@ struct PlogAddress{
 class LocalPlog
 {
 public:
-   LocalPlog(uint64_t plog_id, String plog_path): 
-   _plog_id(plog_id),
-   _plog_path(plog_path)
-   {
-       String chunkFileName = genNewChunkFileName();
-       char * chunkFileAddr = createNewChunkFile(chunkFileName);
+   LocalPlog( const String plog_path, unsigned shard_id): 
+   _plog_path(plog_path),
+   _shard_id(shard_id)
+   {    
+       String chunkFileName = gen_new_chunk_filename();
+       char * chunkFileAddr = create_new_chunk(chunkFileName);
        struct ChunkInfo first_chunk = {._chunk_path=std::move(chunkFileName),._pmemaddr=chunkFileAddr};
-       K2LOG_D(log::skvsvr,"Created plog :{} ", plog_id);
+       K2LOG_D(log::skvsvr,"Created plog :{} path:{}",shard_id, plog_path);
+
    }
     void seal(){
         _sealed = true;
@@ -61,7 +62,7 @@ public:
     
 
 private:
-    char * createNewChunkFile(String newChunkFileName){
+    char * create_new_chunk(String newChunkFileName){
         char * pmemaddr;
         size_t mapped_len;
         if ((pmemaddr = static_cast<char *>(pmem_map_file(newChunkFileName.c_str(),
@@ -69,12 +70,12 @@ private:
             PMEM_FILE_CREATE|PMEM_FILE_EXCL,
             0666, &mapped_len, &_is_pmem))) == NULL) {
             K2LOG_E(log::skvsvr,"pmem_map_file fail");
-            // exit(1);
+            exit(1);
         }
         return pmemaddr;
     }
-    String genNewChunkFileName(){
-        return fmt::format("{}/{}_{}.plog",_plog_path,_plog_id,_active_chunk_id);
+    String gen_new_chunk_filename(){
+        return fmt::format("{}/{}_{}.plog",_plog_path,_shard_id,_active_chunk_id);
     }
     void do_copy_to_non_pmem(char *addr, char *srcaddr, size_t len){
         char *startaddr = addr;
@@ -95,8 +96,9 @@ private:
     }
 
     int _is_pmem;
-    uint64_t _plog_id;
+    // uint64_t _plog_id; 
     String _plog_path;
+    unsigned _shard_id;
     uint64_t _tail_offset = 0;
     bool _sealed = false;
 

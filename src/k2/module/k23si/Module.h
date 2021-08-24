@@ -282,6 +282,10 @@ private:  // members
     std::shared_ptr<Persistence> _persistence;
 
     CPOClient _cpo;
+    
+    uint64_t total_txns{0};
+    // record the module metrics
+    sm::metric_groups _metric_groups;
 };
 
 } // ns k2

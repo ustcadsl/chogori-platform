@@ -36,7 +36,7 @@ namespace k2 {
         return;
     }
     void LocalPlog::append(char *srcdata, size_t len){
-        K2LOG_D(log::skvsvr,"Append data: data=>{} len=>{} ", *srcdata, len);
+        K2LOG_D(log::skvsvr,"Append data: offset=>{} size=>{} ", _tail_offset, len);
         size_t remaining_space = _chunk_max_size - _tail_offset%_chunk_max_size;
         size_t write_size = remaining_space <= len? remaining_space : len;
         char * pemaddr = _chunk_list[_active_chunk_id]._pmemaddr + _tail_offset%_chunk_max_size;
@@ -50,8 +50,8 @@ namespace k2 {
         if (len > remaining_space){
             size_t need_new_chunk= ceil((len-remaining_space)/_chunk_max_size);
             for( size_t i = 0; i < need_new_chunk; i++){
-                String chunkFileName = genNewChunkFileName();
-                char * chunkFileAddr = createNewChunkFile(chunkFileName);
+                String chunkFileName = gen_new_chunk_filename();
+                char * chunkFileAddr = create_new_chunk(chunkFileName);
                 struct ChunkInfo tmp_chunk = {._chunk_path=std::move(chunkFileName),._pmemaddr=chunkFileAddr};
                 _chunk_list.push_back(std::move(tmp_chunk));
                 if( i == need_new_chunk-1){

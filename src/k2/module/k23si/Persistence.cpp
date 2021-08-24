@@ -29,7 +29,7 @@ Persistence::Persistence() {
     int id = seastar::this_shard_id();
     String endpoint = _config.persistenceEndpoint()[id % _config.persistenceEndpoint().size()];
     _remoteEndpoint = RPC().getTXEndpoint(endpoint);
-    // _localplog = std::make_unique<LocalPlog>(100,"/mnt/pmem0/plog_data");
+    _localPlog = std::make_unique<LocalPlog>(_config.localPlogPath(), seastar::this_shard_id());
     _flushTimer.setCallback(
         [this] {
             if (Clock::now() - _lastFlush > _config.persistenceAutoflushDeadline()) {
