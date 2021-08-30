@@ -109,6 +109,8 @@ public:  // application lifespan
     seastar::future<> start() {
         _stopped = false;
 
+        _weights = _aggregate_weights(_txn_weights());
+
         setupSchemaPointers();
 
         registerMetrics();
@@ -149,6 +151,20 @@ public:  // application lifespan
     }
 
 private:
+    // aggregate the weights so that we use them as bucket boundaries
+    std::vector<uint32_t> _aggregate_weights(const std::vector<int>& txn_weights) {
+        K2ASSERT(log::tpcc, txn_weights.size() == 5, "The number of transaction types should be 5, but the actual is {}", txn_weights.size());
+
+        std::vector<uint32_t> weights;
+        uint32_t sum = 0;
+        for(int weight : txn_weights) {
+            sum += weight;
+            weights.push_back(sum);
+        }
+        K2ASSERT(log::tpcc, sum == 100, "The sum of transaction weights should be 100, but the actual value is {}", sum);
+        return weights;
+    }
+
     seastar::future<> _schema_load() {
         std::vector<seastar::future<>> schema_futures;
 
@@ -163,6 +179,11 @@ private:
         }));
 
         schema_futures.push_back(_client.createSchema(tpccCollectionName, Customer::customer_schema)
+        .then([] (auto&& result) {
+            K2ASSERT(log::tpcc, result.status.is2xxOK(), "Failed to create schema");
+        }));
+
+        schema_futures.push_back(_client.createSchema(tpccCollectionName, IdxCustomerName::idx_customer_name_schema)
         .then([] (auto&& result) {
             K2ASSERT(log::tpcc, result.status.is2xxOK(), "Failed to create schema");
         }));
@@ -244,17 +265,20 @@ private:
             [this] {
                 uint32_t txn_type = _random.UniformRandom(1, 100);
                 uint32_t w_id = (seastar::this_shard_id() % _max_warehouses()) + 1;
+                uint32_t d_id = (seastar::this_shard_id() % _districts_per_warehouse()) + 1;
                 TPCCTxn* curTxn;
-                if (txn_type <= 43) {
+                if (txn_type <= _weights[0]) {
                     curTxn = (TPCCTxn*) new PaymentT(_random, _client, w_id, _max_warehouses());
-                } else if (txn_type <= 47) {
+                } else if (txn_type <= _weights[1]) {
                     curTxn = (TPCCTxn*) new OrderStatusT(_random, _client, w_id);
-                } else if (txn_type <= 51) {
+                } else if (txn_type <= _weights[2]) {
                     // range from 1-10 is allowed, otherwise set to 10
                     uint16_t batch_size = (_delivery_txn_batch_size() <= 10 && _delivery_txn_batch_size() > 0) ? batch_size : 10;
                     curTxn = (TPCCTxn*) new DeliveryT(_random, _client, w_id, batch_size);
-                } else {
+                } else if (txn_type <= _weights[3]) {
                     curTxn = (TPCCTxn*) new NewOrderT(_random, _client, w_id, _max_warehouses());
+                } else {
+                    curTxn = (TPCCTxn*) new StockLevelT(_random, _client, w_id, d_id);
                 }
 
                 auto txn_start = k2::Clock::now();
@@ -268,19 +292,23 @@ private:
                     auto end = k2::Clock::now();
                     auto dur = end - txn_start;
 
-                    if (txn_type <= 43) {
+                    if (txn_type <= _weights[0]) {
                         _paymentTxns++;
                         _paymentLatency.add(dur);
-                    } else if (txn_type <= 47) {
+                    } else if (txn_type <= _weights[1]) {
                         _orderStatusTxns++;
                         _orderStatusLatency.add(dur);
-                    } else if (txn_type <= 51) {
+                    } else if (txn_type <= _weights[2]) {
                         _deliveryTxns++;
                         _deliveryLatency.add(dur);
-                    } else {
+                    } else if (txn_type <= _weights[3]) {
                         _newOrderTxns++;
                         _newOrderLatency.add(dur);
+                    } else {
+                        _stockLevelTxns++;
+                        _stockLevelLatency.add(dur);
                     }
+
                 })
                 .finally([curTxn] () {
                     delete curTxn;
@@ -342,19 +370,24 @@ private:
     ConfigVar<int> _max_warehouses{"num_warehouses"};
     ConfigVar<int> _num_concurrent_txns{"num_concurrent_txns"};
     ConfigVar<uint16_t> _delivery_txn_batch_size{"delivery_txn_batch_size"};
+    ConfigVar<uint16_t> _districts_per_warehouse{"districts_per_warehouse"};
+    ConfigVar<std::vector<int>> _txn_weights{"txn_weights"};
 
     sm::metric_groups _metric_groups;
     k2::ExponentialHistogram _newOrderLatency;
     k2::ExponentialHistogram _paymentLatency;
     k2::ExponentialHistogram _orderStatusLatency;
     k2::ExponentialHistogram _deliveryLatency;
+    k2::ExponentialHistogram _stockLevelLatency;
     uint64_t _completedTxns{0};
     uint64_t _newOrderTxns{0};
     uint64_t _paymentTxns{0};
     uint64_t _orderStatusTxns{0};
     uint64_t _deliveryTxns{0};
+    uint64_t _stockLevelTxns{0};
     uint64_t _readOps{0};
     uint64_t _writeOps{0};
+    std::vector<uint32_t> _weights;
 }; // class Client
 
 int main(int argc, char** argv) {;
@@ -375,7 +408,8 @@ int main(int argc, char** argv) {;
         ("do_verification", bpo::value<bool>()->default_value(true), "Run verification tests after run")
         ("cpo_request_timeout", bpo::value<ParseableDuration>(), "CPO request timeout")
         ("cpo_request_backoff", bpo::value<ParseableDuration>(), "CPO request backoff")
-        ("delivery_txn_batch_size", bpo::value<uint16_t>()->default_value(10), "The batch number of Delivery transaction");
+        ("delivery_txn_batch_size", bpo::value<uint16_t>()->default_value(10), "The batch number of Delivery transaction")
+        ("txn_weights", bpo::value<std::vector<int>>()->multitoken()->default_value(std::vector<int>({43,4,4,45,4})), "A comma-separated list of exactly 5 elements denoting the percentage for each txn type: Payment, OrderStatus, Delivery, NewOrder, and StockLevel");
 
     app.addApplet<k2::TSO_ClientLib>();
     app.addApplet<Client>();
