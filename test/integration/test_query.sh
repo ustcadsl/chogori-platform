@@ -15,7 +15,7 @@ TSO=tcp+k2rpc://0.0.0.0:13000
 cpo_child_pid=$!
 
 # start nodepool on 2 cores
-./build/src/k2/cmd/nodepool/nodepool -c2 --tcp_endpoints ${EPS} --enable_tx_checksum true --k23si_persistence_endpoint ${PERSISTENCE} --reactor-backend epoll --prometheus_port 63001 --k23si_cpo_endpoint ${CPO} --tso_endpoint ${TSO} --k23si_query_pagination_limit 2 &
+./build/src/k2/cmd/nodepool/nodepool --log_level INFO k2::skv_server=DEBUG k2::indexer=DEBUG -c2 --tcp_endpoints ${EPS} --enable_tx_checksum true --k23si_persistence_endpoint ${PERSISTENCE} --reactor-backend epoll --prometheus_port 63001 --k23si_cpo_endpoint ${CPO} --tso_endpoint ${TSO} --k23si_query_pagination_limit 2 &
 nodepool_child_pid=$!
 
 # start persistence on 1 cores

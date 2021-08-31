@@ -321,7 +321,7 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline t
 template<typename ValueType, template <typename> typename KeyExtractor> inline typename HOTSingleThreaded<ValueType, KeyExtractor>::const_iterator HOTSingleThreaded<ValueType, KeyExtractor>::findForNonEmptyTrie(typename HOTSingleThreaded<ValueType, KeyExtractor>::KeyType const & searchKey) const {
 	HOTSingleThreadedChildPointer const * current = &mRoot;
 
-	auto const & fixedSizedSearchKey = idx::contenthelpers::toFixSizedKey(idx::contenthelpers::toBigEndianByteOrder(extractKey(searchKey)));
+	auto const & fixedSizedSearchKey = idx::contenthelpers::toFixSizedKey(idx::contenthelpers::toBigEndianByteOrder(searchKey));
 	uint8_t const* searchKeyBytes = idx::contenthelpers::interpretAsByteArray(fixedSizedSearchKey);
 
 	HOTSingleThreaded<ValueType, KeyExtractor>::const_iterator it(current, current + 1);
