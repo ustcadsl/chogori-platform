@@ -122,6 +122,11 @@ template<typename ValueType, template <typename> typename KeyExtractor> struct H
 	inline const_iterator begin() const;
 
 	/**
+	* @return an iterator to the last value according to the key order.
+	*/
+	inline const_iterator last() const;
+
+	/**
 	 * @return an iterator which is positioned after the last element.
 	 */
 	inline const_iterator end() const;
@@ -192,6 +197,12 @@ public:
 	 * @return the collected statistical values
 	 */
 	std::pair<size_t, std::map<std::string, double>> getStatistics() const;
+	/**
+	* return overall number of values stored
+	* 
+	* @return the number of values stored in trie
+	*/
+	size_t size() const;
 private:
 	inline void collectStatsForSubtree(HOTSingleThreadedChildPointer const & subTreeRoot, std::map<std::string, double> & stats) const;
 

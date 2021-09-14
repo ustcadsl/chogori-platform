@@ -29,27 +29,14 @@ using namespace std;
 
 namespace k2
 {
-    inline String convertNull(String& str) {
-        for(size_t i=0; i<str.size(); ++i) {
-            if(str[i]==0) {
-                str[i] = '0';
-            }
-        }
-        return str;
-    }
     template<typename ValueType>
     struct KeyValueNodeKeyExtractor {
         inline size_t getKeyLength(ValueType const &value) const {
             dto::Key tempkey=value->get_key();
             return tempkey.schemaName.size() + tempkey.rangeKey.size()+tempkey.partitionKey.size();
         }
-        inline const char* operator()(ValueType const &value) const {
-            dto::Key tempkey=value->get_key();
-            String s=tempkey.schemaName+tempkey.partitionKey+tempkey.rangeKey;
-            s = convertNull(s);
-            char *s_ptr = (char *)malloc(s.length());
-            strcpy(s_ptr,s.c_str());
-            return s_ptr;
+        inline dto::Key operator()(ValueType const &value) const {
+            return value->get_key();
         }
     };
     typedef hot::singlethreaded::HOTSingleThreaded<k2::KeyValueNode*, KeyValueNodeKeyExtractor> HotIndexer;
@@ -79,20 +66,14 @@ namespace k2
     {
         KeyValueNode* newkvnode = new KeyValueNode(key);
         bool ret = idx.insert(newkvnode);
-        // auto it = lower_bound(key);
-        // K2ASSERT(log::indexer, it!=idx.end() && *it==newkvnode, "Lower bound key={} Test failed for key {}'s lowerBound", 
-        //             it!=idx.end() ? (*it)->get_key():dto::Key(), key);
         if (ret) {
-            String s=key.schemaName+key.partitionKey+key.rangeKey;
-            K2LOG_D(log::indexer, "Insert key {} String {} Ptr {}", key, convertNull(s).c_str(), (void*)newkvnode);
             return newkvnode;
         }
         return nullptr;
     }
     inline KeyValueNode* HOTindexer::find(dto::Key& key)
     {
-        String s=key.schemaName+key.partitionKey+key.rangeKey;
-        auto kit=idx.lookup(convertNull(s).c_str());
+        auto kit=idx.lookup(key);
         if (!kit.mIsValid) {
             return nullptr;
         }
@@ -112,13 +93,12 @@ namespace k2
     }
     inline Iterator HOTindexer::setiter(const dto::Key &key)
     {
-        String s=key.schemaName+key.partitionKey+key.rangeKey;
-        return idx.find(convertNull(s).c_str());
+        // Return wrong result when there is only one leaf node
+        return idx.find(key);
     }
     inline Iterator HOTindexer::lower_bound(const dto::Key& key)
     {
-        String s=key.schemaName+key.partitionKey+key.rangeKey;
-        return idx.lower_bound(convertNull(s).c_str());
+        return idx.lower_bound(key);
     }
     inline Iterator HOTindexer::last()
     {
@@ -147,18 +127,17 @@ namespace k2
     // }
     inline void HOTindexer::erase(dto::Key key)
     {
-        String s=key.schemaName+key.partitionKey+key.rangeKey;
-        auto kit=idx.lookup(convertNull(s).c_str());
+        auto kit=idx.lookup(key);
         if (!kit.mIsValid) {
             return;
         }
         KeyValueNode* tempkvn=kit.mValue;
-        delete tempkvn;
-        idx.remove(convertNull(s).c_str());
+        idx.remove(key);
+        delete tempkvn;       
     }
 
     inline size_t HOTindexer::size()
     {
-        return idx.getStatistics().second["numberValues"];
+        return idx.size();
     }
 }

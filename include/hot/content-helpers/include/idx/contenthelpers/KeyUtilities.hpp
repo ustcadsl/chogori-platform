@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <k2/dto/Collection.h>
 
 namespace idx { namespace contenthelpers {
 
@@ -79,20 +80,57 @@ template<> inline auto toFixSizedKey(char const * const & key) {
 	return fixedSizeKey;
 }
 
+///**
+// * Gets a pointer to the key bytes of the given key.
+// * Be aware that this pointer is only valid as long as keyType is valid!!
+// *
+// * @tparam KeyType the type of the key
+// * @param key the key to get the byte wise representation for
+// * @return the byte wise representation of the key
+// */
+//template<typename KeyType> __attribute__((always_inline)) inline uint8_t const * interpretAsByteArray(KeyType const & key) {
+//	return reinterpret_cast<uint8_t const *>(&key);
+//}
+//
+//template<> inline uint8_t const* interpretAsByteArray<const char*>(const char* const& cStringKey) {
+//	return reinterpret_cast<uint8_t const*>(cStringKey);
+//}
+
 /**
- * Gets a pointer to the key bytes of the given key.
+ * Gets a unique_ptr to the key bytes of the given key.
  * Be aware that this pointer is only valid as long as keyType is valid!!
  *
  * @tparam KeyType the type of the key
  * @param key the key to get the byte wise representation for
  * @return the byte wise representation of the key
  */
-template<typename KeyType> __attribute__((always_inline)) inline uint8_t const * interpretAsByteArray(KeyType const & key) {
-	return reinterpret_cast<uint8_t const *>(&key);
+
+template<typename KeyType> __attribute__((always_inline)) inline std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> interpretAsByteArray(KeyType const& key) {
+	auto bufferSize = sizeof(key);
+	std::unique_ptr<uint8_t[]> byteArray = std::make_unique<uint8_t[]>(bufferSize);
+	memcpy(byteArray.get(), &key, bufferSize);
+	return std::make_pair((uint16_t)bufferSize, std::move(byteArray));
 }
 
-template<> inline uint8_t const* interpretAsByteArray<const char*>(const char * const & cStringKey) {
-	return reinterpret_cast<uint8_t const *>(cStringKey);
+template<> inline std::pair<uint16_t, std::unique_ptr<uint8_t const []>> interpretAsByteArray<k2::dto::Key>(k2::dto::Key const& Key) {
+	//For testKey we return length of char array in first byte which means max number of characters in key is 254
+	// and byte array start from second position
+	size_t bufferSize = Key.schemaName.size() + Key.partitionKey.size() + Key.rangeKey.size() + 1; //Allocate actual size+1 for byte array to make sure the accuracy of keybyte comparing 
+	std::unique_ptr<uint8_t[]> byteArray = std::make_unique<uint8_t[]>(bufferSize);
+	int index = 0;
+	for (const char& c: Key.schemaName) {
+		byteArray[index] = const_cast<uint8_t&>(reinterpret_cast<uint8_t const&>(c));
+		++index;
+	}
+	for (const char& c: Key.partitionKey) {
+		byteArray[index] = const_cast<uint8_t&>(reinterpret_cast<uint8_t const&>(c));
+		++index;
+	}
+	for (const char& c: Key.rangeKey) {
+		byteArray[index] = const_cast<uint8_t&>(reinterpret_cast<uint8_t const&>(c));
+		++index;
+	}
+	return std::make_pair((uint16_t)bufferSize, std::move(byteArray));
 }
 
 }}

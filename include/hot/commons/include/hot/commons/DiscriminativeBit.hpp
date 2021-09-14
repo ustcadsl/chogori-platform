@@ -55,7 +55,7 @@ inline uint16_t DiscriminativeBit::getByteRelativeSignificantBitIndex(uint8_t co
 }
 
 template<typename Operation> inline bool executeForDiffingKeys(uint8_t const* existingKey, uint8_t const* newKey, uint16_t keyLengthInBytes, Operation const & operation) {
-	for(size_t index = 0; index < keyLengthInBytes; ++index) {
+		for(size_t index = 0; index < keyLengthInBytes; ++index) {
 		uint8_t newByte = newKey[index];
 		uint8_t existingByte = existingKey[index];
 		if(existingByte != newByte) {

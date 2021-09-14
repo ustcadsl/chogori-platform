@@ -180,7 +180,6 @@ namespace k2 {
             }
 			         
             valuedata[0].valuepointer = datarecord;
-            K2LOG_D(log::indexer, "insert_datarecord status={}", datarecord->status);
             valuedata[0].timestamp = datarecord->timestamp.tEndTSECount();
             size_inc();
             set_tombstone(0, datarecord->isTombstone);
@@ -310,7 +309,6 @@ namespace k2 {
         }
 
         dto::DataRecord *_getpointer(int order) {
-            K2LOG_D(log::indexer, "Key: {} {} {}", key.schemaName, key.partitionKey, key.rangeKey);
             return valuedata[order].valuepointer;
         }
 

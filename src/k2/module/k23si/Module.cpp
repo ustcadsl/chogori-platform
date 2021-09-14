@@ -384,10 +384,6 @@ void K23SIPartitionModule::_scanAdvance(IndexerIterator& it, bool reverseDirecti
 // desired schema and (eventually) reverse direction scan
 IndexerIterator K23SIPartitionModule::_initializeScan(const dto::Key& start, bool reverse, bool exclusiveKey) {
     auto key_it = _indexer.lower_bound(start);
-    // auto key_it = _indexer.setiter(start);
-    // if(key_it == _indexer.end()) {
-    //     key_it = _indexer.lower_bound(start);
-    // }
     // For reverse direction scan, key_it may not be in range because of how lower_bound works, so fix that here.
     // IF start key is empty, it means this reverse scan start from end of table OR
     //      if lower_bound returns a _indexer.end(), it also means reverse scan should start from end of table;
