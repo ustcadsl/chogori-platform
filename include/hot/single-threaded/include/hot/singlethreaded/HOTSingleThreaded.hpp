@@ -320,7 +320,7 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline t
 
 template<typename ValueType, template <typename> typename KeyExtractor> inline typename HOTSingleThreaded<ValueType, KeyExtractor>::const_iterator HOTSingleThreaded<ValueType, KeyExtractor>::find(typename HOTSingleThreaded<ValueType, KeyExtractor>::KeyType const & searchKey) const {
 	// When first insert, RootNode is a leaf so find function return END_ITERATOR, which is wrong
-	return isRootANode() ? findForNonEmptyTrie(searchKey) : END_ITERATOR;
+	return isRootANode() ? findForNonEmptyTrie(searchKey) : (mRoot.isNull()?END_ITERATOR: findForNonEmptyTrie(searchKey));
 }
 
 template<typename ValueType, template <typename> typename KeyExtractor> inline typename HOTSingleThreaded<ValueType, KeyExtractor>::const_iterator HOTSingleThreaded<ValueType, KeyExtractor>::findForNonEmptyTrie(typename HOTSingleThreaded<ValueType, KeyExtractor>::KeyType const & searchKey) const {
@@ -338,7 +338,6 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline t
 	}
 
 	ValueType const & leafValue = idx::contenthelpers::tidToValue<ValueType>(current->getTid());
-
 	return idx::contenthelpers::contentEquals(extractKey(leafValue), searchKey) ? it : END_ITERATOR;
 }
 

@@ -74,8 +74,10 @@ struct VersionSet {
 */
 
 // the type holding versions for all keys, i.e. the indexer
-typedef HOTindexer IndexerT;
-typedef Iterator IndexerIterator;
+// typedef HOTindexer IndexerT;
+// typedef HotIterator IndexerIterator;
+typedef mapindexer IndexerT;
+typedef MapIterator IndexerIterator;
 
 class K23SIPartitionModule {
 public: // lifecycle

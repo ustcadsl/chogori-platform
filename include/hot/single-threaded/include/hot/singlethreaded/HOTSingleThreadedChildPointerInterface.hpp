@@ -116,6 +116,11 @@ public:
 	inline bool isLeaf() const;
 
 	/**
+	  * @return whether this pointer is null.
+	 */
+	inline bool isNull() const;
+
+	/**
 	 * @return whether this child pointer points to an actual node instance. It is therefore guaranteed that it is no nullptr.
 	 */
 	inline bool isAValidNode() const;

@@ -142,6 +142,10 @@ inline bool HOTSingleThreadedChildPointer::isLeaf() const {
 	return mPointer & 1;
 }
 
+inline bool HOTSingleThreadedChildPointer::isNull() const {
+	return !mPointer;
+}
+
 inline bool HOTSingleThreadedChildPointer::isNode() const {
 	return !isLeaf();
 }

@@ -23,86 +23,63 @@ Copyright(c) 2020 Futurewei Cloud
 
 namespace k2
 {
-    typedef std::map<dto::Key, k2::KeyValueNode> MapIndexer;
+    typedef std::map<dto::Key, k2::KeyValueNode*> MapIndexer;
+    typedef std::map<dto::Key, k2::KeyValueNode*>::iterator MapIterator;
 
     class mapindexer{
     private:
         MapIndexer idx;
-        MapIndexer::iterator scanit;
+        MapIterator scanit;
     public:
-        MapIndexer::iterator insert(dto::Key key);
-        MapIndexer::iterator find(dto::Key &key);
-        MapIndexer::iterator begin();
-        MapIndexer::iterator end();
-        MapIndexer::iterator getiter();
-        MapIndexer::iterator setiter(dto::Key &key);
-        MapIndexer::iterator beginiter();
-        MapIndexer::iterator inciter();
-        MapIndexer::reverse_iterator rbegin();
-        MapIndexer::iterator lower_bound(const dto::Key &start);
+        KeyValueNode* insert(dto::Key key);
+        MapIterator find(dto::Key &key);
+        MapIterator begin();
+        MapIterator end();
+        MapIterator getiter();
+        MapIterator setiter(dto::Key &key);
+        MapIterator lower_bound(const dto::Key &start);
+        MapIterator last();
 
         void erase(dto::Key key);
         size_t size();
+        KeyValueNode* extractFromIter(MapIterator const&iterator);
     };
 
-    inline MapIndexer::iterator mapindexer::insert(dto::Key key)
+    inline KeyValueNode* mapindexer::insert(dto::Key key)
     {
         // TODO handle insert fail
-        KeyValueNode newkvnode(key);
-        auto ret = idx.insert(std::pair<dto::Key , k2::KeyValueNode>(key, newkvnode));
-        //return &(ret.first->second);
-        return ret.first;
+        KeyValueNode* newkvnode = new KeyValueNode(key);
+        auto ret = idx.insert(std::pair<dto::Key , k2::KeyValueNode*>(key, newkvnode));
+        return ret.first->second;
     }
-    inline MapIndexer::iterator mapindexer::find(dto::Key& key)
+    inline MapIterator mapindexer::find(dto::Key& key)
     {
-        /*auto kit = idx.find(key);
-        if (kit == idx.end()) return nullptr;
-        return &(kit->second);*/
         return idx.find(key);
     }
-    inline MapIndexer::iterator mapindexer::begin()
+    inline MapIterator mapindexer::begin()
     {
-        /*auto kit = idx.begin();
-        return &(kit->second);*/
         return idx.begin();
     }
-    inline MapIndexer::iterator mapindexer::end()
+    inline MapIterator mapindexer::end()
     {
-        /*return nullptr;*/
         return idx.end();
     }
-    inline MapIndexer::iterator mapindexer::getiter()
+    inline MapIterator mapindexer::getiter()
     {
-        /*if (scanit == idx.end()) return nullptr;
-        return &(scanit->second);*/
         return scanit;
     }
-    inline MapIndexer::iterator mapindexer::setiter(dto::Key &key)
+    inline MapIterator mapindexer::setiter(dto::Key &key)
     {
-        /*scanit = idx.find(key);
-        if (scanit == idx.end()) return nullptr;
-        return &(scanit->second)*/;
         return idx.find(key);
     }
-    inline MapIndexer::iterator mapindexer::beginiter()
+    inline MapIterator mapindexer::last()
     {
-        /*scanit = idx.begin();
-        if(scanit == idx.end()) return nullptr;
-        return &(scanit->second);*/
-        return idx.begin();
+        //TODO check 
+        auto rit = idx.rbegin();
+        ++rit;
+        return rit.base();
     }
-    inline MapIndexer::iterator mapindexer::inciter()
-    {
-        scanit++;
-        /*if (scanit == idx.end()) return nullptr;
-        return &(scanit->second);*/
-        return scanit;
-    }
-    inline MapIndexer::reverse_iterator mapindexer::rbegin()
-    {
-        return idx.rbegin();
-    }
-    inline MapIndexer::iterator mapindexer::lower_bound(const dto::Key &start)
+    inline MapIterator mapindexer::lower_bound(const dto::Key &start)
     {
         return idx.lower_bound(start);
     }
@@ -117,6 +94,11 @@ namespace k2
     inline size_t mapindexer::size()
     {
         return idx.size();
+    }
+
+    inline KeyValueNode* mapindexer::extractFromIter(MapIterator const& iterator)
+    {
+        return iterator->second;
     }
 /*
 template <typename ValueType>

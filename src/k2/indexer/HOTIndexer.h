@@ -40,26 +40,25 @@ namespace k2
         }
     };
     typedef hot::singlethreaded::HOTSingleThreaded<k2::KeyValueNode*, KeyValueNodeKeyExtractor> HotIndexer;
-    typedef hot::singlethreaded::HOTSingleThreadedIterator<k2::KeyValueNode*> Iterator;
+    typedef hot::singlethreaded::HOTSingleThreadedIterator<k2::KeyValueNode*> HotIterator;
     
     class HOTindexer{
     private:
         HotIndexer idx;
-        Iterator scanit;
+        HotIterator scanit;
     public:
         KeyValueNode* insert(dto::Key key);
-        KeyValueNode* find(dto::Key &key);
-        Iterator begin();
-        Iterator end();
-        Iterator getiter();
-        Iterator setiter(const dto::Key &key);
-        Iterator lower_bound(const dto::Key& key);
-        Iterator last();
-        // Iterator beginiter();
-        // Iterator inciter();
+        HotIterator find(dto::Key &key);
+        HotIterator begin();
+        HotIterator end();
+        HotIterator getiter();
+        HotIterator setiter(const dto::Key &key);
+        HotIterator lower_bound(const dto::Key& key);
+        HotIterator last();
 
         void erase(dto::Key key);
         size_t size();
+        KeyValueNode* extractFromIter(HotIterator const& iterator);
     };
 
     inline KeyValueNode* HOTindexer::insert(dto::Key key)
@@ -71,60 +70,35 @@ namespace k2
         }
         return nullptr;
     }
-    inline KeyValueNode* HOTindexer::find(dto::Key& key)
+    inline HotIterator HOTindexer::find(dto::Key& key)
     {
-        auto kit=idx.lookup(key);
-        if (!kit.mIsValid) {
-            return nullptr;
-        }
-        return kit.mValue;
+        return idx.find(key);
     }
-    inline Iterator HOTindexer::begin()
+    inline HotIterator HOTindexer::begin()
     {
         return idx.begin();
     }
-    inline Iterator HOTindexer::end()
+    inline HotIterator HOTindexer::end()
     {
         return idx.end();
     }
-    inline Iterator HOTindexer::getiter()
+    inline HotIterator HOTindexer::getiter()
     {
         return scanit;
     }
-    inline Iterator HOTindexer::setiter(const dto::Key &key)
+    inline HotIterator HOTindexer::setiter(const dto::Key &key)
     {
         // Return wrong result when there is only one leaf node
         return idx.find(key);
     }
-    inline Iterator HOTindexer::lower_bound(const dto::Key& key)
+    inline HotIterator HOTindexer::lower_bound(const dto::Key& key)
     {
         return idx.lower_bound(key);
     }
-    inline Iterator HOTindexer::last()
+    inline HotIterator HOTindexer::last()
     {
-        Iterator tmp=idx.begin();
-        while(tmp != idx.end()) {
-            Iterator it(tmp);
-            ++tmp;
-            if(tmp == idx.end()) {
-                K2LOG_D(log::indexer, "Last Key {}", it!=idx.end() ? (*it)->get_key() : dto::Key());
-                return it;
-            }
-        }
-        return idx.end();
+        return idx.last();
     }
-    // inline KeyValueNode* HOTindexer::beginiter()
-    // {
-    //     scanit==idx.begin();
-    //     if(scanit==idx.end()) return nullptr;
-    //     return *scanit;
-    // }
-    // inline KeyValueNode* HOTindexer::inciter()
-    // {
-    //     ++scanit;
-    //     if(scanit==idx.end()) return nullptr;
-    //     return *scanit;
-    // }
     inline void HOTindexer::erase(dto::Key key)
     {
         auto kit=idx.lookup(key);
@@ -139,5 +113,10 @@ namespace k2
     inline size_t HOTindexer::size()
     {
         return idx.size();
+    }
+
+    inline KeyValueNode* HOTindexer::extractFromIter(HotIterator const& iterator)
+    {
+        return *iterator;
     }
 }
