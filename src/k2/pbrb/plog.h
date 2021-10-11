@@ -53,5 +53,3 @@ T readFromPlog(const PLogAddr pAddr, size_t size)
     memcpy(dPtr, sPtr, size);
     return result;
 }
-
-}

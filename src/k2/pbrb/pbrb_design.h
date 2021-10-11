@@ -1,3 +1,5 @@
+#pragma once
+
 #include <iostream>
 #include <cstdlib>
 #include <cstring>
@@ -14,8 +16,11 @@
 
 #include "plog.h"
 #include "schema.h"
-#include <k2/dto/Timestamp.h>
 #include <k2/common/Log.h>
+#include <k2/dto/Timestamp.h>
+#include <k2/dto/SKVRecord.h>
+#include <k2/dto/ControlPlaneOracle.h>
+#include <k2/indexer/IndexerInterface.h>
 
 namespace k2::log {
 inline thread_local k2::logging::Logger pbrb("k2::pbrb");
@@ -24,12 +29,23 @@ inline thread_local k2::logging::Logger pbrb("k2::pbrb");
 namespace k2
 {
 
-const int pageSize = 64*1024; //64KB
-const long long mask = 0x000000000000FFFF; //0x00000000000003FF;
-
 using SchemaId = uint32_t;
 using SchemaVer = uint16_t;
 using RowOffset = uint32_t;
+using RowAddr = void *;
+using CRC32 = uint32_t;
+
+const int pageSize = 64*1024; //64KB
+const long long mask = 0x000000000000FFFF; //0x00000000000003FF;
+namespace pbrb {
+    const uint32_t errMask = 1 << 31;
+
+    const uint32_t rowCRC32Offset = 0;
+    const uint32_t rowTSOffset = sizeof(CRC32);
+    const uint32_t rowPlogAddrOffset = sizeof(CRC32) + sizeof(dto::Timestamp);
+
+    bool isValid(uint32_t testVal);
+}
 
 // Field Types
 
@@ -41,6 +57,7 @@ using RowOffset = uint32_t;
 struct SimpleSchema {
     String name;
     uint32_t version = 0;
+    uint32_t schemaId = pbrb::errMask;
     std::vector<k2::dto::SchemaField> fields;
     String getKey(int id){
         char buf[256];
@@ -55,13 +72,14 @@ struct SchemaUMap {
     uint32_t addSchema(SimpleSchema schemaPtr) {
         uint32_t retVal = currIdx;
         umap.insert({currIdx++, schemaPtr});
+        schemaPtr.schemaId = retVal;
         return retVal;
     }
 };
 
 static uint32_t FTSize[256] = {
     0,      // NULL_T = 0,
-    116,    // STRING, // NULL characters in string is OK
+    32,    // STRING, // NULL characters in string is OK
     sizeof(int16_t),  // INT16T,
     sizeof(int32_t),  // INT32T,
     sizeof(int64_t),  // INT64T,
@@ -128,6 +146,7 @@ struct SchemaMetaData
     // Construct from a Schema
     void setInfo(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize, uint32_t rowHeaderSize) {
         // read from Schema
+        K2LOG_I(log::pbrb, "set smd info: rowHeaderSize: {}", rowHeaderSize);
         if (schemaUMap.umap.find(schemaId) == schemaUMap.umap.end())
             return;
 
@@ -151,6 +170,8 @@ struct SchemaMetaData
 
             // Go to next field.
             currRowOffset += fieldObj.fieldSize;
+
+            K2LOG_I(log::pbrb, "Current type: {}, offset: {}, currRowOffset: {}, rowHeaderSize :{}, nullableBitmapSize: {}", schema->fields[i].type, fieldObj.fieldOffset, currRowOffset, rowHeaderSize, nullableBitmapSize);
         }
         
         // set rowSize
@@ -158,7 +179,8 @@ struct SchemaMetaData
         setOccuBitmapSize(pageSize);
         maxRowCnt = (pageSize - pageHeaderSize - occuBitmapSize) / rowSize;
 
-        std::cout << "\nGot Schema: " << schemaId << std::endl 
+        K2LOG_I(log::pbrb, "Add new schema:{}", schema->name);
+        std::cout << std::dec << "\nGot Schema: " << schemaId << std::endl 
                   << "name: " << schema->name << std::endl
                   << "occuBitmapSize: " << occuBitmapSize << std::endl
                   << "rowSize: " << rowSize << std::endl
@@ -345,8 +367,24 @@ public:
         memset(pagePtr->content + 26, 0, _pageHeaderSize - 26);
     }
 
-    // 1.2 row get functions.
+    // 1.2 row get & set functions.
 
+    // Row Stuct:
+    // CRC (4) | Timestamp (16) | PlogAddr (8) | ...
+    
+    // CRC:
+    uint32_t getCRCRow();
+    void setCRCRow();
+
+    // Timestamp: (RowAddr + 4)
+    dto::Timestamp getTimestampRow(RowAddr rAddr);
+    void setTimestampRow(RowAddr rAddr, dto::Timestamp &ts);
+    
+    // PlogAddr: (RowAddr + 20)
+    void *getPlogAddrRow(RowAddr rAddr);
+    void setPlogAddrRow(RowAddr rAddr, void *PlogAddr);
+
+    // Debugging Output Function.
     void printFieldsRow(const BufferPage *pagePtr, RowOffset rowOffset) {
         SchemaMetaData smd = _schemaMap[getSchemaIDPage(pagePtr)];
         char buf[4096];
@@ -365,6 +403,16 @@ public:
                           << smd.schema->fields[idx].name << ", "
                           << *(int *)buf << std::endl;
         }
+    }
+
+    void printHeaderRow(const BufferPage *pagePtr, RowOffset rowOffset) {
+        SchemaMetaData smd = _schemaMap[getSchemaIDPage(pagePtr)];
+        size_t rowOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
+                                 smd.rowSize * rowOffset;
+        uint8_t *rowAddr = (uint8_t *)(pagePtr) + rowOffsetInPage;
+        auto ts = getTimestamp(rowAddr);
+        auto pAddr = getPlogAddrRow(rowAddr);
+        K2LOG_I(log::pbrb, "Timestamp: {}, pAddr: {}", ts, pAddr);
     }
 
     // 2. Occupancy Bitmap functions.
@@ -423,7 +471,7 @@ public:
         // Get a page and set schemaMetadata.
         BufferPage *pagePtr = _freePageList.front();
         SchemaMetaData smd(schemaId, _pageSize, _pageHeaderSize, _rowHeaderSize, pagePtr);
-        _schemaMap.insert({schemaId, smd});
+        _schemaMap.insert_or_assign(schemaId, smd);
 
         // Initialize Page.
         //memset(pagePtr, 0, sizeof(BufferPage));
@@ -431,7 +479,7 @@ public:
         initializePage(pagePtr);
         setSchemaIDPage(pagePtr, schemaId);
 
-        K2LOG_I(log::pbrb, "\ncreateCacheForSchema, schemaId: {} pagePtr empty:{}, _freePageList size:{}", schemaId, pagePtr==nullptr,  _freePageList.size());
+        K2LOG_I(log::pbrb, "createCacheForSchema, schemaId: {}, pagePtr empty:{}, _freePageList size:{}, pageSize: {}, smd.rowSize: {}, _schemaMap[0].rowSize: {}", schemaId, pagePtr==nullptr,  _freePageList.size(), sizeof(BufferPage), smd.rowSize, _schemaMap[0].rowSize);
 
         _freePageList.pop_front();
 
@@ -559,6 +607,7 @@ public:
             for (uint32_t i = 0; i < smd.maxRowCnt; i++)
                 if (isBitmapSet(pagePtr, i)) {
                     std::cout << "Row Offset: " << i << std::endl;
+                    printHeaderRow(pagePtr, i);
                     printFieldsRow(pagePtr, i);
                 }
             
@@ -593,7 +642,12 @@ public:
     uint32_t addSchemaUMap(SimpleSchema schemaPtr){
         return schemaUMap.addSchema(schemaPtr);
     }
-
+    
+    // Transport Functions:
+    
+    // PBRB Row -> SKVRecord
+    dto::SKVRecord *generateSKVRecordByRow(RowAddr rAddr, const String &collName, std::shared_ptr<dto::Schema> schema);
+    dto::DataRecord *generateDataRecord(dto::SKVRecord *skvRecord, KeyValueNode &node, int order, void *hotAddr);
 };
 
 }

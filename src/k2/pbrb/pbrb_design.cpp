@@ -5,6 +5,11 @@
 namespace k2
 {
 
+namespace pbrb {
+    bool isValid(uint32_t testVal) {
+        return !(testVal & errMask);
+    }
+}
 // Copy the header of row from DataRecord of query to (pagePtr, rowOffset)
 void *PBRB::cacheRowHeaderFrom(BufferPage *pagePtr, RowOffset rowOffset, dto::Timestamp& timestamp, void* PlogAddr) {
     //K2LOG_I(log::pbrb, "function cacheRowFromPlog(BufferPage, RowOffset:{}, PlogAddr", rowOffset);
@@ -30,19 +35,19 @@ void *PBRB::cacheRowHeaderFrom(BufferPage *pagePtr, RowOffset rowOffset, dto::Ti
     K2LOG_I(log::pbrb, "^^^^^^schemaId:{}, RowOffset:{}, occuBitmapSize:{}, rowSize:{}, byteOffsetInPage:{}, rowBasePtr:{}", schemaId, rowOffset, smd.occuBitmapSize, smd.rowSize, byteOffsetInPage, rowBasePtr);
 
     // Copy timestamp
-    uint32_t tsoId = timestamp.tsoId();
-    void *tsPtr = (void *) ((uint8_t *) rowBasePtr + 4);
-    memcpy(tsPtr, &tsoId, sizeof(uint32_t));
+    // uint32_t tsoId = timestamp.tsoId();
+    // void *tsPtr = (void *) ((uint8_t *) rowBasePtr + 4);
+    // memcpy(tsPtr, &tsoId, sizeof(uint32_t));
 
+    setTimestampRow(rowBasePtr, timestamp);
     // Set PlogAddre in row.
-    void *plogAddr = (void *) ((uint8_t *) rowBasePtr + 20);
-    memcpy(plogAddr, PlogAddr, 8);
+    setPlogAddrRow(rowBasePtr, PlogAddr);
 
     return rowBasePtr;
 }
 
 // Copy the field of row from DataRecord of query to (pagePtr, rowOffset)
-void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, void* field, size_t strSize, uint32_t fieldID)
+void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, void* valueAddr, size_t strSize, uint32_t fieldID)
 {
     //K2LOG_I(log::pbrb, "function cacheRowFromPlog(BufferPage, RowOffset:{}, field:{}", rowOffset, field);
     if (pagePtr == nullptr) {
@@ -69,15 +74,17 @@ void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset
     void *destPtr = (void *) ((uint8_t *) rowBasePtr + smd.fieldsInfo[fieldID].fieldOffset);
     
     if(strSize > 0) {
-        // Copy the size of String
-        memcpy(destPtr, &strSize, sizeof(size_t));
-        destPtr = (void *) ((uint8_t *) rowBasePtr + smd.fieldsInfo[fieldID].fieldOffset + sizeof(size_t));
+        // TODO Copy the size of String
+        std::string cstr(((k2::String *) valueAddr)->c_str());
+        K2LOG_I(log::pbrb, "the c_str value is: {}", cstr);
+        memcpy(destPtr, ((k2::String *) valueAddr)->c_str(), strSize);
+        destPtr = (void *) ((uint8_t *) rowBasePtr + smd.fieldsInfo[fieldID].fieldOffset + strSize);
     }
     //size_t copySize = smd.rowSize - smd.fieldsInfo[fieldID].fieldOffset;
     size_t copySize = smd.fieldsInfo[fieldID].fieldSize;
     K2LOG_I(log::pbrb, "fieldID:{}, fieldOffset:{}, destPtr:{}, copySize:{}, strSize:{}", fieldID, smd.fieldsInfo[fieldID].fieldOffset, destPtr, copySize, strSize);
     // + 4 to move to the real address in simple plog
-    memcpy(destPtr, field, copySize);
+    // memcpy(destPtr, valueAddr, copySize);
 
     return rowBasePtr;
 }
@@ -263,7 +270,7 @@ RowOffset PBRB::findEmptySlotInPage(BufferPage *pagePtr)
 std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID)
 {
     BufferPage *pagePtr = _schemaMap[schemaID].headPage;
-    //K2LOG_I(log::pbrb, "^^^^^^^^findCacheRowPosition, schemaID:{}, pagePtr empty:{}", schemaID, pagePtr==nullptr);
+    K2LOG_I(log::pbrb, "^^^^^^^^findCacheRowPosition, schemaID:{}, pagePtr empty:{}", schemaID, pagePtr==nullptr);
     while (pagePtr != nullptr) {
         RowOffset rowOffset = findEmptySlotInPage(pagePtr);
         if (rowOffset & 0x80000000)
@@ -590,6 +597,45 @@ bool PBRB::mergePage(BufferPage *pagePtr1, BufferPage *pagePtr2) {
         setPrevPage(next, prev);
 
     return true;
+}
+
+// 1.2 Row get & set Functions.
+
+// dto::timestamp (_tEndTSECount 8, _tsoId 4, _tStartDelta 4) (Starts in Byte 4)
+dto::Timestamp PBRB::getTimestampRow(RowAddr rAddr) {
+    uint64_t tEndTSECount;
+    uint32_t tsoId, tStartDelta;
+    
+    // memcpy.
+    uint8_t *dstPtr = (uint8_t *)rAddr;
+    memcpy(&tEndTSECount, dstPtr + 4, sizeof(uint64_t));
+    memcpy(&tsoId, dstPtr + 12, sizeof(uint32_t));
+    memcpy(&tStartDelta, dstPtr + 16, sizeof(uint32_t));
+
+    dto::Timestamp ts(tEndTSECount, tsoId, tStartDelta);
+    return ts;
+}
+
+void PBRB::setTimestampRow(RowAddr rAddr, dto::Timestamp &ts) {
+    uint64_t tEndTSECount = ts.tEndTSECount();
+    uint32_t tsoId = ts.tsoId();
+    uint32_t tStartDelta = ts.tEndTSECount() - ts.tStartTSECount();
+    
+    // memcpy.
+    uint8_t *dstPtr = (uint8_t *)rAddr;
+    memcpy(dstPtr + 4, &tEndTSECount, sizeof(uint64_t));
+    memcpy(dstPtr + 12, &tsoId, sizeof(uint32_t));
+    memcpy(dstPtr + 16, &tStartDelta, sizeof(uint32_t));
+}
+
+void *PBRB::getPlogAddrRow(RowAddr rAddr) {
+    void *retVal = *((void **)((uint8_t *)rAddr + 20));
+    return retVal;
+}
+
+void PBRB::setPlogAddrRow(RowAddr rAddr, void *PlogAddr) {
+    uint8_t *dstPtr = (uint8_t *)rAddr;
+    memcpy(dstPtr + 20, &PlogAddr, sizeof(void *));
 }
 
 }

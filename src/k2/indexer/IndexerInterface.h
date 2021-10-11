@@ -161,6 +161,22 @@ namespace k2 {
             return viter;
         }
 
+        dto::DataRecord *get_datarecord(const dto::Timestamp &timestamp, int &order) {
+            for (int i = 0; i < 3; ++i)
+                if (timestamp.tEndTSECount() >= valuedata[i].timestamp) {
+                    // std::cout << key << ", " << valuedata[i].timestamp << ", " << valuedata[i].valuepointer << std::endl;
+                    order = i;
+                    return valuedata[i].valuepointer;
+                }
+            order = -1;
+            dto::DataRecord *viter = valuedata[2].valuepointer;
+            while (viter != nullptr && timestamp.compareCertain(viter->timestamp) < 0) {
+                // skip newer records
+                viter = viter->prevVersion;
+            }
+            return viter;
+        }
+
         int insert_datarecord(dto::DataRecord *datarecord) {
             datarecord->prevVersion = valuedata[0].valuepointer;
             for (int i = 2; i > 0; i--) {

@@ -620,8 +620,8 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
 
 seastar::future<std::tuple<Status, dto::K23SIReadResponse>>
 K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline deadline) {
-    K2LOG_D(log::skvsvr, "Partition: {}, received read {}", _partition, request);
-    //K2LOG_I(log::skvsvr, "------Partition: {}, received read {}", _partition, request);
+    //K2LOG_D(log::skvsvr, "Partition: {}, received read {}", _partition, request);
+    K2LOG_I(log::skvsvr, "------Partition: {}, received read {}", _partition, request);
 
     Status validateStatus = _validateReadRequest(request);
     if (!validateStatus.is2xxOK()) {
@@ -646,61 +646,107 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     // DataRecord* rec = _getDataRecordForRead(versions, request.mtr.timestamp);
     // bool needPush = !rec ? _checkPushForRead(versions, request.mtr.timestamp) : false;
 
-    DataRecord* rec = node.get_datarecord(request.mtr.timestamp);
-
-    /////////////////////////////////////
-    auto schemaIt = _schemas.find(request.key.schemaName);
-    auto schemaVer = schemaIt->second.find(rec->value.schemaVersion);
-    dto::Schema& schema = *(schemaVer->second);
-    K2LOG_I(log::skvsvr, "------request.key: {}, schemaName: {}, schemaVer:{}", request.key, request.key.schemaName, schemaVer->first);
-
-    uint32_t SMapIndex = pbrb->mapCachedSchema(request.key.schemaName, schemaVer->first);
-    /*if(SMapIndex > 0){
-        K2LOG_I(log::skvsvr, "$$$$$$schemaName: {}, schemaVer:{}, SMapIndex:{}", request.key.schemaName, schemaVer->first, SMapIndex);
-    }*/
-    if(SMapIndex == 0){ //add a new schema to PBRB schema metadata
-        SimpleSchema S;
-        S.name = request.key.schemaName;
-        S.version = schemaVer->first;
-        for(uint32_t i = 0; i < schema.fields.size(); i++){
-            S.fields.push_back(schema.fields[i]);
+    int order;
+    K2LOG_I(log::skvsvr, "Ready to read datarecord");
+    DataRecord* rec = node.get_datarecord(request.mtr.timestamp, order);
+    K2LOG_I(log::skvsvr, "Node info ====== Timestamp: {}; Order: {}, SchemaVersion: {}", request.mtr.timestamp, order, rec->value.schemaVersion);
+    DataRecord* result = nullptr;
+    if (rec != nullptr) {
+        
+        if (order == -1) {
+            // case 1: cold version (not in kvnode)
+            // return directly.
+            K2LOG_I(log::skvsvr, "Case 1: Cold Version not in KVNode");
+            result = rec;
         }
-        auto sID = pbrb->addSchemaUMap(S);
-        pbrb->createCacheForSchema(sID);
-        SMapIndex = sID+1;
-    }
+        
+        else if (order >= 0) {
+            // find schema
+            auto schemaIt = _schemas.find(request.key.schemaName);
+            K2EXPECT(log::skvsvr, schemaIt != _schemas.end(), true);
+            auto schemaVer = schemaIt->second.find(rec->value.schemaVersion);
+            K2EXPECT(log::skvsvr, schemaVer != schemaIt->second.end(), true);
+            dto::Schema& schema = *(schemaVer->second);
+            K2LOG_I(log::skvsvr, "------request.key: {}, schemaName: {}, schemaVer:{}", request.key, request.key.schemaName, schemaVer->first);
 
-    //insert the SKV record to the PBRB cache, return the RAM address of the ccahed slot
-    SMapIndex--;
-    std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex);
-    BufferPage *pagePtr = retVal.first;
-    RowOffset rowOffset = retVal.second;
-    auto rowAddr = pbrb->cacheRowHeaderFrom(pagePtr, rowOffset, request.mtr.timestamp, rec);
-    K2LOG_I(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
-    
-    for(uint32_t j=0; j < schema.fields.size(); j++){
-        if (rec->value.excludedFields.size() && rec->value.excludedFields[j]) {
-            // A value of NULL in the record is treated the same as if the field doesn't exist in the record
-            continue;
+            uint32_t SMapIndex = pbrb->mapCachedSchema(request.key.schemaName, schemaVer->first);
+            if(SMapIndex == 0){ //add a new schema to PBRB schema metadata
+                SimpleSchema S;
+                S.name = request.key.schemaName;
+                S.version = schemaVer->first;
+                for(uint32_t i = 0; i < schema.fields.size(); i++){
+                    S.fields.push_back(schema.fields[i]);
+                }
+                auto sID = pbrb->addSchemaUMap(S);
+                pbrb->createCacheForSchema(sID);
+                SMapIndex = sID+1;
+            }
+
+            // insert the SKV record to the PBRB cache, return the RAM address of the cached slot
+            SMapIndex--;
+            K2LOG_I(log::skvsvr, "SMAPIDX: {}", SMapIndex);
+            pbrb->printRowsBySchema(SMapIndex);
+            
+            if (!node.is_inmem(order)) {
+                // case 2: cold version (in kvnode)
+                
+                K2LOG_I(log::skvsvr, "Case 2: Cold Version in KVNode");
+                std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex); 
+                BufferPage *pagePtr = retVal.first;
+                RowOffset rowOffset = retVal.second;
+                auto rowAddr = pbrb->cacheRowHeaderFrom(pagePtr, rowOffset, request.mtr.timestamp, rec);
+                K2LOG_I(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
+                
+                // copy fields
+                for(uint32_t j=0; j < schema.fields.size(); j++){
+                    if (rec->value.excludedFields.size() && rec->value.excludedFields[j]) {
+                        // A value of NULL in the record is treated the same as if the field doesn't exist in the record
+                        continue;
+                    }
+                    bool success = false;
+                _cacheFieldValueToPBRB(schema.fields[j], rec->value.fieldData, success, pagePtr, rowOffset, j);
+                }
+                pbrb->setRowBitMapPage(pagePtr, rowOffset);
+
+                // update indexer.
+                // void *hotAddr = pbrb->getAddrByPageAndOffset(pagePtr, rowOffset);
+                // node.insert_hot_datarecord(rec->timestamp, static_cast<dto::DataRecord *>(hotAddr));
+                // K2LOG_I(log::skvsvr, "Stored hot address: {} in node", hotAddr);
+                // debug output
+                pbrb->printRowsBySchema(SMapIndex);
+
+                rec->value.fieldData.seek(0);
+                
+                result = rec;
+            }
+            else {
+                // case 3: hot version
+                K2LOG_I(log::skvsvr, "Case 3: Hot Version in KVNode");
+                void *hotAddr = static_cast<void *>(rec);
+                dto::SKVRecord *sRec = pbrb->generateSKVRecordByRow(hotAddr, request.collectionName, schemaVer->second);
+                // TODO: ADD tombstone info.
+                result = pbrb->generateDataRecord(sRec, node, order, hotAddr);
+
+                // TODO: Evict expired versions.
+            }
         }
-        bool success = false;
-       _cacheFieldValueToPBRB(schema.fields[j], rec->value.fieldData, success, pagePtr, rowOffset, j);
+        
+        
+        
     }
-    pbrb->setRowBitMapPage(pagePtr, rowOffset);
-    rec->value.fieldData.seek(0);
-    //update the KVNode of indexer to record the RAM address for this cached version
-    //_indexer.insert(request.key, rowAddr, request.mtr.timestamp);
+    // update the KVNode of indexer to record the RAM address for this cached version
+    // _indexer.insert(request.key, rowAddr, request.mtr.timestamp);
     ////////////////////////////////////
 
     // case need push: WI && WI.ts < tx.timestamp
-    bool needPush = rec != nullptr && rec->status == dto::DataRecord::WriteIntent && rec->timestamp.compareCertain(request.mtr.timestamp) < 0;
+    bool needPush = result != nullptr && result->status == dto::DataRecord::WriteIntent && result->timestamp.compareCertain(request.mtr.timestamp) < 0;
 
     if (!needPush) {
-        return _makeReadOK(rec);
+        return _makeReadOK(result);
     }
 
     // record is still pending and isn't from same transaction.
-    return _doPush(request.key,rec->timestamp, request.mtr, deadline)
+    return _doPush(request.key,result->timestamp, request.mtr, deadline)
         .then([this, request=std::move(request), deadline](auto&& retryChallenger) mutable {
             if (!retryChallenger.is2xxOK()) {
                 return RPCResponse(dto::K23SIStatus::AbortConflict("incumbent txn won in read push"), dto::K23SIReadResponse{});
@@ -776,7 +822,7 @@ void K23SIPartitionModule::_cacheFieldValueToPBRB(const dto::SchemaField& field,
             k2::String value{};
             success = payload.read(value);
             size_t strSize = value.size();
-            //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}, strSize:{}", field.type, field.name, value, strSize);
+            // K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}, strSize:{}", field.type, field.name, value, strSize);
             pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, strSize, fieldID);
         } break;
         case FieldType::INT16T: {
