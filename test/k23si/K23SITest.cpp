@@ -192,7 +192,7 @@ private:
         record.serializeNext<String>(key.rangeKey);
         record.serializeNext<String>(data.f1);
         record.serializeNext<String>(data.f2);
-        // K2LOG_I(log::k23si, "cname={}, key={}, phash={}, ts={}", cname, key, key.partitionHash(), mtr.timestamp)
+        K2LOG_I(log::k23si, "cname={}, key={}, phash={}, ts={}", cname, key, key.partitionHash(), mtr.timestamp)
         auto& part = _pgetter.getPartitionForKey(key);
         dto::K23SIWriteRequest request {
             .pvid = part.partition->keyRangeV.pvid,

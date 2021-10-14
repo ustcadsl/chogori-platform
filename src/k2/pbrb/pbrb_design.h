@@ -14,13 +14,15 @@
 #include <tuple>
 #include <vector>
 
-#include "plog.h"
-#include "schema.h"
 #include <k2/common/Log.h>
+#include <k2/dto/FieldTypes.h>
 #include <k2/dto/Timestamp.h>
 #include <k2/dto/SKVRecord.h>
 #include <k2/dto/ControlPlaneOracle.h>
 #include <k2/indexer/IndexerInterface.h>
+
+#include "plog.h"
+#include "schema.h"
 
 namespace k2::log {
 inline thread_local k2::logging::Logger pbrb("k2::pbrb");
@@ -36,7 +38,7 @@ using RowAddr = void *;
 using CRC32 = uint32_t;
 
 const int pageSize = 64*1024; //64KB
-const long long mask = 0x000000000000FFFF; //0x00000000000003FF;
+const long long mask = 0x000000000000FFFF; //0x000000000000FFFF;
 namespace pbrb {
     const uint32_t errMask = 1 << 31;
 
@@ -78,8 +80,8 @@ struct SchemaUMap {
 };
 
 static uint32_t FTSize[256] = {
-    0,      // NULL_T = 0,
-    32,    // STRING, // NULL characters in string is OK
+    0,                // NULL_T = 0,
+    64,    // STRING, // NULL characters in string is OK
     sizeof(int16_t),  // INT16T,
     sizeof(int32_t),  // INT32T,
     sizeof(int64_t),  // INT64T,
@@ -394,15 +396,26 @@ public:
             readFromPage(pagePtr, rowOffsetInPage + smd.fieldsInfo[idx].fieldOffset, 
                 rowOffsetInPage + smd.fieldsInfo[idx].fieldSize, buf);
             auto t = smd.schema->fields[idx].type;
-            if (t == k2::dto::FieldType::STRING)
-                std::cout << "(index, field name, data): " << idx << ", "
-                          << smd.schema->fields[idx].name << ", "
-                          << buf << std::endl;
-            else if (t == k2::dto::FieldType::INT32T)
-                std::cout << std::dec << "(index, field name, data): " << idx << ", "
-                          << smd.schema->fields[idx].name << ", "
-                          << *(int *)buf << std::endl;
+            void *valuePtr = nullptr;
+            if (t == k2::dto::FieldType::STRING) {
+                String *value = new String(buf);
+                valuePtr = static_cast<void *>(&value);
+            }
+            using FieldType = dto::FieldType;
+            using TypeMismatchException = dto::TypeMismatchException;
+            K2_DTO_CAST_APPLY_FIELD_VALUE(printField, smd.schema->fields[idx], valuePtr, idx, smd.schema->fields[idx].name);
         }
+    }
+
+    template <typename T>
+    void printField(const dto::SchemaField& field, void *valuePtr, int idx, String &fname) {
+        (void) field;
+        T value{};
+        if (valuePtr == nullptr) {
+            K2LOG_D(log::pbrb, "Field {}: [nullptr]", idx);
+        }
+        value = *(static_cast<T *>(valuePtr));
+        K2LOG_D(log::pbrb, "Field {}: [field name: {}, data: {}]", idx, fname, value);
     }
 
     void printHeaderRow(const BufferPage *pagePtr, RowOffset rowOffset) {
@@ -410,7 +423,7 @@ public:
         size_t rowOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
                                  smd.rowSize * rowOffset;
         uint8_t *rowAddr = (uint8_t *)(pagePtr) + rowOffsetInPage;
-        auto ts = getTimestamp(rowAddr);
+        auto ts = getTimestampRow(rowAddr);
         auto pAddr = getPlogAddrRow(rowAddr);
         K2LOG_I(log::pbrb, "Timestamp: {}, pAddr: {}", ts, pAddr);
     }
@@ -464,6 +477,10 @@ public:
 
     //create a pageList for a SKV table according to schemaID
     BufferPage *createCacheForSchema(SchemaId schemaId) {
+        return createCacheForSchema(schemaId, 0);
+    }
+
+    BufferPage *createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
         
         if (_freePageList.empty())
             return nullptr;
@@ -478,6 +495,7 @@ public:
 
         initializePage(pagePtr);
         setSchemaIDPage(pagePtr, schemaId);
+        setSchemaVerPage(pagePtr, schemaVer);
 
         K2LOG_I(log::pbrb, "createCacheForSchema, schemaId: {}, pagePtr empty:{}, _freePageList size:{}, pageSize: {}, smd.rowSize: {}, _schemaMap[0].rowSize: {}", schemaId, pagePtr==nullptr,  _freePageList.size(), sizeof(BufferPage), smd.rowSize, _schemaMap[0].rowSize);
 
@@ -591,12 +609,6 @@ public:
     //evict rows from PBRB cache in the background
     void doBackgroundPBRBGC();
 
-    uint32_t getTimestamp(void *addr) {
-        uint32_t ts;
-        memcpy(&ts, (uint8_t *)addr + 4, 4);
-        return ts;
-    }
-
     void printRowsBySchema(SchemaId sid) {
         SchemaMetaData smd = _schemaMap[sid];
         BufferPage *pagePtr = smd.headPage;
@@ -648,6 +660,12 @@ public:
     // PBRB Row -> SKVRecord
     dto::SKVRecord *generateSKVRecordByRow(RowAddr rAddr, const String &collName, std::shared_ptr<dto::Schema> schema);
     dto::DataRecord *generateDataRecord(dto::SKVRecord *skvRecord, KeyValueNode &node, int order, void *hotAddr);
+    // getSchemaVer by hotAddr in SimpleSchema
+    uint32_t getSchemaVer(void *hotAddr) {
+        auto pagePtr = getPageAddr(hotAddr);
+        SchemaMetaData &smd = _schemaMap[getSchemaIDPage(pagePtr)];
+        return smd.schema->version;
+    }
 };
 
 }

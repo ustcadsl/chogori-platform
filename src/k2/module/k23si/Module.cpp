@@ -641,6 +641,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     }
 
     KeyValueNode& node = IndexIt->second;
+    node.printAll();
     // If there is WI, if same TX return WI or set needPush true
     // else return right version or null&&needPush = false
     // DataRecord* rec = _getDataRecordForRead(versions, request.mtr.timestamp);
@@ -649,7 +650,8 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     int order;
     K2LOG_I(log::skvsvr, "Ready to read datarecord");
     DataRecord* rec = node.get_datarecord(request.mtr.timestamp, order);
-    K2LOG_I(log::skvsvr, "Node info ====== Timestamp: {}; Order: {}, SchemaVersion: {}", request.mtr.timestamp, order, rec->value.schemaVersion);
+    if (rec != nullptr)
+        K2LOG_I(log::skvsvr, "Node info ====== Timestamp: {}; Order: {}, SchemaVersion: {}", request.mtr.timestamp, order, rec->value.schemaVersion);
     DataRecord* result = nullptr;
     if (rec != nullptr) {
         
@@ -663,9 +665,18 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
         else if (order >= 0) {
             // find schema
             auto schemaIt = _schemas.find(request.key.schemaName);
-            K2EXPECT(log::skvsvr, schemaIt != _schemas.end(), true);
-            auto schemaVer = schemaIt->second.find(rec->value.schemaVersion);
-            K2EXPECT(log::skvsvr, schemaVer != schemaIt->second.end(), true);
+            K2ASSERT(log::skvsvr, schemaIt != _schemas.end(), "Found Schema: {}", schemaIt->first);
+            uint32_t sVer;
+
+            // datarecord
+            if (!node.is_inmem(order))
+                sVer = rec->value.schemaVersion;
+            // hot row
+            else {
+                sVer = pbrb->getSchemaVer(rec);
+            }
+            auto schemaVer = schemaIt->second.find(sVer);
+            K2ASSERT(log::skvsvr, schemaVer != schemaIt->second.end(), "sVer: {}", sVer);
             dto::Schema& schema = *(schemaVer->second);
             K2LOG_I(log::skvsvr, "------request.key: {}, schemaName: {}, schemaVer:{}", request.key, request.key.schemaName, schemaVer->first);
 
@@ -678,7 +689,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                     S.fields.push_back(schema.fields[i]);
                 }
                 auto sID = pbrb->addSchemaUMap(S);
-                pbrb->createCacheForSchema(sID);
+                pbrb->createCacheForSchema(sID, S.version);
                 SMapIndex = sID+1;
             }
 
@@ -704,14 +715,15 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                         continue;
                     }
                     bool success = false;
-                _cacheFieldValueToPBRB(schema.fields[j], rec->value.fieldData, success, pagePtr, rowOffset, j);
+                    _cacheFieldValueToPBRB(schema.fields[j], rec->value.fieldData, success, pagePtr, rowOffset, j);
                 }
                 pbrb->setRowBitMapPage(pagePtr, rowOffset);
 
                 // update indexer.
-                // void *hotAddr = pbrb->getAddrByPageAndOffset(pagePtr, rowOffset);
-                // node.insert_hot_datarecord(rec->timestamp, static_cast<dto::DataRecord *>(hotAddr));
-                // K2LOG_I(log::skvsvr, "Stored hot address: {} in node", hotAddr);
+                void *hotAddr = pbrb->getAddrByPageAndOffset(pagePtr, rowOffset);
+                node.insert_hot_datarecord(rec->timestamp, static_cast<dto::DataRecord *>(hotAddr));
+                K2LOG_I(log::skvsvr, "Stored hot address: {} in node", hotAddr);
+                node.printAll();
                 // debug output
                 pbrb->printRowsBySchema(SMapIndex);
 
@@ -766,11 +778,12 @@ std::size_t K23SIPartitionModule::_findField(const dto::Schema schema, k2::Strin
 }
 
 template <typename T>
-void _getFieldData(const dto::SchemaField& field, Payload& payload, bool& success, BufferPage *pagePtr, RowOffset rowOffset, uint32_t fieldID) {
+T _getFieldData(const dto::SchemaField& field, Payload& payload, bool& success, uint32_t fieldID) {
     (void) field;
     T value{};
     success = payload.read(value);
-    K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
+    K2LOG_I(log::skvsvr, "fieldId: {}, field.type: {}, field.name: {}, value: {}", fieldID, field.type, field.name, value);
+    return value;
     //pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, fieldID);
 }
 
@@ -816,13 +829,14 @@ void _getNextPayloadOffset<String>(const dto::SchemaField& field, Payload& base,
 }
 
 void K23SIPartitionModule::_cacheFieldValueToPBRB(const dto::SchemaField& field, Payload& payload, bool& success, BufferPage *pagePtr, RowOffset rowOffset, uint32_t fieldID){
-    //K2_DTO_CAST_APPLY_FIELD_VALUE(_getFieldData, field, payload, success, pagePtr, rowOffset, fieldID);
+    K2_DTO_CAST_APPLY_FIELD_VALUE(_getFieldData, field, payload, success, fieldID);
+    // K2LOG_I(log::skvsvr, "Ready to cache field: [field.type: {}, field.name: {}, value: {}, strSize: {}]", field.type, field.name, value, strSize);
     switch (field.type) {
         case k2::dto::FieldType::STRING: {
             k2::String value{};
             success = payload.read(value);
             size_t strSize = value.size();
-            // K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}, strSize:{}", field.type, field.name, value, strSize);
+            K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}, strSize:{}", field.type, field.name, value, strSize);
             pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, strSize, fieldID);
         } break;
         case FieldType::INT16T: {
@@ -883,7 +897,8 @@ void K23SIPartitionModule::_cacheFieldValueToPBRB(const dto::SchemaField& field,
             auto msg = fmt::format(
                 "cannot apply field of type {}", field.type);
             throw TypeMismatchException(msg);
-    }               
+    }
+    K2LOG_I(log::skvsvr, "Stored Field Data.");
 }
 
 bool K23SIPartitionModule::_isUpdatedField(uint32_t fieldIdx, std::vector<uint32_t> fieldsForPartialUpdate) {

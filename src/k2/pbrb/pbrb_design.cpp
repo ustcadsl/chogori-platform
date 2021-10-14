@@ -73,18 +73,24 @@ void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset
     // Copy a field to PBRB row
     void *destPtr = (void *) ((uint8_t *) rowBasePtr + smd.fieldsInfo[fieldID].fieldOffset);
     
+    // TYPE: STRING
     if(strSize > 0) {
         // TODO Copy the size of String
-        std::string cstr(((k2::String *) valueAddr)->c_str());
-        K2LOG_I(log::pbrb, "the c_str value is: {}", cstr);
-        memcpy(destPtr, ((k2::String *) valueAddr)->c_str(), strSize);
+        K2ASSERT(log::pbrb, strSize < FTSize[static_cast<int>(k2::dto::FieldType::STRING)] - 1, "strSize < FTSize[String] - 1");
+
+        memcpy(destPtr, ((k2::String *) valueAddr)->c_str(), strSize + 1);
         destPtr = (void *) ((uint8_t *) rowBasePtr + smd.fieldsInfo[fieldID].fieldOffset + strSize);
+        K2LOG_D(log::pbrb, "Copied k2::String: {}", valueAddr);
+        K2LOG_D(log::pbrb, "Copied {} byte(s) to {}", strSize + 1, destPtr);
+        printFieldsRow(pagePtr, rowOffset);
+        return rowBasePtr;
     }
-    //size_t copySize = smd.rowSize - smd.fieldsInfo[fieldID].fieldOffset;
+
+    // TYPE: OTHERS
     size_t copySize = smd.fieldsInfo[fieldID].fieldSize;
     K2LOG_I(log::pbrb, "fieldID:{}, fieldOffset:{}, destPtr:{}, copySize:{}, strSize:{}", fieldID, smd.fieldsInfo[fieldID].fieldOffset, destPtr, copySize, strSize);
     // + 4 to move to the real address in simple plog
-    // memcpy(destPtr, valueAddr, copySize);
+    memcpy(destPtr, valueAddr, copySize);
 
     return rowBasePtr;
 }
@@ -196,7 +202,7 @@ void *PBRB::cacheColdRow(PLogAddr pAddress, String key)
         BufferPage *pagePtr = retVal.first;
         RowOffset rowOffset = retVal.second;
         cacheRowFromPlog(pagePtr, rowOffset, pAddress);
-        kvNode.insertRow(replaceAddr, getTimestamp(replaceAddr), true, this);
+        kvNode.insertRow(replaceAddr, getTimestampRow(replaceAddr).tStartTSECount(), true, this);
         return replaceAddr;
     }
 
@@ -216,7 +222,7 @@ void *PBRB::cacheColdRow(PLogAddr pAddress, String key)
 
     void *hotAddr = cacheRowFromPlog(pagePtr, rowOffset, pAddress);
     if (hotAddr != nullptr) {
-        kvNode.insertRow(hotAddr, getTimestamp(hotAddr), true, this);
+        kvNode.insertRow(hotAddr, getTimestampRow(hotAddr).tStartTSECount(), true, this);
         return hotAddr;
     }
     return nullptr;
@@ -508,7 +514,7 @@ bool PBRB::splitPage(BufferPage *pagePtr) {
 
         // 4.3: update _indexer.
         KVN &kvNode = (*_indexer)[key];
-        uint32_t ts = getTimestamp(oldRowAddr);
+        uint32_t ts = getTimestampRow(oldRowAddr).tStartTSECount();
         int verIdx = kvNode.findVerByTs(ts);
         
         assert(verIdx != -1 && kvNode.isCached[verIdx] == true);    
@@ -574,7 +580,7 @@ bool PBRB::mergePage(BufferPage *pagePtr1, BufferPage *pagePtr2) {
 
         // 3.3: update _indexer
         KVN &kvNode = (*_indexer)[key];
-        uint32_t ts = getTimestamp(oldRowAddr);
+        uint32_t ts = getTimestampRow(oldRowAddr).tStartTSECount();
         int verIdx = kvNode.findVerByTs(ts);
         
         assert(verIdx != -1 && kvNode.isCached[verIdx] == true);    

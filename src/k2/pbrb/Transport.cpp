@@ -22,15 +22,15 @@ dto::SKVRecord *PBRB::generateSKVRecordByRow(RowAddr rAddr, const String &collNa
     // Copy Fields.
     assert(smd.schema->fields.size() == smd.fieldsInfo.size() && smd.fieldsInfo.size() > 0);
     
-    K2LOG_I(log::pbrb, "field(s) count: {}", smd.schema->fields.size());
+    K2LOG_D(log::pbrb, "field(s) count: {}", smd.schema->fields.size());
     for (uint32_t idx = 0; idx < smd.schema->fields.size(); idx++) {
         auto ft = smd.schema->fields[idx].type;
         if (ft == k2::dto::FieldType::STRING) {
             auto fieldOffset = smd.fieldsInfo[idx].fieldOffset;
             char *cstr = (char *)((uint8_t *)rAddr + fieldOffset);
-            String str(cstr, FTSize[static_cast<int>(ft)]);
+            String str(cstr);
             // -----! NOTICE: size need -1 here. !-----
-            K2LOG_I(log::pbrb, "Copy Field {}: (Type: STRING, FieldOffset: {}, value: {}, size: {}", idx, smd.fieldsInfo[idx].fieldOffset, str, str.size());
+            K2LOG_D(log::pbrb, "Copy Field {}: (Type: STRING, FieldOffset: {}, value: {}, size: {}", idx, smd.fieldsInfo[idx].fieldOffset, str, str.size());
             // Serialize into record
             record->serializeNext<String>(str);
         }

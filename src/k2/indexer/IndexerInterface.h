@@ -33,6 +33,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include <k2/dto/Collection.h>
 #include <k2/dto/K23SI.h>
 
+
 namespace k2 {
 //
 //  K2 internal MVCC representation
@@ -149,6 +150,13 @@ namespace k2 {
             valuedata[order].valuepointer = nullptr;
         }
 
+        // debugging
+        void printAll() {
+            for (int i = 0; i < 3; ++i) {
+                std::cout << i << ": " << key << ", " << valuedata[i].timestamp << ", " << valuedata[i].valuepointer << std::endl;
+            }
+        }
+
         dto::DataRecord *get_datarecord(const dto::Timestamp &timestamp) {
             for (int i = 0; i < 3; ++i)
                 if (timestamp.tEndTSECount() >= valuedata[i].timestamp)
@@ -162,14 +170,22 @@ namespace k2 {
         }
 
         dto::DataRecord *get_datarecord(const dto::Timestamp &timestamp, int &order) {
+            std::cout << "@get_datarecord: " << timestamp << ", "<< order;
             for (int i = 0; i < 3; ++i)
                 if (timestamp.tEndTSECount() >= valuedata[i].timestamp) {
-                    // std::cout << key << ", " << valuedata[i].timestamp << ", " << valuedata[i].valuepointer << std::endl;
+                    std::cout << key << ", " << valuedata[i].timestamp << ", " << valuedata[i].valuepointer << std::endl;
                     order = i;
                     return valuedata[i].valuepointer;
                 }
             order = -1;
             dto::DataRecord *viter = valuedata[2].valuepointer;
+
+            // Get pointer of cold version out of indexer.
+            if (is_inmem(2)) {}
+                // viter = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(viter));
+            else
+                viter = viter->prevVersion;
+            
             while (viter != nullptr && timestamp.compareCertain(viter->timestamp) < 0) {
                 // skip newer records
                 viter = viter->prevVersion;
@@ -178,6 +194,7 @@ namespace k2 {
         }
 
         int insert_datarecord(dto::DataRecord *datarecord) {
+            // printAll();
             datarecord->prevVersion = valuedata[0].valuepointer;
             for (int i = 2; i > 0; i--) {
                 valuedata[i] = valuedata[i - 1];
@@ -191,6 +208,7 @@ namespace k2 {
             set_tombstone(0, datarecord->isTombstone);
             set_exist(0, 1);
             set_inmem(0, 0);
+            printAll();
             return 0;
         }
 
@@ -198,7 +216,8 @@ namespace k2 {
             for (int i = 0; i < 3; ++i)
                 if (timestamp.tEndTSECount() == valuedata[i].timestamp) {
                     set_inmem(i, 1);
-                    datarecord->prevVersion = valuedata[i].valuepointer;
+                    // Set prevVer operation done in 
+                    // datarecord->prevVersion = valuedata[i].valuepointer;
                     valuedata[i].valuepointer = datarecord;
                     return 0;
                 }
