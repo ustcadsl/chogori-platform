@@ -829,7 +829,7 @@ void _getNextPayloadOffset<String>(const dto::SchemaField& field, Payload& base,
 }
 
 void K23SIPartitionModule::_cacheFieldValueToPBRB(const dto::SchemaField& field, Payload& payload, bool& success, BufferPage *pagePtr, RowOffset rowOffset, uint32_t fieldID){
-    K2_DTO_CAST_APPLY_FIELD_VALUE(_getFieldData, field, payload, success, fieldID);
+    // K2_DTO_CAST_APPLY_FIELD_VALUE(_getFieldData, field, payload, success, fieldID);
     // K2LOG_I(log::skvsvr, "Ready to cache field: [field.type: {}, field.name: {}, value: {}, strSize: {}]", field.type, field.name, value, strSize);
     switch (field.type) {
         case k2::dto::FieldType::STRING: {

@@ -400,10 +400,14 @@ public:
             if (t == k2::dto::FieldType::STRING) {
                 String *value = new String(buf);
                 valuePtr = static_cast<void *>(&value);
+                K2LOG_D(log::pbrb, "Field {}: [field name: {}, data: {}]", idx, smd.schema->fields[idx].name, buf);
             }
-            using FieldType = dto::FieldType;
-            using TypeMismatchException = dto::TypeMismatchException;
-            K2_DTO_CAST_APPLY_FIELD_VALUE(printField, smd.schema->fields[idx], valuePtr, idx, smd.schema->fields[idx].name);
+            else {
+                valuePtr = static_cast<void *>(buf);
+                using FieldType = dto::FieldType;
+                using TypeMismatchException = dto::TypeMismatchException;
+                K2_DTO_CAST_APPLY_FIELD_VALUE(printField, smd.schema->fields[idx], valuePtr, idx, smd.schema->fields[idx].name);
+            }
         }
     }
 

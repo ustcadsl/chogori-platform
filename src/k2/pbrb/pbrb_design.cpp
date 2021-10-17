@@ -89,6 +89,7 @@ void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset
     // TYPE: OTHERS
     size_t copySize = smd.fieldsInfo[fieldID].fieldSize;
     K2LOG_I(log::pbrb, "fieldID:{}, fieldOffset:{}, destPtr:{}, copySize:{}, strSize:{}", fieldID, smd.fieldsInfo[fieldID].fieldOffset, destPtr, copySize, strSize);
+    printFieldsRow(pagePtr, rowOffset);
     // + 4 to move to the real address in simple plog
     memcpy(destPtr, valueAddr, copySize);
 

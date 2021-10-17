@@ -248,7 +248,7 @@ public:
         YTDPayment = 10;
         PaymentCount = 1;
         DeliveryCount = 0;
-        Info = random.RandomString(500, 500);
+        Info = random.RandomString(20, 50);
     }
 
     Customer(int16_t w_id, int16_t d_id, int32_t c_id) :
