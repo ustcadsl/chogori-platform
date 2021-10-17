@@ -131,7 +131,6 @@ namespace k2 {
         }
 
         int size() {
-            K2LOG_D(log::indexer, "IN SIZE FUNCTION");
             return (int) ((flags << 32) >> 32);
         }
 
@@ -140,7 +139,9 @@ namespace k2 {
         }
 
         int size_dec() {
-            if (flags == 0) return 1;
+            int tmp=(int)((flags << 32) >> 32);
+            if (tmp<=0) 
+                return 1;
             flags--;
             return 0;
         }
@@ -194,14 +195,22 @@ namespace k2 {
         }
 
         int insert_datarecord(dto::DataRecord *datarecord) {
-            // printAll();
-            datarecord->prevVersion = valuedata[0].valuepointer;
-            for (int i = 2; i > 0; i--) {
-                valuedata[i] = valuedata[i - 1];
-                set_tombstone(i, is_tombstone(i - 1));
-                set_exist(i, is_exist(i - 1));
-                set_inmem(i, is_inmem(i - 1));
+            if(size() > 0) {
+                if(valuedata[0].valuepointer->status == dto::DataRecord::Committed) {
+                    datarecord->prevVersion = valuedata[0].valuepointer;
+                    for (int i = 2; i > 0; i--) {
+                        valuedata[i] = valuedata[i - 1];
+                        set_tombstone(i, is_tombstone(i - 1));
+                        set_exist(i, is_exist(i - 1));
+                        set_inmem(i, is_inmem(i - 1));
+                    }
+                }
+                else {
+                    size_dec();
+                    datarecord->prevVersion = valuedata[1].valuepointer;   
+                }
             }
+			         
             valuedata[0].valuepointer = datarecord;
             valuedata[0].timestamp = datarecord->timestamp.tEndTSECount();
             size_inc();
@@ -314,7 +323,8 @@ namespace k2 {
                 set_exist(j, is_exist(j + 1));
                 set_inmem(j, is_inmem(j + 1));
             }
-            size_dec();
+            if (size_dec()==1) 
+                K2LOG_D(log::indexer, "try to remove with no versions, Key: {} {} {}", key.schemaName, key.partitionKey, key.rangeKey);
             if (valuedata[2].valuepointer != nullptr) {
                 if(valuedata[2].valuepointer->prevVersion != nullptr){
                     valuedata[2].valuepointer = valuedata[2].valuepointer->prevVersion;
@@ -333,7 +343,6 @@ namespace k2 {
         }
 
         dto::DataRecord *_getpointer(int order) {
-            K2LOG_D(log::indexer, "Key: {} {} {}", key.schemaName, key.partitionKey, key.rangeKey);
             return valuedata[order].valuepointer;
         }
 

@@ -36,6 +36,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include <k2/tso/client/tso_clientlib.h>
 #include <k2/indexer/IndexerInterface.h>
 #include <k2/indexer/MapIndexer.h>
+#include <k2/indexer/HOTIndexer.h>
 
 #include "ReadCache.h"
 #include "TxnManager.h"
@@ -76,8 +77,10 @@ struct VersionSet {
 */
 
 // the type holding versions for all keys, i.e. the indexer
+// typedef HOTindexer IndexerT;
+// typedef HotIterator IndexerIterator;
 typedef mapindexer IndexerT;
-typedef std::map<dto::Key, k2::KeyValueNode>::iterator IndexerIterator;
+typedef MapIterator IndexerIterator;
 
 class K23SIPartitionModule {
 public: // lifecycle
@@ -225,7 +228,7 @@ private: // methods
     // bool _checkPushForRead(const VersionSet& versions, const dto::Timestamp& timestamp);
 
     // Helper to remove a WI and delete the key from the indexer of there are no committed records
-    void _removeWI(IndexerIterator it);
+    void _removeWI(KeyValueNode& it);
 
     // get timeNow Timestamp from TSO
     seastar::future<dto::Timestamp> getTimeNow() {

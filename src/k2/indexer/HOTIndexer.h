@@ -22,109 +22,101 @@ Copyright(c) 2020 Futurewei Cloud
 #include "IndexerInterface.h"
 
 #include <k2/common/Common.h>
-#include <hot/singlethreaded/include/hot/singlethreaded/HOTSingleThreaded.hpp>
-#include <hot/contenthelpers/include/idx/contenthelpers/IdentityKeyExtractor.hpp>
+#include <hot/singlethreaded/HOTSingleThreaded.hpp>
+#include <idx/contenthelpers/IdentityKeyExtractor.hpp>
 
 using namespace std;
 
 namespace k2
 {
-
     template<typename ValueType>
     struct KeyValueNodeKeyExtractor {
         inline size_t getKeyLength(ValueType const &value) const {
             dto::Key tempkey=value->get_key();
-            return tempkey.rangeKey.size()+tempkey.partitionKey.size();
+            return tempkey.schemaName.size() + tempkey.rangeKey.size()+tempkey.partitionKey.size();
         }
-        inline const char* operator()(ValueType const &value) const {
-            dto::Key tempkey=value->get_key();
-            String s=tempkey.partitionKey+tempkey.rangeKey;
-            return s.c_str();
+        inline dto::Key operator()(ValueType const &value) const {
+            return value->get_key();
         }
     };
-
-    class HOTindexer : public Indexer{
+    typedef hot::singlethreaded::HOTSingleThreaded<k2::KeyValueNode*, KeyValueNodeKeyExtractor> HotIndexer;
+    typedef hot::singlethreaded::HOTSingleThreadedIterator<k2::KeyValueNode*> HotIterator;
+    
+    class HOTindexer{
     private:
-        hot::singlethreaded::HOTSingleThreaded<k2::KeyValueNode*, KeyValueNodeKeyExtractor> idx;
-        hot::singlethreaded::HOTSingleThreadedIterator<k2::KeyValueNode*> scanit;
+        HotIndexer idx;
+        HotIterator scanit;
     public:
         KeyValueNode* insert(dto::Key key);
-        KeyValueNode* find(dto::Key &key);
-        KeyValueNode* begin();
-        KeyValueNode* end();
-        KeyValueNode* getiter();
-        KeyValueNode* setiter(dto::Key &key);
-        KeyValueNode* beginiter();
-        KeyValueNode* inciter();
+        HotIterator find(dto::Key &key);
+        HotIterator begin();
+        HotIterator end();
+        HotIterator getiter();
+        HotIterator setiter(const dto::Key &key);
+        HotIterator lower_bound(const dto::Key& key);
+        HotIterator last();
 
         void erase(dto::Key key);
         size_t size();
+        KeyValueNode* extractFromIter(HotIterator const& iterator);
     };
 
     inline KeyValueNode* HOTindexer::insert(dto::Key key)
     {
         KeyValueNode* newkvnode = new KeyValueNode(key);
         bool ret = idx.insert(newkvnode);
-        if (ret) return newkvnode;
-        return nullptr;
-    }
-    inline KeyValueNode* HOTindexer::find(dto::Key& key)
-    {
-        String s=key.partitionKey+key.rangeKey;
-        auto kit=idx.lookup(s.c_str());
-        if (!kit.mIsValid) {
-            return nullptr;
+        if (ret) {
+            return newkvnode;
         }
-        return kit.mValue;
-    }
-    inline KeyValueNode* HOTindexer::begin()
-    {
-        auto kit=idx.begin();
-        return *kit;
-    }
-    inline KeyValueNode* HOTindexer::end()
-    {
         return nullptr;
     }
-    inline KeyValueNode* HOTindexer::getiter()
+    inline HotIterator HOTindexer::find(dto::Key& key)
     {
-        if(scanit==idx.end()) return nullptr;
-        return *scanit;
+        return idx.find(key);
     }
-    inline KeyValueNode* HOTindexer::setiter(dto::Key &key)
+    inline HotIterator HOTindexer::begin()
     {
-        String s=key.partitionKey+key.rangeKey;
-        scanit=idx.find(s.c_str());
-        if (scanit==idx.end()) return nullptr;
-        return *scanit;
+        return idx.begin();
     }
-    inline KeyValueNode* HOTindexer::beginiter()
+    inline HotIterator HOTindexer::end()
     {
-        scanit==idx.begin();
-        if(scanit==idx.end()) return nullptr;
-        return *scanit;
+        return idx.end();
     }
-    inline KeyValueNode* HOTindexer::inciter()
+    inline HotIterator HOTindexer::getiter()
     {
-        scanit++;
-        if(scanit==idx.end()) return nullptr;
-        return *scanit;
+        return scanit;
+    }
+    inline HotIterator HOTindexer::setiter(const dto::Key &key)
+    {
+        // Return wrong result when there is only one leaf node
+        return idx.find(key);
+    }
+    inline HotIterator HOTindexer::lower_bound(const dto::Key& key)
+    {
+        return idx.lower_bound(key);
+    }
+    inline HotIterator HOTindexer::last()
+    {
+        return idx.last();
     }
     inline void HOTindexer::erase(dto::Key key)
     {
-        String s=key.partitionKey+key.rangeKey;
-        auto kit=idx.lookup(s.c_str());
+        auto kit=idx.lookup(key);
         if (!kit.mIsValid) {
             return;
         }
         KeyValueNode* tempkvn=kit.mValue;
-        delete tempkvn;
-        idx.remove(s.c_str());
+        idx.remove(key);
+        delete tempkvn;       
     }
 
     inline size_t HOTindexer::size()
     {
-        return idx.getStatistics().second["numberValues"];
+        return idx.size();
     }
 
+    inline KeyValueNode* HOTindexer::extractFromIter(HotIterator const& iterator)
+    {
+        return *iterator;
+    }
 }

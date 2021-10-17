@@ -88,8 +88,6 @@ namespace k2::dto {
 // committed records. It is split into a separate struct so that code can more easily
 // be written to handle both write intents and committed records.
 struct DataRecord {
-    //dto::Key key;
-
     // the user data for the record
     SKVRecord::Storage value;
 

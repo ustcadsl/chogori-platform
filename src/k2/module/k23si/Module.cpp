@@ -94,7 +94,8 @@ Status K23SIPartitionModule::_validateStaleWrite(const RequestT& request, KeyVal
     // if a txn committed a value at time T5, then we must also assume they did a read at time T5
     // NB(3) This code does not care if there is a WI. If there is a WI, then this check can help avoid
     // an unnecessary PUSH.
-    DataRecord* latestRec = KVNode.begin();
+    dto::DataRecord* latestRec = KVNode.begin();
+    while(latestRec!=nullptr && latestRec->status == dto::DataRecord::WriteIntent) latestRec=latestRec->prevVersion;
     if (latestRec != nullptr && latestRec->status == dto::DataRecord::Committed &&
         request.mtr.timestamp.compareCertain(latestRec->timestamp) <= 0) {
         // newest version is the latest committed and its newer than the request
@@ -364,10 +365,10 @@ _makeReadOK(dto::DataRecord* rec) {
 void K23SIPartitionModule::_scanAdvance(IndexerIterator& it, bool reverseDirection, const String& schema) {
     if (!reverseDirection) {
         ++it;
-        if (it != _indexer.end() && it->first.schemaName != schema) {
+        if (it != _indexer.end() && (_indexer.extractFromIter(it))->get_key().schemaName != schema) {
             it = _indexer.end();
         }
-
+        K2LOG_D(log::indexer, "Scan Advance at key {}", it!=_indexer.end() ? (_indexer.extractFromIter(it))->get_key() : dto::Key());
         return;
     }
 
@@ -375,8 +376,8 @@ void K23SIPartitionModule::_scanAdvance(IndexerIterator& it, bool reverseDirecti
         it = _indexer.end();
     } else {
         --it;
-
-        if (it->first.schemaName != schema) {
+        K2LOG_D(log::indexer, "Reverse scan Advance at key {}", it!=_indexer.end() ? (_indexer.extractFromIter(it))->get_key() : dto::Key());
+        if ((_indexer.extractFromIter(it))->get_key().schemaName != schema) {
             it = _indexer.end();
         }
     }
@@ -386,7 +387,6 @@ void K23SIPartitionModule::_scanAdvance(IndexerIterator& it, bool reverseDirecti
 // desired schema and (eventually) reverse direction scan
 IndexerIterator K23SIPartitionModule::_initializeScan(const dto::Key& start, bool reverse, bool exclusiveKey) {
     auto key_it = _indexer.lower_bound(start);
-
     // For reverse direction scan, key_it may not be in range because of how lower_bound works, so fix that here.
     // IF start key is empty, it means this reverse scan start from end of table OR
     //      if lower_bound returns a _indexer.end(), it also means reverse scan should start from end of table;
@@ -394,20 +394,20 @@ IndexerIterator K23SIPartitionModule::_initializeScan(const dto::Key& start, boo
     // ELSE IF lower_bound returns a key bigger than start, find the first key not bigger than start;
     if (reverse) {
         if (start.partitionKey == "" || key_it == _indexer.end()) {
-            key_it = (++_indexer.rbegin()).base();
-        } else if (key_it->first == start && exclusiveKey) {
+            key_it = _indexer.last();
+        } else if ((_indexer.extractFromIter(key_it))->get_key() == start && exclusiveKey) {
             _scanAdvance(key_it, reverse, start.schemaName);
-        } else if (key_it->first > start) {
-            while (key_it->first > start) {
+        } else if ((_indexer.extractFromIter(key_it))->get_key() > start) {
+            while ((_indexer.extractFromIter(key_it))->get_key() > start) {
                 _scanAdvance(key_it, reverse, start.schemaName);
             }
         }
     }
 
-    if (key_it != _indexer.end() && key_it->first.schemaName != start.schemaName) {
+    if (key_it != _indexer.end() && (_indexer.extractFromIter(key_it))->get_key().schemaName != start.schemaName) {
         key_it = _indexer.end();
     }
-
+    K2LOG_D(log::skvsvr, "lower bound of start key {} is {}", start, key_it != _indexer.end() ? (_indexer.extractFromIter(key_it))->get_key() : dto::Key() );
     return key_it;
 }
 
@@ -416,20 +416,20 @@ bool K23SIPartitionModule::_isScanDone(const IndexerIterator& it, const dto::K23
                                        size_t response_size) {
     if (it == _indexer.end()) {
         return true;
-    } else if (it->first == request.key) {
+    } else if ((_indexer.extractFromIter(it))->get_key() == request.key) {
         // Start key as inclusive overrides end key as exclusive
         return false;
-    } else if (!request.reverseDirection && it->first >= request.endKey &&
+    } else if (!request.reverseDirection && (_indexer.extractFromIter(it))->get_key() >= request.endKey &&
                request.endKey.partitionKey != "") {
         return true;
-    } else if (request.reverseDirection && it->first <= request.endKey) {
+    } else if (request.reverseDirection && (_indexer.extractFromIter(it))->get_key() <= request.endKey) {
         return true;
     } else if (request.recordLimit >= 0 && response_size == (uint32_t)request.recordLimit) {
         return true;
     } else if (response_size == _config.paginationLimit()) {
         return true;
     }
-
+    K2LOG_D(log::skvsvr, "Continue to scan");
     return false;
 }
 
@@ -443,7 +443,7 @@ dto::Key K23SIPartitionModule::_getContinuationToken(const IndexerIterator& it,
     if ((request.recordLimit >= 0 && response_size == (uint32_t)request.recordLimit) ||
         // Test for past user endKey:
         (it != _indexer.end() &&
-            (request.reverseDirection ? it->first <= request.endKey : it->first >= request.endKey && request.endKey.partitionKey != "")) ||
+            (request.reverseDirection ? (_indexer.extractFromIter(it))->get_key() <= request.endKey : (_indexer.extractFromIter(it))->get_key() >= request.endKey && request.endKey.partitionKey != "")) ||
         // Test for partition bounds contains endKey and we are at end()
         (it == _indexer.end() &&
             (request.reverseDirection ?
@@ -455,7 +455,7 @@ dto::Key K23SIPartitionModule::_getContinuationToken(const IndexerIterator& it,
     else if (it != _indexer.end()) {
         // This is the paginated case
         response.exclusiveToken = false;
-        return it->first;
+        return (_indexer.extractFromIter(it))->get_key();
     }
 
     // This is the multi-partition case
@@ -523,11 +523,11 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
     IndexerIterator key_it = _initializeScan(request.key, request.reverseDirection, request.exclusiveKey);
     for (; !_isScanDone(key_it, request, response.results.size());
                         _scanAdvance(key_it, request.reverseDirection, request.key.schemaName)) {
-        auto& KVNode = key_it->second;
-        DataRecord* record = KVNode.get_datarecord(request.mtr.timestamp);
+        auto& KVNode = *_indexer.extractFromIter(key_it);
+        dto::DataRecord* record = KVNode.get_datarecord(request.mtr.timestamp);
+        K2LOG_D(log::skvsvr, "Scan at key {}", KVNode.get_key());
         bool needPush = record != nullptr && record->status == dto::DataRecord::WriteIntent && record->timestamp.compareCertain(request.mtr.timestamp) < 0;
-        /*DataRecord* record = _getDataRecordForRead(versions, request.mtr.timestamp);
-        bool needPush = !record ? _checkPushForRead(versions, request.mtr.timestamp) : false;*/
+        K2LOG_D(log::skvsvr, "Need push={}", needPush);
 
         if (!record) {
             // happy case: we either had no versions, or all versions were newer than the requested timestamp
@@ -571,18 +571,18 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
             break;
         }
         K2LOG_D(log::skvsvr, "query from txn {}, updates read cache for key range {} - {}",
-                request.mtr, request.key, key_it->first);
+                request.mtr, request.key, (_indexer.extractFromIter(key_it))->get_key());
 
         // Do a push but we need to save our place in the query
         // TODO we can test the filter condition against the WI and last committed version and possibly
         // avoid a push
         // Must update read cache before doing an async operation
         request.reverseDirection ?
-            _readCache->insertInterval(key_it->first, request.key, request.mtr.timestamp) :
-            _readCache->insertInterval(request.key, key_it->first, request.mtr.timestamp);
+            _readCache->insertInterval((_indexer.extractFromIter(key_it))->get_key(), request.key, request.mtr.timestamp) :
+            _readCache->insertInterval(request.key, (_indexer.extractFromIter(key_it))->get_key(), request.mtr.timestamp);
 
         K2LOG_D(log::skvsvr, "About to PUSH in query request");
-        request.key = key_it->first; // if we retry, do so with the key we're currently iterating on
+        request.key = (_indexer.extractFromIter(key_it))->get_key(); // if we retry, do so with the key we're currently iterating on
         return _doPush(request.key, record->timestamp, request.mtr, deadline)
         .then([this, request=std::move(request),
                         resp=std::move(response), deadline](auto&& retryChallenger) mutable {
@@ -603,7 +603,7 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
         endInterval.partitionKey = "";
         endInterval.rangeKey = "";
     } else {
-        endInterval = key_it->first;
+        endInterval = (_indexer.extractFromIter(key_it))->get_key();
     }
 
     K2LOG_D(log::skvsvr, "query from txn {}, updates read cache for key range {} - {}",
@@ -635,13 +635,12 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     _readCache->insertInterval(request.key, request.key, request.mtr.timestamp);
 
     // find the record we should return
-    auto IndexIt = _indexer.find(request.key);
-    if (IndexIt == _indexer.end()) {
+    IndexerIterator it = _indexer.find(request.key);
+    if(it == _indexer.end()) {
         return _makeReadOK(nullptr);
     }
+    KeyValueNode* nodePtr = _indexer.extractFromIter(it);
 
-    KeyValueNode& node = IndexIt->second;
-    node.printAll();
     // If there is WI, if same TX return WI or set needPush true
     // else return right version or null&&needPush = false
     // DataRecord* rec = _getDataRecordForRead(versions, request.mtr.timestamp);
@@ -649,7 +648,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
 
     int order;
     K2LOG_I(log::skvsvr, "Ready to read datarecord");
-    DataRecord* rec = node.get_datarecord(request.mtr.timestamp, order);
+    DataRecord* rec = nodePtr->get_datarecord(request.mtr.timestamp, order);
     if (rec != nullptr)
         K2LOG_I(log::skvsvr, "Node info ====== Timestamp: {}; Order: {}, SchemaVersion: {}", request.mtr.timestamp, order, rec->value.schemaVersion);
     DataRecord* result = nullptr;
@@ -669,7 +668,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             uint32_t sVer;
 
             // datarecord
-            if (!node.is_inmem(order))
+            if (!nodePtr->is_inmem(order))
                 sVer = rec->value.schemaVersion;
             // hot row
             else {
@@ -698,7 +697,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             K2LOG_I(log::skvsvr, "SMAPIDX: {}", SMapIndex);
             pbrb->printRowsBySchema(SMapIndex);
             
-            if (!node.is_inmem(order)) {
+            if (!nodePtr->is_inmem(order)) {
                 // case 2: cold version (in kvnode)
                 
                 K2LOG_I(log::skvsvr, "Case 2: Cold Version in KVNode");
@@ -721,9 +720,9 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
 
                 // update indexer.
                 void *hotAddr = pbrb->getAddrByPageAndOffset(pagePtr, rowOffset);
-                node.insert_hot_datarecord(rec->timestamp, static_cast<dto::DataRecord *>(hotAddr));
+                nodePtr->insert_hot_datarecord(rec->timestamp, static_cast<dto::DataRecord *>(hotAddr));
                 K2LOG_I(log::skvsvr, "Stored hot address: {} in node", hotAddr);
-                node.printAll();
+                nodePtr->printAll();
                 // debug output
                 pbrb->printRowsBySchema(SMapIndex);
 
@@ -756,6 +755,10 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     if (!needPush) {
         return _makeReadOK(result);
     }
+    K2LOG_D(log::skvsvr, "need push with state{}, record ts={}, mtr={}",
+                rec->status, rec->timestamp, request.mtr.timestamp);
+    K2LOG_D(log::skvsvr, "need push node states:size={} begin is empty {} second is empty {} third is empty {}",
+                nodePtr->size(), nodePtr->_getpointer(0)==nullptr,nodePtr->_getpointer(1)==nullptr,nodePtr->_getpointer(2)==nullptr);
 
     // record is still pending and isn't from same transaction.
     return _doPush(request.key,result->timestamp, request.mtr, deadline)
@@ -1219,16 +1222,22 @@ K23SIPartitionModule::handleWrite(dto::K23SIWriteRequest&& request, FastDeadline
 seastar::future<std::tuple<Status, dto::K23SIWriteResponse>>
 K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadline deadline) {
     K2LOG_D(log::skvsvr, "processing write: {}", request);
-    auto it = _indexer.find(request.key);
+    IndexerIterator it = _indexer.find(request.key);
+    KeyValueNode* nodePtr;
     if(it == _indexer.end()) {
         //new KeyValueNode if there is no
-        it = _indexer.insert(request.key);
+        K2LOG_D(log::skvsvr, "Insert new KeyValueNode for key{}", request.key);
+        nodePtr = _indexer.insert(request.key);
     }
-    Status validateStatus = _validateWriteRequest(request, it->second);
+    else {
+        nodePtr = _indexer.extractFromIter(it);
+    }
+    //TODO check nodePtr is not null
+    Status validateStatus = _validateWriteRequest(request, *nodePtr);
     K2LOG_D(log::skvsvr, "write for {} validated with status {}", request, validateStatus);
     if (!validateStatus.is2xxOK()) {
-        if (it->second.begin() == nullptr) {
-            // remove the key from indexer if there are no versions for it
+        if (nodePtr->begin() == nullptr) {
+            // remove the key from indexer if there are no versions in node
             _indexer.erase(request.key);
         }
         K2LOG_D(log::skvsvr, "rejecting write {} due to {}", request, validateStatus);
@@ -1237,12 +1246,12 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
     }
 
     // check to see if we should push or is this a write from same txn
-    KeyValueNode& KVNode = it->second;
-    dto::DataRecord* rec = it->second.begin();
+    KeyValueNode& KVNode = *nodePtr;
+    dto::DataRecord* rec = nodePtr->begin();
     if (rec != nullptr && rec->status  == dto::DataRecord::WriteIntent && rec->timestamp != request.mtr.timestamp) {
         // this is a write request finding a WI from a different transaction. Do a push with the remaining
         // deadline time.
-        K2LOG_D(log::skvsvr, "different WI found for key {}", request.key);
+        K2LOG_D(log::skvsvr, "different WI found for key {}, ol", request.key);
         return _doPush(request.key, rec->timestamp, request.mtr, deadline)
             .then([this, request = std::move(request), deadline](auto&& retryChallenger) mutable {
                 if (!retryChallenger.is2xxOK()) {
@@ -1409,12 +1418,12 @@ K23SIPartitionModule::_doPush(dto::Key key, dto::Timestamp incumbentId, dto::K23
             }
 
             // update the write intent if necessary
-            auto IndexerIt = _indexer.find(key);
+            IndexerIterator IndexerIt = _indexer.find(key);
             if (IndexerIt == _indexer.end()) {
                 return seastar::make_ready_future<Status>(response.allowChallengerRetry ? dto::K23SIStatus::OK : dto::K23SIStatus::AbortConflict);
             }
 
-            KeyValueNode& node = IndexerIt->second;
+            KeyValueNode& node = *_indexer.extractFromIter(IndexerIt);
             dto::DataRecord* rec = node.get_datarecord(request.incumbentMTR.timestamp);
             if (rec != nullptr && rec->status == dto::DataRecord::WriteIntent &&
                 rec->timestamp == request.incumbentMTR.timestamp) {
@@ -1427,7 +1436,7 @@ K23SIPartitionModule::_doPush(dto::Key key, dto::Timestamp incumbentId, dto::K23
                             K2LOG_W(log::skvsvr, "Unable to abort write in {} with local txn metadata due to {}", request.incumbentMTR, status);
                             return seastar::make_ready_future<Status>(std::move(status));
                         }
-                        _removeWI(IndexerIt);
+                        _removeWI(node);
                         break;
                     }
                     case dto::EndAction::Commit: {
@@ -1490,11 +1499,11 @@ Status K23SIPartitionModule::_finalizeTxnWIs(dto::Timestamp txnts, dto::EndActio
     }
     K2ASSERT(log::skvsvr, twim->isCommitted() || twim->isAborted(), "Twim {} has not ended yet", *twim);
     for (auto& key: twim->writeKeys) {
-        auto idxIt = _indexer.find(const_cast<Key &>(key));
+        IndexerIterator idxIt = _indexer.find(const_cast<Key &>(key));
         K2ASSERT(log::skvsvr, idxIt != _indexer.end(),
                  "TWIM {} has registered WI for key {} but key is not in indexer", *twim, key);
 
-        KeyValueNode& KVNode = idxIt->second;
+        KeyValueNode& KVNode = *_indexer.extractFromIter(idxIt);
         dto::DataRecord* WIRec = KVNode.begin();
         K2ASSERT(log::skvsvr, WIRec!=nullptr&&WIRec->status==dto::DataRecord::WriteIntent,
                  "TWIM {} has registered WI for key{}, but key does not have a WI", *twim, key);
@@ -1505,7 +1514,7 @@ Status K23SIPartitionModule::_finalizeTxnWIs(dto::Timestamp txnts, dto::EndActio
         switch (action) {
             case dto::EndAction::Abort: {
                 K2LOG_D(log::skvsvr, "aborting {}, in txn {}", key, *twim);
-                _removeWI(idxIt);
+                _removeWI(KVNode);
                 break;
             }
             case dto::EndAction::Commit: {
@@ -1542,11 +1551,11 @@ seastar::future<std::tuple<Status, dto::K23SIInspectRecordsResponse>>
 K23SIPartitionModule::handleInspectRecords(dto::K23SIInspectRecordsRequest&& request) {
     K2LOG_D(log::skvsvr, "handleInspectRecords for: {}", request.key);
 
-    auto it = _indexer.find(request.key);
+    IndexerIterator it = _indexer.find(request.key);
     if (it == _indexer.end()) {
         return RPCResponse(dto::K23SIStatus::KeyNotFound("Key not found in indexer"), dto::K23SIInspectRecordsResponse{});
     }
-    auto& KVNode = it->second;
+    auto& KVNode = *_indexer.extractFromIter(it);
     int size = KVNode.size();
 
     std::vector<dto::DataRecord> records;
@@ -1595,12 +1604,11 @@ K23SIPartitionModule::handleInspectWIs(dto::K23SIInspectWIsRequest&&) {
     std::vector<dto::DataRecord> records;
 
     for (auto it = _indexer.begin(); it != _indexer.end(); ++it) {
-        auto& KVNode = it->second;
-        if (KVNode.begin() == nullptr || KVNode.begin()->status == dto::DataRecord::Committed) {
+        if (_indexer.extractFromIter(it)->begin() == nullptr || _indexer.extractFromIter(it)->begin()->status == dto::DataRecord::Committed) {
             continue;
         }
 
-        dto::DataRecord* rec = KVNode.begin();
+        dto::DataRecord* rec = _indexer.extractFromIter(it)->begin();
         dto::DataRecord copy {
                 .value=rec->value.share(),
                 .isTombstone=rec->isTombstone,
@@ -1632,7 +1640,7 @@ K23SIPartitionModule::handleInspectAllKeys(dto::K23SIInspectAllKeysRequest&& req
     keys.reserve(_indexer.size());
 
     for (auto it = _indexer.begin(); it != _indexer.end(); ++it) {
-        keys.push_back(it->first);
+        keys.push_back(_indexer.extractFromIter(it)->get_key());
     }
 
     dto::K23SIInspectAllKeysResponse response { std::move(keys) };
@@ -1680,8 +1688,7 @@ K23SIPartitionModule::_getDataRecordForRead(VersionSet& versions, dto::Timestamp
 }*/
 
 // Helper to remove a WI and delete the key from the indexer of there are no committed records
-void K23SIPartitionModule::_removeWI(IndexerIterator it) {
-    KeyValueNode& node = it->second;
+void K23SIPartitionModule::_removeWI(KeyValueNode& node) {
     node.remove_datarecord(0);
     //TODO check available
     if (node.begin() == nullptr) {
