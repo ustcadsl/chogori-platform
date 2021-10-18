@@ -217,7 +217,7 @@ namespace k2 {
             set_tombstone(0, datarecord->isTombstone);
             set_exist(0, 1);
             set_inmem(0, 0);
-            printAll();
+            // printAll();
             return 0;
         }
 

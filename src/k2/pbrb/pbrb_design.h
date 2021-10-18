@@ -663,7 +663,7 @@ public:
     
     // PBRB Row -> SKVRecord
     dto::SKVRecord *generateSKVRecordByRow(RowAddr rAddr, const String &collName, std::shared_ptr<dto::Schema> schema);
-    dto::DataRecord *generateDataRecord(dto::SKVRecord *skvRecord, KeyValueNode &node, int order, void *hotAddr);
+    dto::DataRecord *generateDataRecord(dto::SKVRecord *skvRecord, KeyValueNode *node, int order, void *hotAddr);
     // getSchemaVer by hotAddr in SimpleSchema
     uint32_t getSchemaVer(void *hotAddr) {
         auto pagePtr = getPageAddr(hotAddr);

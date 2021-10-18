@@ -736,7 +736,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 void *hotAddr = static_cast<void *>(rec);
                 dto::SKVRecord *sRec = pbrb->generateSKVRecordByRow(hotAddr, request.collectionName, schemaVer->second);
                 // TODO: ADD tombstone info.
-                result = pbrb->generateDataRecord(sRec, node, order, hotAddr);
+                result = pbrb->generateDataRecord(sRec, nodePtr, order, hotAddr);
 
                 // TODO: Evict expired versions.
             }
@@ -750,14 +750,19 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     ////////////////////////////////////
 
     // case need push: WI && WI.ts < tx.timestamp
+    // dto::DataRecord* rec = nodePtr->get_datarecord(request.mtr.timestamp);
+    // auto result = rec;
+    K2LOG_D(log::skvsvr, "Result of Getrecord with status{} key{}", rec ? rec->status : -1, nodePtr->get_key());
+
     bool needPush = result != nullptr && result->status == dto::DataRecord::WriteIntent && result->timestamp.compareCertain(request.mtr.timestamp) < 0;
 
+    // happy case: either committed, or txn is reading its own write, or there is no matching version
     if (!needPush) {
         return _makeReadOK(result);
     }
-    K2LOG_D(log::skvsvr, "need push with state{}, record ts={}, mtr={}",
+    K2LOG_I(log::skvsvr, "need push with state{}, record ts={}, mtr={}",
                 rec->status, rec->timestamp, request.mtr.timestamp);
-    K2LOG_D(log::skvsvr, "need push node states:size={} begin is empty {} second is empty {} third is empty {}",
+    K2LOG_I(log::skvsvr, "need push node states:size={} begin is empty {} second is empty {} third is empty {}",
                 nodePtr->size(), nodePtr->_getpointer(0)==nullptr,nodePtr->_getpointer(1)==nullptr,nodePtr->_getpointer(2)==nullptr);
 
     // record is still pending and isn't from same transaction.
@@ -1198,7 +1203,7 @@ seastar::future<std::tuple<Status, dto::K23SIWriteResponse>>
 K23SIPartitionModule::handleWrite(dto::K23SIWriteRequest&& request, FastDeadline deadline) {
     // NB: failures in processing a write do not require that we set the TR state to aborted at the TRH. We rely on
     //     the client to do the correct thing and issue an abort on a failure.
-    K2LOG_D(log::skvsvr, "Partition: {}, handle write: {}", _partition, request);
+    K2LOG_I(log::skvsvr, "Partition: {}, handle write: {}", _partition, request);
     if (request.designateTRH) {
         if (!_validateRequestPartition(request)) {
             // tell client their collection partition is gone
@@ -1251,7 +1256,7 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
     if (rec != nullptr && rec->status  == dto::DataRecord::WriteIntent && rec->timestamp != request.mtr.timestamp) {
         // this is a write request finding a WI from a different transaction. Do a push with the remaining
         // deadline time.
-        K2LOG_D(log::skvsvr, "different WI found for key {}, ol", request.key);
+        K2LOG_I(log::skvsvr, "different WI found for key {}, ol", request.key);
         return _doPush(request.key, rec->timestamp, request.mtr, deadline)
             .then([this, request = std::move(request), deadline](auto&& retryChallenger) mutable {
                 if (!retryChallenger.is2xxOK()) {
