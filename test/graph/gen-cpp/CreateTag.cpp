@@ -53,7 +53,9 @@ using namespace ::apache::thrift::server;
 static std::unordered_map<std::string, int32_t> spaceTable;
 
 static std::unordered_map<std::string, int32_t> tagTable;
-
+static std::unordered_map<std::string, std::vector<std::string>> name2Eps = {
+    {"test1", {"tcp+k2rpc://0.0.0.0:10000"}},{"test2", {"tcp+k2rpc://0.0.0.0:10001"}},{"test3", {"tcp+k2rpc://0.0.0.0:10002"}}
+};
 bool finish = false;
 
 struct MyCollectionCreateRequest
@@ -291,7 +293,11 @@ public:
         bool isRepeated = false;
         int32_t spaceID;
         std::vector<k2::String> endpoints;
-        endpoints.push_back("tcp+k2rpc://0.0.0.0:10000");
+        std::vector<std::string> stdEndpoints = name2Eps[req.properties.space_name];
+        for (const std::string& ep : stdEndpoints) {
+            endpoints.emplace_back(ep);
+        }
+        
         //rangeEnds
         std::vector<k2::String> rangeEnds;
         rangeEnds.push_back("");
@@ -373,7 +379,9 @@ public:
         }
         return;
     }
+    void addVertices(ExecResponse& _return, const AddVerticesRequest& req){
 
+    }
     int32_t add(const int32_t num1, const int32_t num2)
     {
         // Your implementation goes here

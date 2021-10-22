@@ -18,7 +18,7 @@ int main(int argc, char **argv) {
     // ::apache::thrift::stdcxx::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
     // ::apache::thrift::stdcxx::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
 
-   std::shared_ptr<TTransport> socket(new TSocket("localhost", 9090));
+   std::shared_ptr<TTransport> socket(new TSocket("localhost", 9076));
    std::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
    std::shared_ptr<TProtocol> protocol(new TBinaryProtocol(transport));
   

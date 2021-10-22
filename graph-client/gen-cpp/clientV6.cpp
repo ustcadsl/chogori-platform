@@ -65,28 +65,22 @@ int main(int argc, char **argv) {
 
        CreateTagReq tagReq;
        tagReq.tag_name = "tag1";
-
-     //  tagReq.space_id = _return.id.space_id;
         tagReq.space_id = 1;
-     //  tagReq.skv_graph_schema = tagSchema;
+       ExecResp tag_resp;
 
+       client.createTag(tag_resp,tagReq);
 
-    //   ExecResp tag_resp;
-
-    //   client.createTag(tag_resp,tagReq);
-
-    //   std::cout<<"tagID:  "<<tag_resp.id.tag_id<<std::endl;
-    //    std::cout<<"code： "<<tag_resp.code<<std::endl;
+       std::cout<<"tagID:  "<<tag_resp.id.tag_id<<std::endl;
+        std::cout<<"code： "<<tag_resp.code<<std::endl;
 
 
   
     //    std::cout<<client.add(1,2)<<std::endl;
 
 
-
 //space 
         SpaceDesc testDesc2;
-       testDesc2.space_name="graphTest";
+       testDesc2.space_name="test2";
       
         CreateSpaceReq testReq2;
        testReq2.properties = testDesc2;
@@ -97,12 +91,22 @@ int main(int argc, char **argv) {
 
        std::cout<<"SpaceID: "<<_return2.id.space_id<<std::endl;
        std::cout<<"code： "<<_return2.code<<std::endl;
-       
+     
+      
+       CreateTagReq tagReq_2;
+       tagReq_2.tag_name = "tag_2";
+        tagReq_2.space_id = 1;
+       ExecResp tag_resp_2;
 
+       client.createTag(tag_resp_2,tagReq_2);
+
+       std::cout<<"tagID:  "<<tag_resp_2.id.tag_id<<std::endl;
+        std::cout<<"code： "<<tag_resp_2.code<<std::endl;
 
      
         
         transport->close();
+
 
     } catch (TException& tx) {
         std::cout << "ERROR: " << tx.what() << std::endl;
