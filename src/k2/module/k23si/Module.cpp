@@ -764,6 +764,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     K2LOG_I(log::skvsvr, "need push node states:size={} begin is empty {} second is empty {} third is empty {}",
                 nodePtr->size(), nodePtr->_getpointer(0)==nullptr,nodePtr->_getpointer(1)==nullptr,nodePtr->_getpointer(2)==nullptr);
 
+    K2ASSERT(log::skvsvr, false, "HANDLE READ DO PUSH HERE!");
     // record is still pending and isn't from same transaction.
     return _doPush(request.key,result->timestamp, request.mtr, deadline)
         .then([this, request=std::move(request), deadline](auto&& retryChallenger) mutable {
@@ -1335,9 +1336,11 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, KeyValueNode* 
     dto::DataRecord *rec = new dto::DataRecord{.value=request.value.copy(), .isTombstone=request.isDelete, .timestamp=request.mtr.timestamp,
                         .prevVersion=nullptr, .status=dto::DataRecord::WriteIntent, .request_id=request.request_id};
 
-    KVNode->insert_datarecord(rec);
+    KVNode->printAll();
+    KVNode->insert_datarecord(rec, pbrb);
     // TODO: evict old hot version in pbrb!
     KVNode->set_writeintent();
+    K2LOG_D(log::skvsvr, "After _createWI:");
     KVNode->printAll();
     auto status = _twimMgr.addWrite(std::move(request.mtr), std::move(request.key), std::move(request.trh), std::move(request.trhCollection));
 
@@ -1716,7 +1719,7 @@ K23SIPartitionModule::_getDataRecordForRead(VersionSet& versions, dto::Timestamp
 
 // Helper to remove a WI and delete the key from the indexer of there are no committed records
 void K23SIPartitionModule::_removeWI(KeyValueNode& node) {
-    node.remove_datarecord(0);
+    node.remove_datarecord(0, pbrb);
     //TODO check available
     if (node.begin() == nullptr) {
         _indexer.erase(node.get_key());

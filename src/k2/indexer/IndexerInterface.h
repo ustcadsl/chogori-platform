@@ -202,35 +202,7 @@ namespace k2 {
 
         dto::DataRecord *get_datarecord(const dto::Timestamp &timestamp, int &order, PBRB *pbrb);
 
-        int insert_datarecord(dto::DataRecord *datarecord) {
-            if(size() > 0) {
-                if(valuedata[0].valuepointer->status == dto::DataRecord::Committed) {
-                    datarecord->prevVersion = valuedata[0].valuepointer;
-                    for (int i = 2; i > 0; i--) {
-                        valuedata[i] = valuedata[i - 1];
-                        set_tombstone(i, is_tombstone(i - 1));
-                        set_exist(i, is_exist(i - 1));
-                        set_inmem(i, is_inmem(i - 1));
-                    }
-                    set_zero_writeintent(); // WI = False;
-                }
-                else {
-                    size_dec();
-                    datarecord->prevVersion = valuedata[1].valuepointer;
-                    set_writeintent(); // WI = True;
-                }
-            }
-			         
-            valuedata[0].valuepointer = datarecord;
-            valuedata[0].timestamp = datarecord->timestamp.tEndTSECount();
-            size_inc();
-            set_tombstone(0, datarecord->isTombstone);
-            set_exist(0, 1);
-            set_inmem(0, 0);
-            K2LOG_I(log::indexer, "After insert new datarecord:");
-            printAll();
-            return 0;
-        }
+        int insert_datarecord(dto::DataRecord *datarecord, PBRB *pbrb);
 
         int insert_hot_datarecord(const dto::Timestamp &timestamp, dto::DataRecord *datarecord) {
             for (int i = 0; i < 3; ++i)
@@ -290,68 +262,11 @@ namespace k2 {
             return 1;
         }
 
-        int remove_datarecord(dto::DataRecord *datarecord) {
-            if (datarecord == nullptr) {
-                return 1;
-            }
+        dto::DataRecord *_getColdVerPtr(int order, PBRB *pbrb);
 
-            dto::DataRecord *toremove;
-            for (int i = 0; i < 3; ++i) {
-                if (valuedata[i].valuepointer == nullptr) {
-                    return 1;
-                }
-                if (valuedata[i].valuepointer == datarecord) {
-                    return this->remove_datarecord(i);
-                }
-            }
+        int remove_datarecord(dto::DataRecord *datarecord, PBRB *pbrb);
 
-            dto::DataRecord *viter = valuedata[2].valuepointer;
-            while (viter->prevVersion != nullptr && viter->prevVersion != datarecord) {
-                // skip newer records
-                viter = viter->prevVersion;
-            }
-            if (viter->prevVersion == nullptr) {
-                return 1;
-            }
-            toremove = viter->prevVersion;
-            viter->prevVersion = toremove->prevVersion;
-            size_dec();
-            delete toremove;
-            return 0;
-        }
-
-        int remove_datarecord(int order) {
-            if (order >= 3 || valuedata[order].valuepointer == nullptr) {
-                return 1;
-            }
-            dto::DataRecord *toremove = valuedata[order].valuepointer;
-            if (order > 0) {
-                valuedata[order - 1].valuepointer->prevVersion = valuedata[order].valuepointer->prevVersion;
-            }
-            for (int j = order; j < 2; ++j) {
-                valuedata[j] = valuedata[j + 1];
-                set_tombstone(j, is_tombstone(j + 1));
-                set_exist(j, is_exist(j + 1));
-                set_inmem(j, is_inmem(j + 1));
-            }
-            if (size_dec()==1) 
-                K2LOG_D(log::indexer, "try to remove with no versions, Key: {} {} {}", key.schemaName, key.partitionKey, key.rangeKey);
-            if (valuedata[2].valuepointer != nullptr) {
-                if(valuedata[2].valuepointer->prevVersion != nullptr){
-                    valuedata[2].valuepointer = valuedata[2].valuepointer->prevVersion;
-                    set_tombstone(2, valuedata[2].valuepointer->isTombstone);
-                    set_inmem(2, 0);
-                }
-                else {
-                    set_zero(2);
-                    set_tombstone(2, 0);
-                    set_exist(2, 0);
-                    set_inmem(2, 0);
-                }
-            }
-            delete toremove;
-            return 0;
-        }
+        int remove_datarecord(int order, PBRB *pbrb);
 
         dto::DataRecord *_getpointer(int order) {
             return valuedata[order].valuepointer;
