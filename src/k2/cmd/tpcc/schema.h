@@ -45,6 +45,15 @@ static const String tpccCollectionName = "TPCC";
     } \
     while (0) \
 
+#define CHECK_READ_STATUS_TYPE(read_result,type) \
+    do { \
+        if (!((read_result).status.is2xxOK())) { \
+            K2LOG_D(log::tpcc, "TPC-C failed to read rows: {}", (read_result).status); \
+            return make_exception_future<type>(std::runtime_error(String("TPC-C failed to read rows: ") + __FILE__ + ":" + std::to_string(__LINE__))); \
+        } \
+    } \
+    while (0) \
+
 template<typename ValueType>
 seastar::future<WriteResult> writeRow(ValueType& row, K2TxnHandle& txn, bool erase = false)
 {
@@ -90,7 +99,7 @@ struct Address {
     SKV_RECORD_FIELDS(Street_1, Street_2, City, State, Zip);
 };
 
-uint64_t getDate()
+inline uint64_t getDate()
 {
     return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
@@ -139,7 +148,7 @@ public:
     SKV_RECORD_FIELDS(WarehouseID, Tax, YTD, Name, address);
 
 private:
-    ConfigVar<uint16_t> _districts_per_warehouse{"districts_per_warehouse"};
+    ConfigVar<int16_t> _districts_per_warehouse{"districts_per_warehouse"};
     ConfigVar<uint32_t> _customers_per_district{"customers_per_district"};
 };
 
@@ -227,7 +236,12 @@ public:
 
     Customer(RandomContext& random, int16_t w_id, int16_t d_id, int32_t c_id) :
             WarehouseID(w_id), DistrictID(d_id), CustomerID(c_id) {
-        LastName = random.RandowLastNameString();
+        if (c_id < 1000) {
+            LastName = random.RandowLastNameString(true, c_id);
+        } else {
+            LastName = random.RandowLastNameString();
+        }
+
         MiddleName = "OE";
         FirstName = random.RandomString(8, 16);
         address = Address(random);
@@ -281,6 +295,40 @@ public:
         Info, address);
 };
 
+// secondary index for customer name in original TPCC created by the following ddl
+//
+//      CREATE INDEX idx_customer_name ON customer (c_w_id,c_d_id,c_last,c_first);
+//
+class IdxCustomerName {
+public:
+    static inline dto::Schema idx_customer_name_schema {
+        .name = "idx_customer_name",
+        .version = 1,
+        .fields = std::vector<dto::SchemaField> {
+            {dto::FieldType::INT16T, "ID", false, false},
+            {dto::FieldType::INT16T, "DID", false, false},
+            {dto::FieldType::STRING, "LastName", false, false},
+            {dto::FieldType::INT32T, "CID", false, false}
+        },
+        .partitionKeyFields = std::vector<uint32_t> { 0 },
+        .rangeKeyFields = std::vector<uint32_t> { 1, 2, 3 }
+    };
+
+    IdxCustomerName(int16_t w_id, int16_t d_id, String c_last, int32_t c_id) :
+        WarehouseID(w_id), DistrictID(d_id), LastName(c_last), CustomerID(c_id) {};
+
+    IdxCustomerName() = default;
+
+    std::optional<int16_t> WarehouseID;
+    std::optional<int16_t> DistrictID;
+    std::optional<String> LastName;
+    std::optional<int32_t> CustomerID;
+
+    static inline thread_local std::shared_ptr<dto::Schema> schema;
+    static inline String collectionName = tpccCollectionName;
+    SKV_RECORD_FIELDS(WarehouseID, DistrictID, LastName, CustomerID);
+};
+
 class History {
 public:
     static inline dto::Schema history_schema {
@@ -306,6 +354,7 @@ public:
         CustomerDistrictID = d_id;
         Date = getDate();
         Amount = 10;
+        DistrictID = d_id;
         Info = random.RandomString(12, 24);
     }
 
@@ -353,7 +402,7 @@ public:
                 {dto::FieldType::INT16T, "ID", false, false},
                 {dto::FieldType::INT16T, "DID", false, false},
                 {dto::FieldType::INT64T, "OID", false, false},
-                {dto::FieldType::INT16T, "LineCount", false, false},
+                {dto::FieldType::INT16T, "OrderLineCount", false, false},
                 {dto::FieldType::INT64T, "EntryDate", false, false},
                 {dto::FieldType::INT32T, "CID", false, false},
                 {dto::FieldType::INT32T, "CarrierID", false, false},
@@ -366,13 +415,13 @@ public:
     Order(RandomContext& random, int16_t w_id, int16_t d_id, int32_t c_id, int64_t id) :
             WarehouseID(w_id), DistrictID(d_id), OrderID(id) {
         CustomerID = c_id;
-        EntryDate = 0; // TODO
+        EntryDate = getDate();
         if (id < 2101) {
             CarrierID = random.UniformRandom(1, 10);
         } else {
             CarrierID = 0;
         }
-        OrderLineCount = random.UniformRandom(5, 15);
+        OrderLineCount = 1;       
         AllLocal = 1;
     }
 
@@ -405,8 +454,37 @@ public:
         CarrierID, AllLocal);
 
 private:
-    ConfigVar<uint16_t> _districts_per_warehouse{"districts_per_warehouse"};
+    ConfigVar<int16_t> _districts_per_warehouse{"districts_per_warehouse"};
     ConfigVar<uint32_t> _customers_per_district{"customers_per_district"};
+};
+
+// secondary index for order table on (warehouse_id, district_id, customer_id, and order_id)
+class IdxOrderCustomer {
+public:
+    static inline dto::Schema idx_order_customer_schema {
+        .name = "idx_order_customer",
+        .version = 1,
+        .fields = std::vector<dto::SchemaField> {
+            {dto::FieldType::INT16T, "ID", false, false},
+            {dto::FieldType::INT16T, "DID", false, false},
+            {dto::FieldType::INT32T, "CID", false, false},
+            {dto::FieldType::INT64T, "OID", false, false}
+        },
+        .partitionKeyFields = std::vector<uint32_t> { 0 },
+        .rangeKeyFields = std::vector<uint32_t> { 1, 2, 3 }
+    };
+
+    IdxOrderCustomer(int16_t w_id, int16_t d_id, int32_t c_id, int64_t o_id) :
+        WarehouseID(w_id), DistrictID(d_id), CustomerID(c_id), OrderID(o_id) {};
+
+    std::optional<int16_t> WarehouseID;
+    std::optional<int16_t> DistrictID;
+    std::optional<int32_t> CustomerID;
+    std::optional<int64_t> OrderID;
+
+    static inline thread_local std::shared_ptr<dto::Schema> schema;
+    static inline String collectionName = tpccCollectionName;
+    SKV_RECORD_FIELDS(WarehouseID, DistrictID, CustomerID, OrderID);
 };
 
 class NewOrder {
@@ -498,7 +576,7 @@ public:
         Amount = 0;
     }
 
-    OrderLine(int16_t w_id, int16_t d_id, int64_t o_id, int32_t line_number) : 
+    OrderLine(int16_t w_id, int16_t d_id, int64_t o_id, int32_t line_number) :
         WarehouseID(w_id), DistrictID(d_id), OrderID(o_id), OrderLineNumber(line_number) {}
 
     OrderLine() = default;
@@ -673,10 +751,12 @@ public:
         Dist_03, Dist_04, Dist_05, Dist_06, Dist_07, Dist_08, Dist_09, Dist_10, Info);
 };
 
-void setupSchemaPointers() {
+void inline setupSchemaPointers() {
     Warehouse::schema = std::make_shared<dto::Schema>(Warehouse::warehouse_schema);
     District::schema = std::make_shared<dto::Schema>(District::district_schema);
     Customer::schema = std::make_shared<dto::Schema>(Customer::customer_schema);
+    IdxCustomerName::schema = std::make_shared<dto::Schema>(IdxCustomerName::idx_customer_name_schema);
+    IdxOrderCustomer::schema = std::make_shared<dto::Schema>(IdxOrderCustomer::idx_order_customer_schema);
     History::schema = std::make_shared<dto::Schema>(History::history_schema);
     Order::schema = std::make_shared<dto::Schema>(Order::order_schema);
     NewOrder::schema = std::make_shared<dto::Schema>(NewOrder::neworder_schema);
@@ -684,4 +764,3 @@ void setupSchemaPointers() {
     Item::schema = std::make_shared<dto::Schema>(Item::item_schema);
     Stock::schema = std::make_shared<dto::Schema>(Stock::stock_schema);
 }
-

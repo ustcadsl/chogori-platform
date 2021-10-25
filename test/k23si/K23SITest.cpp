@@ -35,6 +35,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include "Log.h"
 
 namespace k2 {
+using namespace dto;
 struct DataRec {
     String f1;
     String f2;
@@ -201,7 +202,7 @@ private:
             .trhCollection = cname,
             .isDelete = isDelete,
             .designateTRH = isTRH,
-            .rejectIfExists = false,
+            .precondition = dto::ExistencePrecondition::None,
             .request_id = id++,
             .key = key,
             .value = std::move(record.storage),

@@ -132,7 +132,7 @@ seastar::future<ReadResult<dto::SKVRecord>> K2TxnHandle::read(dto::Key key, Stri
             K2LOG_D(log::skvclient, "got status={}", status);
             if (!status.is2xxOK()) {
                 return seastar::make_ready_future<ReadResult<dto::SKVRecord>>(
-                            ReadResult<dto::SKVRecord>(std::move(status), SKVRecord()));
+                            ReadResult<dto::SKVRecord>(std::move(status), dto::SKVRecord()));
             }
 
             return _client->getSchema(collName, schemaName, k2response.value.schemaVersion)
@@ -144,10 +144,10 @@ seastar::future<ReadResult<dto::SKVRecord>> K2TxnHandle::read(dto::Key key, Stri
                     return seastar::make_ready_future<ReadResult<dto::SKVRecord>>(
                         ReadResult<dto::SKVRecord>(
                         dto::K23SIStatus::OperationNotAllowed("Matching schema could not be found"),
-                        SKVRecord()));
+                        dto::SKVRecord()));
                 }
 
-                SKVRecord skv_record(collName, schema_ptr, std::move(storage), true);
+                dto::SKVRecord skv_record(collName, schema_ptr, std::move(storage), true);
                 return seastar::make_ready_future<ReadResult<dto::SKVRecord>>(
                         ReadResult<dto::SKVRecord>(std::move(s), std::move(skv_record)));
             });
@@ -156,7 +156,7 @@ seastar::future<ReadResult<dto::SKVRecord>> K2TxnHandle::read(dto::Key key, Stri
 
 
 std::unique_ptr<dto::K23SIWriteRequest> K2TxnHandle::_makeWriteRequest(dto::SKVRecord& record, bool erase,
-                                                                      bool rejectIfExists) {
+                                                                    dto::ExistencePrecondition precondition) {
     for (const String& key : record.partitionKeys) {
         if (key == "") {
             throw K23SIClientException("Partition key field not set for write request");
@@ -183,7 +183,7 @@ std::unique_ptr<dto::K23SIWriteRequest> K2TxnHandle::_makeWriteRequest(dto::SKVR
         _trh_collection,
         erase,
         isTRH,
-        rejectIfExists,
+        precondition,
         _client->write_ops,
         key,
         record.storage.share(),
@@ -207,7 +207,7 @@ std::unique_ptr<dto::K23SIWriteRequest> K2TxnHandle::_makePartialUpdateRequest(d
             _trh_collection,
             false, // Partial update cannot be a delete
             isTRH,
-            false, // Partial update must be applied on existing record
+            dto::ExistencePrecondition::Exists, // Partial update must be applied on existing record
             _client->write_ops,
             std::move(key),
             record.storage.share(),
@@ -238,7 +238,7 @@ seastar::future<EndResult> K2TxnHandle::end(bool shouldCommit) {
 
         return seastar::make_ready_future<EndResult>(EndResult(Statuses::S200_OK("default end result")));
     }
-
+    K2LOG_D(log::skvclient, "End Mtr {}", _mtr);
     auto* request  = new dto::K23SITxnEndRequest {
         dto::PVID{}, // Will be filled in by PartitionRequest
         _trh_collection,
@@ -287,10 +287,6 @@ seastar::future<EndResult> K2TxnHandle::end(bool shouldCommit) {
                 return seastar::make_ready_future<EndResult>(EndResult(std::move(s)));
             });
         }).finally([request] () { delete request; });
-}
-
-seastar::future<WriteResult> K2TxnHandle::erase(SKVRecord& record) {
-    return write(record, true);
 }
 
 K23SIClient::K23SIClient(const K23SIClientConfig &) :
@@ -372,7 +368,7 @@ seastar::future<Status> K23SIClient::refreshSchemaCache(const String& collection
         }
 
         auto& schemaMap = schemas[collectionName];
-        for (const Schema& schema : collSchemas) {
+        for (const auto& schema : collSchemas) {
             schemaMap[schema.name][schema.version] = std::make_shared<dto::Schema>(schema);
         }
 
@@ -459,8 +455,8 @@ seastar::future<CreateQueryResult> K23SIClient::createQuery(const String& collec
 
         Query query;
         query.schema = response.schema;
-        query.startScanRecord = SKVRecord(collectionName, query.schema);
-        query.endScanRecord = SKVRecord(collectionName, query.schema);
+        query.startScanRecord = dto::SKVRecord(collectionName, query.schema);
+        query.endScanRecord = dto::SKVRecord(collectionName, query.schema);
         query.request.collectionName = collectionName;
         return CreateQueryResult{Statuses::S200_OK("Created query"), std::move(query)};
     });
@@ -479,7 +475,7 @@ void K2TxnHandle::_prepareQueryRequest(Query& query) {
         if (key == "") {
             emptyField = true;
             if (query.request.reverseDirection) {
-                key = NullLastToKeyString();
+                key = dto::NullLastToKeyString();
             }
         } else if (emptyField) {
             throw K23SIClientException("Key fields of startScanRecord are not a prefix");
@@ -489,7 +485,7 @@ void K2TxnHandle::_prepareQueryRequest(Query& query) {
         if (key == "") {
             emptyField = true;
             if (query.request.reverseDirection) {
-                key = NullLastToKeyString();
+                key = dto::NullLastToKeyString();
             }
         } else if (emptyField) {
             throw K23SIClientException("Key fields of startScanRecord are not a prefix");
@@ -501,7 +497,7 @@ void K2TxnHandle::_prepareQueryRequest(Query& query) {
         if (key == "") {
             emptyField = true;
             if (!query.request.reverseDirection) {
-                key = NullLastToKeyString();
+                key = dto::NullLastToKeyString();
             }
         } else if (emptyField) {
             throw K23SIClientException("Key fields of endScanRecord are not a prefix");
@@ -511,7 +507,7 @@ void K2TxnHandle::_prepareQueryRequest(Query& query) {
         if (key == "") {
             emptyField = true;
             if (!query.request.reverseDirection) {
-                key = NullLastToKeyString();
+                key = dto::NullLastToKeyString();
             }
         } else if (emptyField) {
             throw K23SIClientException("Key fields of endScanRecord are not a prefix");
@@ -524,10 +520,8 @@ void K2TxnHandle::_prepareQueryRequest(Query& query) {
         // If we've padded the end key for a forward prefix scan, we need to add one more byte
         // because the end key is exclusive but we want to include any record that may actually
         // have null last key fields set
-        query.request.endKey.partitionKey.append(" ", 1);
         query.request.endKey.rangeKey.append(" ", 1);
     }
-
 
     if (query.request.key > query.request.endKey && !query.request.reverseDirection &&
                 query.request.endKey.partitionKey != "") {
@@ -544,6 +538,7 @@ void K2TxnHandle::_prepareQueryRequest(Query& query) {
 // Get one set of paginated results for a query. User may need to call again with same query
 // object to get more results
 seastar::future<QueryResult> K2TxnHandle::query(Query& query) {
+    K2LOG_I(log::skvclient, "Client prepare query");
     if (!_valid) {
         return seastar::make_exception_future<QueryResult>(K23SIClientException("Invalid use of K2TxnHandle"));
     }

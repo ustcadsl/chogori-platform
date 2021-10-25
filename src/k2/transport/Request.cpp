@@ -45,7 +45,7 @@ Request::Request(Request&& o):
     metadata(std::move(o.metadata)),
     payload(std::move(o.payload)) {
     o.verb = InternalVerbs::NIL;
-    K2LOG_D(log::tx, "move Request @{}, with verb={}, from {}", ((void*)this), int(verb), endpoint.url);
+    K2LOG_D(log::tx, "From o{} move Request @{}, with verb={}, from {}", ((void*)&o), ((void*)this), int(verb), endpoint.url);
 }
 
 } // k2tx

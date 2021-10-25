@@ -36,25 +36,25 @@ Payload::PayloadPosition::PayloadPosition(_Size bIdx, _Size bOff, size_t offset)
     // Empty payload will have position of (bidx=0, boff=0, off=0)
 }
 
-Payload::Payload(BinaryAllocatorFunctor allocator):
-    _size(0), _capacity(0), _allocator(allocator) {
+Payload::Payload(BinaryAllocator&& allocator):
+    _size(0), _capacity(0), _allocator(std::move(allocator)) {
 }
 
 Payload::Payload(std::vector<Binary>&& externallyAllocatedBuffers, size_t containedDataSize):
     _buffers(std::move(externallyAllocatedBuffers)),
     _size(containedDataSize),
     _capacity(_size),
-    _allocator(nullptr) {
+    _allocator(BinaryAllocator()) {
 }
 
 Payload::Payload():
     _size(0),
     _capacity(0),
-    _allocator(nullptr) {
+    _allocator(BinaryAllocator()) {
 }
 
-Binary Payload::DefaultAllocator() {
-    return Binary(8192);
+BinaryAllocator Payload::DefaultAllocator(size_t default_size) {
+    return BinaryAllocator(default_size, [](size_t bsize) { return Binary(bsize); });
 }
 
 bool Payload::isEmpty() const {
@@ -93,7 +93,7 @@ void Payload::clear() {
 
 void Payload::appendBinary(Binary&& binary) {
     // we can only append into a non-self-allocating payload
-    K2ASSERT(log::tx, _allocator == nullptr, "cannot append to non-allocating payload");
+    K2ASSERT(log::tx, !_allocator.canAllocate(), "cannot append to non-allocating payload");
     _size += binary.size();
     _capacity += binary.size();
     _buffers.push_back(std::move(binary));
@@ -109,7 +109,7 @@ void Payload::seek(size_t offset) {
         // Just start at 0 and go up
         _currentPosition = PayloadPosition();
     }
-    _advancePosition(offset - _currentPosition.offset);
+    skip(offset - _currentPosition.offset);
 }
 
 void Payload::seek(PayloadPosition position) {
@@ -141,7 +141,7 @@ bool Payload::read(void* data, size_t size) {
         std::memcpy(data, buffer.get() + _currentPosition.bufferOffset, needToCopySize);
         size -= needToCopySize;
         data = (void*)((char*)data + needToCopySize);
-        _advancePosition(needToCopySize);
+        skip(needToCopySize);
     }
 
     return true;
@@ -160,7 +160,7 @@ bool Payload::read(Binary& binary, size_t size) {
 
     // the read is inside a single binary - we can just share in no-copy way
     binary = buffer.share(_currentPosition.bufferOffset, size);
-    _advancePosition(size);
+    skip(size);
     return true;
 }
 
@@ -168,7 +168,7 @@ bool Payload::read(char& b) {
     if (getDataRemaining() == 0) return false;
 
     b = _buffers[_currentPosition.bufferIndex][_currentPosition.bufferOffset];
-    _advancePosition(1);
+    skip(1);
     return true;
 }
 
@@ -201,7 +201,7 @@ bool Payload::read(Payload& other) {
     other.clear();
     other._size = size;
     other._capacity = size;
-    other._allocator = nullptr;
+    other._allocator = BinaryAllocator();
     other._currentPosition = PayloadPosition();
     while(size > 0) {
         auto shared = _buffers[_currentPosition.bufferIndex].share();
@@ -212,7 +212,7 @@ bool Payload::read(Payload& other) {
         shared.trim(trimSize);
         other._buffers.push_back(std::move(shared));
         size -= trimSize;
-        _advancePosition(trimSize);
+        skip(trimSize);
     }
     return true;
 }
@@ -233,16 +233,16 @@ bool Payload::copyFromPayload(Payload& src, size_t toCopy) {
         size_t needToCopySize = std::min(toCopy, currentBufferRemaining);
 
         write(buffer.get() + src._currentPosition.bufferOffset, needToCopySize);
-        src._advancePosition(needToCopySize);
+        src.skip(needToCopySize);
         toCopy -= needToCopySize;
     }
 
     return true;
 }
 
-void Payload::skip(size_t advance) {
+void Payload::reserve(size_t advance) {
     ensureCapacity(_currentPosition.offset + advance);
-    _advancePosition(advance);
+    skip(advance);
 }
 
 void Payload::truncateToCurrent() {
@@ -267,7 +267,7 @@ void Payload::truncateToCurrent() {
 void Payload::write(char b) {
     ensureCapacity(_currentPosition.offset + 1);
     _buffers[_currentPosition.bufferIndex].get_write()[_currentPosition.bufferOffset] = b;
-    _advancePosition(1);
+    skip(1);
 }
 
 void Payload::write(const void* data, size_t size) {
@@ -279,7 +279,7 @@ void Payload::write(const void* data, size_t size) {
         size_t needToCopySize = std::min(size, currentBufferRemaining);
 
         std::memcpy(buffer.get_write() + _currentPosition.bufferOffset, data, needToCopySize);
-        _advancePosition(needToCopySize);
+        skip(needToCopySize);
         data = (void*)((char*)data + needToCopySize);
         size -= needToCopySize;
     }
@@ -320,7 +320,7 @@ void Payload::write(const Payload& other) {
         _buffers.push_back(std::move(buf));
         _size += sz;
         _capacity += sz;
-        _advancePosition(sz);
+        skip(sz);
     }
 }
 
@@ -328,9 +328,13 @@ void Payload::writeMany() {
     // this is needed for the base case of the recursive template version
 }
 
+size_t Payload::getFieldsSize() {
+    return 0;
+}
+
 bool Payload::_allocateBuffer() {
-    K2ASSERT(log::tx, _allocator, "cannot allocate buffer without allocator");
-    Binary buf = _allocator();
+    K2ASSERT(log::tx, _allocator.canAllocate(), "cannot allocate buffer without allocator");
+    Binary buf = _allocator.allocate();
     if (!buf) {
         return false;
     }
@@ -343,8 +347,8 @@ bool Payload::_allocateBuffer() {
     return true;
 }
 
-void Payload::_advancePosition(size_t advance) {
-    auto newOffset = advance + _currentPosition.offset;
+void Payload::skip(size_t numBytes) {
+    auto newOffset = numBytes + _currentPosition.offset;
     K2ASSERT(log::tx, newOffset <= _capacity, "offset must be within the existing payload");
 
     _size = std::max(_size, newOffset);
@@ -358,8 +362,8 @@ void Payload::_advancePosition(size_t advance) {
     }
 
     // the newoffset should now be within the existing memory. Find where it falls
-    while (advance > 0) {
-        auto canAdvance = std::min(advance,
+    while (numBytes > 0) {
+        auto canAdvance = std::min(numBytes,
                                    _buffers[_currentPosition.bufferIndex].size() - _currentPosition.bufferOffset);
         _currentPosition.offset += canAdvance;
         _currentPosition.bufferOffset += canAdvance;
@@ -368,7 +372,7 @@ void Payload::_advancePosition(size_t advance) {
             _currentPosition.bufferOffset = 0;
             ++_currentPosition.bufferIndex;
         }
-        advance -= canAdvance;
+        numBytes -= canAdvance;
     }
 }
 
@@ -387,7 +391,7 @@ uint32_t Payload::computeCrc32c() {
         checksum = crc32c::Extend(checksum, reinterpret_cast<const uint8_t*>(buffer.get() + _currentPosition.bufferOffset), needToCopySize);
 
         size -= needToCopySize;
-        _advancePosition(needToCopySize);
+        skip(needToCopySize);
     }
 
     // put the cursor back where it was before we started
@@ -405,7 +409,7 @@ Payload Payload::shareRegion(size_t startOffset, size_t nbytes){
     seek(startOffset);
     nbytes = std::min(_size - _currentPosition.offset, nbytes);
 
-    Payload shared(_allocator);
+    Payload shared(std::move(BinaryAllocator(_allocator)));
     shared._size = nbytes;
     shared._capacity = nbytes; // the capacity of the new payload stops with the current data written
 
@@ -430,8 +434,9 @@ Payload Payload::shareRegion(size_t startOffset, size_t nbytes){
     return shared;
 }
 
-Payload Payload::copy(BinaryAllocatorFunctor allocator) {
-    Payload copied(allocator);
+Payload Payload::copy(BinaryAllocator&& allocator) {
+    Payload copied;
+    Binary b = allocator.allocate(_size);
 
     // copy exactly the data we need
     size_t toCopy = _size;
@@ -440,13 +445,18 @@ Payload Payload::copy(BinaryAllocatorFunctor allocator) {
         auto& curBuf = _buffers[curBufIndex];
         auto copySizeFromCurBuf = std::min(toCopy, curBuf.size());
 
-        copied.write(curBuf.get(), copySizeFromCurBuf);
+        std::memcpy(b.get_write() + (b.size() - toCopy), curBuf.get(), copySizeFromCurBuf);
         toCopy -= copySizeFromCurBuf;
         curBufIndex++;
     }
 
-    copied.seek(0);
+    copied.appendBinary(std::move(b));
+    copied._allocator = std::move(allocator);
     return copied;
+}
+
+Payload Payload::copy() {
+    return copy(DefaultAllocator());
 }
 
 bool Payload::operator==(const Payload& o) const {
