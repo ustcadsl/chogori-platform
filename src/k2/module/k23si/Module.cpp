@@ -648,7 +648,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
 
     int order;
     K2LOG_I(log::skvsvr, "Ready to read datarecord");
-    DataRecord* rec = nodePtr->get_datarecord(request.mtr.timestamp, order);
+    DataRecord* rec = nodePtr->get_datarecord(request.mtr.timestamp, order, pbrb);
     if (rec != nullptr)
         K2LOG_I(log::skvsvr, "Node info ====== Timestamp: {}; Order: {}, SchemaVersion: {}", request.mtr.timestamp, order, rec->value.schemaVersion);
     DataRecord* result = nullptr;
@@ -704,7 +704,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex); 
                 BufferPage *pagePtr = retVal.first;
                 RowOffset rowOffset = retVal.second;
-                auto rowAddr = pbrb->cacheRowHeaderFrom(pagePtr, rowOffset, request.mtr.timestamp, rec);
+                auto rowAddr = pbrb->cacheRowHeaderFrom(pagePtr, rowOffset, rec);
                 K2LOG_I(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
                 
                 // copy fields
@@ -735,8 +735,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 K2LOG_I(log::skvsvr, "Case 3: Hot Version in KVNode");
                 void *hotAddr = static_cast<void *>(rec);
                 dto::SKVRecord *sRec = pbrb->generateSKVRecordByRow(hotAddr, request.collectionName, schemaVer->second);
-                // TODO: ADD tombstone info.
-                result = pbrb->generateDataRecord(sRec, nodePtr, order, hotAddr);
+                result = pbrb->generateDataRecord(sRec, hotAddr);
 
                 // TODO: Evict expired versions.
             }
@@ -845,61 +844,61 @@ void K23SIPartitionModule::_cacheFieldValueToPBRB(const dto::SchemaField& field,
             success = payload.read(value);
             size_t strSize = value.size();
             K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}, strSize:{}", field.type, field.name, value, strSize);
-            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, strSize, fieldID);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, strSize, fieldID, true);
         } break;
         case FieldType::INT16T: {
             int16_t value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
-            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
         case FieldType::INT32T: {
             int32_t value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
-            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
         case FieldType::INT64T: {
             int64_t value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
-            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
         case FieldType::FLOAT: {
             float value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
-            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
         case FieldType::DOUBLE: {
             double value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
-            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
         case FieldType::BOOL: {
             bool value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
-            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
         case FieldType::DECIMAL64: {
             std::decimal::decimal64 value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
-            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
         case FieldType::DECIMAL128: {
             std::decimal::decimal128 value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
-            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
         case FieldType::FIELD_TYPE: {
             FieldType value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
-            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID);
+            pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
         default:
             auto msg = fmt::format(
@@ -1251,13 +1250,19 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
     }
 
     // check to see if we should push or is this a write from same txn
-    KeyValueNode& KVNode = *nodePtr;
+    // KeyValueNode& KVNode = *nodePtr;
     dto::DataRecord* rec = nodePtr->begin();
-    if (rec != nullptr && rec->status  == dto::DataRecord::WriteIntent && rec->timestamp != request.mtr.timestamp) {
+
+    nodePtr->printAll();
+    bool isHot = nodePtr->is_inmem(0);
+
+    NodeVerMetadata verMD = nodePtr->getNodeVerMetaData(0, pbrb);
+
+    if (rec != nullptr && verMD.status == dto::DataRecord::WriteIntent && verMD.timestamp != request.mtr.timestamp) {
         // this is a write request finding a WI from a different transaction. Do a push with the remaining
         // deadline time.
         K2LOG_I(log::skvsvr, "different WI found for key {}, ol", request.key);
-        return _doPush(request.key, rec->timestamp, request.mtr, deadline)
+        return _doPush(request.key, verMD.timestamp, request.mtr, deadline)
             .then([this, request = std::move(request), deadline](auto&& retryChallenger) mutable {
                 if (!retryChallenger.is2xxOK()) {
                     // challenger must fail. Flush in case a TR was created during this call to handle write
@@ -1272,17 +1277,24 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
 
     // Handle idempotency here. If request ids match, then this was a retry message from the client
     // and we should return OK
-    if (rec != nullptr && rec->status == dto::DataRecord::WriteIntent &&
-        request.mtr.timestamp == rec->timestamp &&
-        request.request_id == rec->request_id) {
+    if (rec != nullptr && verMD.status == dto::DataRecord::WriteIntent &&
+        request.mtr.timestamp == verMD.timestamp &&
+        request.request_id == verMD.request_id) {
         K2LOG_D(log::skvsvr, "duplicate write encountered in request {}", request);
         return RPCResponse(dto::K23SIStatus::Created("wi was already created"), dto::K23SIWriteResponse{});
     }
 
     // Note that if we are here and a WI exists, it must be from the txn of the current request
     dto::DataRecord* head = rec;
+    bool isTombstone;
+    if (head != nullptr) {
+        if (isHot)
+            isTombstone = pbrb->getIsTombstoneRow(head);
+        else
+            isTombstone = rec->isTombstone;
+    }
 
-    if (request.rejectIfExists && head && !head->isTombstone) {
+    if (request.rejectIfExists && head && !isTombstone) {
         // Need to add to read cache to prevent an erase coming in before this requests timestamp
         // If the condition passes (ie, there was no previous version and the insert succeeds) then
         // we do not need to insert into the read cache because the write intent will handle conflicts
@@ -1297,7 +1309,7 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
 
     if (request.fieldsForPartialUpdate.size() > 0) {
         // parse the partial record to full record
-        if (!head || head->isTombstone) {
+        if (!head || isTombstone) {
             K2LOG_D(log::skvsvr, "partial update request {} not accepted since there is no previous version to update", request);
             // cannot parse partial record without a version
             return RPCResponse(dto::K23SIStatus::KeyNotFound("can not partial update with no/deleted version"), dto::K23SIWriteResponse{});
@@ -1311,20 +1323,22 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
 
 
     // all checks passed - we're ready to place this WI as the latest version
-    auto status = _createWI(std::move(request), KVNode);
+    auto status = _createWI(std::move(request), nodePtr);
     K2LOG_D(log::skvsvr, "WI creation with status {}", status);
     return RPCResponse(std::move(status), dto::K23SIWriteResponse{});
 }
 
 Status
-K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, KeyValueNode& KVNode) {
+K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, KeyValueNode* KVNode) {
     K2LOG_D(log::skvsvr, "Write Request creating WI: {}", request);
     // we need to copy this data into a new memory block so that we don't hold onto and fragment the transport memory
     dto::DataRecord *rec = new dto::DataRecord{.value=request.value.copy(), .isTombstone=request.isDelete, .timestamp=request.mtr.timestamp,
                         .prevVersion=nullptr, .status=dto::DataRecord::WriteIntent, .request_id=request.request_id};
 
-    KVNode.insert_datarecord(rec);
-
+    KVNode->insert_datarecord(rec);
+    // TODO: evict old hot version in pbrb!
+    KVNode->set_writeintent();
+    KVNode->printAll();
     auto status = _twimMgr.addWrite(std::move(request.mtr), std::move(request.key), std::move(request.trh), std::move(request.trhCollection));
 
     if (!status.is2xxOK()) {
@@ -1509,12 +1523,14 @@ Status K23SIPartitionModule::_finalizeTxnWIs(dto::Timestamp txnts, dto::EndActio
                  "TWIM {} has registered WI for key {} but key is not in indexer", *twim, key);
 
         KeyValueNode& KVNode = *_indexer.extractFromIter(idxIt);
+        NodeVerMetadata verMD = KVNode.getNodeVerMetaData(0, pbrb);
         dto::DataRecord* WIRec = KVNode.begin();
-        K2ASSERT(log::skvsvr, WIRec!=nullptr&&WIRec->status==dto::DataRecord::WriteIntent,
+        KVNode.printAll();
+        K2ASSERT(log::skvsvr, WIRec!=nullptr&&verMD.status==dto::DataRecord::WriteIntent,
                  "TWIM {} has registered WI for key{}, but key does not have a WI", *twim, key);
-        K2ASSERT(log::skvsvr, WIRec->timestamp == txnts,
+        K2ASSERT(log::skvsvr, verMD.timestamp == txnts,
                  "TWIM {} has registered WI for key{}, but WI is from different transaction {}",
-                 *twim, key, WIRec->timestamp);
+                 *twim, key, verMD.timestamp);
 
         switch (action) {
             case dto::EndAction::Abort: {
@@ -1524,7 +1540,13 @@ Status K23SIPartitionModule::_finalizeTxnWIs(dto::Timestamp txnts, dto::EndActio
             }
             case dto::EndAction::Commit: {
                 K2LOG_D(log::skvsvr, "committing {}, in txn {}", key, *twim);
-                WIRec->status = dto::DataRecord::Committed;
+                if (verMD.isHot) {
+                    dto::DataRecord::Status status = dto::DataRecord::Committed;
+                    pbrb->setStatusRow(WIRec, status);
+                }
+                else {
+                    WIRec->status = dto::DataRecord::Committed;
+                }
                 break;
             }
             default:

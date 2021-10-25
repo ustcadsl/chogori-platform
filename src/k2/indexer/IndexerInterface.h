@@ -37,7 +37,17 @@ Copyright(c) 2020 Futurewei Cloud
 namespace k2 {
 //
 //  K2 internal MVCC representation
-//
+//        
+    struct NodeVerMetadata{
+        bool isHot;
+        dto::Timestamp timestamp;
+        dto::DataRecord::Status status;
+        bool isTombstone;
+        uint64_t request_id;
+        void print() {
+            K2LOG_I(log::indexer, "Node Metadata: [isHot: {}, timestamp: {}, status: {}, isTombstone: {}, request_id: {}", isHot, timestamp, status, isTombstone, request_id);
+        }
+    };
 
     class KeyValueNode {
     private:
@@ -76,22 +86,37 @@ namespace k2 {
             return key;
         }
 
+        // Flags:
+        //      63: is_writeintent
+        //      61, 60, 59: tomestone[0], inmem[0], exist[0].
+        //      ...
+
         inline bool _get_flag_i(int i) {
-            return bool(flags & (1 << i));
+            return bool(flags & ((uint64_t)1 << i));
         }
 
         inline bool _set_flag_i(int i) {
-            flags = flags | (1 << i);
+            flags = flags | ((uint64_t)1 << i);
+            K2ASSERT(log::indexer, _get_flag_i(i), "still 0 after set");
             return _get_flag_i(i);
         }
 
         inline bool _set_zero_flag_i(int i) {
-            flags = flags & (~(1 << i));
+            flags = flags & (~((uint64_t)1 << i));
+            K2ASSERT(log::indexer, !_get_flag_i(i), "still 1 after clear");
             return _get_flag_i(i);
         }
 
         inline bool is_writeintent() {
             return _get_flag_i(63);
+        }
+
+        inline bool set_writeintent() {
+            return _set_flag_i(63);
+        }
+        
+        inline bool set_zero_writeintent() {
+            return _set_zero_flag_i(63);
         }
 
         inline bool is_tombstone(int i) {
@@ -153,10 +178,15 @@ namespace k2 {
 
         // debugging
         void printAll() {
+            std::cout << "KeyValueNode: " << this << " IsWI: " << is_writeintent() << std::endl;
             for (int i = 0; i < 3; ++i) {
-                std::cout << i << ": " << key << ", " << valuedata[i].timestamp << ", " << valuedata[i].valuepointer << std::endl;
+                std::cout << i << ": " << key << ", " << valuedata[i].timestamp << ", " << valuedata[i].valuepointer << " is_inmem: "<< is_inmem(i) << std::endl;
             }
         }
+
+        // verMetaData
+
+        NodeVerMetadata getNodeVerMetaData(int order, PBRB *pbrb);
 
         dto::DataRecord *get_datarecord(const dto::Timestamp &timestamp) {
             for (int i = 0; i < 3; ++i)
@@ -170,29 +200,7 @@ namespace k2 {
             return viter;
         }
 
-        dto::DataRecord *get_datarecord(const dto::Timestamp &timestamp, int &order) {
-            std::cout << "@get_datarecord: " << timestamp << ", "<< order;
-            for (int i = 0; i < 3; ++i)
-                if (timestamp.tEndTSECount() >= valuedata[i].timestamp) {
-                    std::cout << key << ", " << valuedata[i].timestamp << ", " << valuedata[i].valuepointer << std::endl;
-                    order = i;
-                    return valuedata[i].valuepointer;
-                }
-            order = -1;
-            dto::DataRecord *viter = valuedata[2].valuepointer;
-
-            // Get pointer of cold version out of indexer.
-            if (is_inmem(2)) {}
-                // viter = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(viter));
-            else
-                viter = viter->prevVersion;
-            
-            while (viter != nullptr && timestamp.compareCertain(viter->timestamp) < 0) {
-                // skip newer records
-                viter = viter->prevVersion;
-            }
-            return viter;
-        }
+        dto::DataRecord *get_datarecord(const dto::Timestamp &timestamp, int &order, PBRB *pbrb);
 
         int insert_datarecord(dto::DataRecord *datarecord) {
             if(size() > 0) {
@@ -204,10 +212,12 @@ namespace k2 {
                         set_exist(i, is_exist(i - 1));
                         set_inmem(i, is_inmem(i - 1));
                     }
+                    set_zero_writeintent(); // WI = False;
                 }
                 else {
                     size_dec();
-                    datarecord->prevVersion = valuedata[1].valuepointer;   
+                    datarecord->prevVersion = valuedata[1].valuepointer;
+                    set_writeintent(); // WI = True;
                 }
             }
 			         
@@ -217,7 +227,8 @@ namespace k2 {
             set_tombstone(0, datarecord->isTombstone);
             set_exist(0, 1);
             set_inmem(0, 0);
-            // printAll();
+            K2LOG_I(log::indexer, "After insert new datarecord:");
+            printAll();
             return 0;
         }
 

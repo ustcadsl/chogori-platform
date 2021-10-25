@@ -81,7 +81,7 @@ struct SchemaUMap {
 
 static uint32_t FTSize[256] = {
     0,                // NULL_T = 0,
-    64,    // STRING, // NULL characters in string is OK
+    128,    // STRING, // NULL characters in string is OK
     sizeof(int16_t),  // INT16T,
     sizeof(int32_t),  // INT32T,
     sizeof(int64_t),  // INT64T,
@@ -212,7 +212,7 @@ private:
     uint32_t _maxPageNumber;
     uint32_t _pageSize = pageSize;
     uint32_t _pageHeaderSize = 64;
-    uint32_t _rowHeaderSize = 4 + 16 + 8;
+    uint32_t _rowHeaderSize = 4 + 16 + 8 + 1 + 1 + 8;
 
     //A list to store allocated free pages
     std::list<BufferPage *> _freePageList;
@@ -369,68 +369,34 @@ public:
         memset(pagePtr->content + 26, 0, _pageHeaderSize - 26);
     }
 
-    // 1.2 row get & set functions.
+    // 1.2 Row get & set functions.
 
-    // Row Stuct:
-    // CRC (4) | Timestamp (16) | PlogAddr (8) | ...
+    // Row Struct:
+    // CRC (4) | Timestamp (16) | PlogAddr (8) | Status (1) | isTombStone(1)
     
     // CRC:
     uint32_t getCRCRow();
     void setCRCRow();
 
-    // Timestamp: (RowAddr + 4)
+    // Timestamp: (RowAddr + 4, 16)
     dto::Timestamp getTimestampRow(RowAddr rAddr);
     void setTimestampRow(RowAddr rAddr, dto::Timestamp &ts);
     
-    // PlogAddr: (RowAddr + 20)
+    // PlogAddr: (RowAddr + 20, 8)
     void *getPlogAddrRow(RowAddr rAddr);
     void setPlogAddrRow(RowAddr rAddr, void *PlogAddr);
 
-    // Debugging Output Function.
-    void printFieldsRow(const BufferPage *pagePtr, RowOffset rowOffset) {
-        SchemaMetaData smd = _schemaMap[getSchemaIDPage(pagePtr)];
-        char buf[4096];
-        size_t rowOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
-                                 smd.rowSize * rowOffset;
-        for (size_t idx = 0; idx < smd.fieldsInfo.size(); idx++) {   
-            readFromPage(pagePtr, rowOffsetInPage + smd.fieldsInfo[idx].fieldOffset, 
-                rowOffsetInPage + smd.fieldsInfo[idx].fieldSize, buf);
-            auto t = smd.schema->fields[idx].type;
-            void *valuePtr = nullptr;
-            if (t == k2::dto::FieldType::STRING) {
-                String *value = new String(buf);
-                valuePtr = static_cast<void *>(&value);
-                K2LOG_D(log::pbrb, "Field {}: [field name: {}, data: {}]", idx, smd.schema->fields[idx].name, buf);
-            }
-            else {
-                valuePtr = static_cast<void *>(buf);
-                using FieldType = dto::FieldType;
-                using TypeMismatchException = dto::TypeMismatchException;
-                K2_DTO_CAST_APPLY_FIELD_VALUE(printField, smd.schema->fields[idx], valuePtr, idx, smd.schema->fields[idx].name);
-            }
-        }
-    }
+    // Status: (RowAddr + 28, 1)
+    dto::DataRecord::Status getStatusRow(RowAddr rAddr);
+    Status setStatusRow(RowAddr rAddr, const dto::DataRecord::Status& status);
 
-    template <typename T>
-    void printField(const dto::SchemaField& field, void *valuePtr, int idx, String &fname) {
-        (void) field;
-        T value{};
-        if (valuePtr == nullptr) {
-            K2LOG_D(log::pbrb, "Field {}: [nullptr]", idx);
-        }
-        value = *(static_cast<T *>(valuePtr));
-        K2LOG_D(log::pbrb, "Field {}: [field name: {}, data: {}]", idx, fname, value);
-    }
+    // isTombstone: (RowAddr + 29, 1)
+    bool getIsTombstoneRow(RowAddr rAddr);
+    Status setIsTombstoneRow(RowAddr rAddr, const bool& isTombstone);
 
-    void printHeaderRow(const BufferPage *pagePtr, RowOffset rowOffset) {
-        SchemaMetaData smd = _schemaMap[getSchemaIDPage(pagePtr)];
-        size_t rowOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
-                                 smd.rowSize * rowOffset;
-        uint8_t *rowAddr = (uint8_t *)(pagePtr) + rowOffsetInPage;
-        auto ts = getTimestampRow(rowAddr);
-        auto pAddr = getPlogAddrRow(rowAddr);
-        K2LOG_I(log::pbrb, "Timestamp: {}, pAddr: {}", ts, pAddr);
-    }
+    // requestId: (RowAddr + 30, 8)
+    uint64_t getRequestIdRow(RowAddr rAddr);
+    Status setRequestIdRow(RowAddr rAddr, const uint64_t& request_id);
 
     // 2. Occupancy Bitmap functions.
 
@@ -462,7 +428,7 @@ public:
             return false;
     }
 
-    // 3. Oprations.
+    // 3. Operations.
 
     // 3.1 Initialize a schema.
 
@@ -561,10 +527,10 @@ public:
     void *cacheRowFromPlog(BufferPage *pagePtr, RowOffset rowOffset, PLogAddr pAddress);
 
     // Copy the header of row from DataRecord of query to (pagePtr, rowOffset)
-    void *cacheRowHeaderFrom(BufferPage *pagePtr, RowOffset rowOffset, dto::Timestamp& timestamp, void* PlogAddr);
+    void *cacheRowHeaderFrom(BufferPage *pagePtr, RowOffset rowOffset, dto::DataRecord* rec);
 
     // Copy the field of row from DataRecord of query to (pagePtr, rowOffset)
-    void *cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, void* field, size_t strSize, uint32_t fieldID);
+    void *cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, void* field, size_t strSize, uint32_t fieldID, bool isStr);
     
     // find an empty slot between the beginOffset and endOffset in the page
     RowOffset findEmptySlotInPage(BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset);
@@ -612,6 +578,56 @@ public:
 
     //evict rows from PBRB cache in the background
     void doBackgroundPBRBGC();
+
+    // 4. Debugging Output Function.
+    void printFieldsRow(const BufferPage *pagePtr, RowOffset rowOffset) {
+        SchemaMetaData smd = _schemaMap[getSchemaIDPage(pagePtr)];
+        char buf[4096];
+        size_t rowOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
+                                 smd.rowSize * rowOffset;
+        for (size_t idx = 0; idx < smd.fieldsInfo.size(); idx++) {   
+            readFromPage(pagePtr, rowOffsetInPage + smd.fieldsInfo[idx].fieldOffset, 
+                rowOffsetInPage + smd.fieldsInfo[idx].fieldSize, buf);
+            auto t = smd.schema->fields[idx].type;
+            void *valuePtr = nullptr;
+            if (t == k2::dto::FieldType::STRING) {
+                String *value = new String(buf);
+                valuePtr = static_cast<void *>(&value);
+                K2LOG_D(log::pbrb, "Field {}: [field name: {}, data: {}]", idx, smd.schema->fields[idx].name, buf);
+            }
+            else {
+                valuePtr = static_cast<void *>(buf);
+                using FieldType = dto::FieldType;
+                using TypeMismatchException = dto::TypeMismatchException;
+                K2_DTO_CAST_APPLY_FIELD_VALUE(printField, smd.schema->fields[idx], valuePtr, idx, smd.schema->fields[idx].name);
+            }
+        }
+    }
+
+    template <typename T>
+    void printField(const dto::SchemaField& field, void *valuePtr, int idx, String &fname) {
+        (void) field;
+        T value{};
+        if (valuePtr == nullptr) {
+            K2LOG_D(log::pbrb, "Field {}: [nullptr]", idx);
+        }
+        value = *(static_cast<T *>(valuePtr));
+        K2LOG_D(log::pbrb, "Field {}: [field name: {}, data: {}]", idx, fname, value);
+    }
+
+    void printHeaderRow(const BufferPage *pagePtr, RowOffset rowOffset) {
+        SchemaMetaData smd = _schemaMap[getSchemaIDPage(pagePtr)];
+        size_t rowOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
+                                 smd.rowSize * rowOffset;
+        uint8_t *rowAddr = (uint8_t *)(pagePtr) + rowOffsetInPage;
+        auto ts = getTimestampRow(rowAddr);
+        auto pAddr = getPlogAddrRow(rowAddr);
+        auto status = getStatusRow(rowAddr);
+        auto isTombstone = getIsTombstoneRow(rowAddr);
+        auto request_id = getRequestIdRow(rowAddr);
+        std::cout << "\nIn Row: " << rowAddr << std::endl;
+        K2LOG_I(log::pbrb, "Timestamp: {}, pAddr: {}, isWriteIntent: {}, isTombstone: {}, request_id: {}", ts, pAddr, status == dto::DataRecord::WriteIntent, isTombstone, request_id);
+    }
 
     void printRowsBySchema(SchemaId sid) {
         SchemaMetaData smd = _schemaMap[sid];
@@ -663,13 +679,14 @@ public:
     
     // PBRB Row -> SKVRecord
     dto::SKVRecord *generateSKVRecordByRow(RowAddr rAddr, const String &collName, std::shared_ptr<dto::Schema> schema);
-    dto::DataRecord *generateDataRecord(dto::SKVRecord *skvRecord, KeyValueNode *node, int order, void *hotAddr);
+    dto::DataRecord *generateDataRecord(dto::SKVRecord *skvRecord, void *hotAddr);
     // getSchemaVer by hotAddr in SimpleSchema
     uint32_t getSchemaVer(void *hotAddr) {
         auto pagePtr = getPageAddr(hotAddr);
         SchemaMetaData &smd = _schemaMap[getSchemaIDPage(pagePtr)];
         return smd.schema->version;
     }
+
 };
 
 }

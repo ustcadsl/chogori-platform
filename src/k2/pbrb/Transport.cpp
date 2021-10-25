@@ -41,17 +41,19 @@ dto::SKVRecord *PBRB::generateSKVRecordByRow(RowAddr rAddr, const String &collNa
 
 
 
-dto::DataRecord *PBRB::generateDataRecord(dto::SKVRecord *skvRecord, KeyValueNode *node, int order, void *hotAddr) {
+dto::DataRecord *PBRB::generateDataRecord(dto::SKVRecord *skvRecord, void *hotAddr) {
     // validate
     K2EXPECT(log::pbrb, skvRecord != nullptr, true);
+    dto::DataRecord *coldVer = static_cast<dto::DataRecord *>(getPlogAddrRow(hotAddr));
+    dto::DataRecord *prevVer = coldVer->prevVersion;
     dto::DataRecord *record = new dto::DataRecord {
         .value=std::move(skvRecord->storage), 
-        .isTombstone=node->is_tombstone(order), 
+        .isTombstone=getIsTombstoneRow(hotAddr), 
         .timestamp=getTimestampRow(hotAddr),
-        .prevVersion=nullptr, 
-        .status=node->is_writeintent() ? dto::DataRecord::WriteIntent : dto::DataRecord::Committed, 
+        .prevVersion=prevVer, 
+        .status=getStatusRow(hotAddr), 
         // TODO: update request_id
-        .request_id=0
+        .request_id=getRequestIdRow(hotAddr)
     };
     K2LOG_D(log::pbrb, "Generated Datarecord: [timestamp = {}, status = {}, value = {}]", record->timestamp, record->status, record->value);
     return record;

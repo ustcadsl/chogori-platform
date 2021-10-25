@@ -178,7 +178,7 @@ private: // methods
     Status _validateReadRequest(const RequestT& request) const;
 
     // helper method used to create and persist a WriteIntent
-    Status _createWI(dto::K23SIWriteRequest&& request, KeyValueNode& KVNode);
+    Status _createWI(dto::K23SIWriteRequest&& request, KeyValueNode* KVNode);
 
     // helper method used to make a projection SKVRecord payload
     bool _makeProjection(dto::SKVRecord::Storage& fullRec, dto::K23SIQueryRequest& request, dto::SKVRecord::Storage& projectionRec);

@@ -11,7 +11,7 @@ namespace pbrb {
     }
 }
 // Copy the header of row from DataRecord of query to (pagePtr, rowOffset)
-void *PBRB::cacheRowHeaderFrom(BufferPage *pagePtr, RowOffset rowOffset, dto::Timestamp& timestamp, void* PlogAddr) {
+void *PBRB::cacheRowHeaderFrom(BufferPage *pagePtr, RowOffset rowOffset, dto::DataRecord* rec) {
     //K2LOG_I(log::pbrb, "function cacheRowFromPlog(BufferPage, RowOffset:{}, PlogAddr", rowOffset);
     if (pagePtr == nullptr) {
         K2LOG_I(log::pbrb, "Trying to cache row to nullptr!");
@@ -39,15 +39,17 @@ void *PBRB::cacheRowHeaderFrom(BufferPage *pagePtr, RowOffset rowOffset, dto::Ti
     // void *tsPtr = (void *) ((uint8_t *) rowBasePtr + 4);
     // memcpy(tsPtr, &tsoId, sizeof(uint32_t));
 
-    setTimestampRow(rowBasePtr, timestamp);
-    // Set PlogAddre in row.
-    setPlogAddrRow(rowBasePtr, PlogAddr);
+    setTimestampRow(rowBasePtr, rec->timestamp);
+    setPlogAddrRow(rowBasePtr, rec);
+    setStatusRow(rowBasePtr, rec->status);
+    setIsTombstoneRow(rowBasePtr, rec->isTombstone);
+    setRequestIdRow(rowBasePtr, rec->request_id);
 
     return rowBasePtr;
 }
 
 // Copy the field of row from DataRecord of query to (pagePtr, rowOffset)
-void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, void* valueAddr, size_t strSize, uint32_t fieldID)
+void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, void* valueAddr, size_t strSize, uint32_t fieldID, bool isStr)
 {
     //K2LOG_I(log::pbrb, "function cacheRowFromPlog(BufferPage, RowOffset:{}, field:{}", rowOffset, field);
     if (pagePtr == nullptr) {
@@ -74,12 +76,17 @@ void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset
     void *destPtr = (void *) ((uint8_t *) rowBasePtr + smd.fieldsInfo[fieldID].fieldOffset);
     
     // TYPE: STRING
-    if(strSize > 0) {
-        // TODO Copy the size of String
+    if (isStr) {
         K2ASSERT(log::pbrb, strSize < FTSize[static_cast<int>(k2::dto::FieldType::STRING)] - 1, "strSize < FTSize[String] - 1");
-
-        memcpy(destPtr, ((k2::String *) valueAddr)->c_str(), strSize + 1);
-        destPtr = (void *) ((uint8_t *) rowBasePtr + smd.fieldsInfo[fieldID].fieldOffset + strSize);
+        
+        if (strSize > 0)
+            memcpy(destPtr, ((k2::String *) valueAddr)->c_str(), strSize + 1);
+        else {
+            *(uint8_t *)destPtr = '\0';
+            K2LOG_D(log::pbrb, "StrSize == 0, Wrote \\0");
+            return rowBasePtr;
+        }
+        
         K2LOG_D(log::pbrb, "Copied k2::String: {}", valueAddr);
         K2LOG_D(log::pbrb, "Copied {} byte(s) to {}", strSize + 1, destPtr);
         printFieldsRow(pagePtr, rowOffset);
@@ -614,10 +621,10 @@ dto::Timestamp PBRB::getTimestampRow(RowAddr rAddr) {
     uint32_t tsoId, tStartDelta;
     
     // memcpy.
-    uint8_t *dstPtr = (uint8_t *)rAddr;
-    memcpy(&tEndTSECount, dstPtr + 4, sizeof(uint64_t));
-    memcpy(&tsoId, dstPtr + 12, sizeof(uint32_t));
-    memcpy(&tStartDelta, dstPtr + 16, sizeof(uint32_t));
+    uint8_t *srcPtr = (uint8_t *)rAddr;
+    memcpy(&tEndTSECount, srcPtr + 4, sizeof(uint64_t));
+    memcpy(&tsoId, srcPtr + 12, sizeof(uint32_t));
+    memcpy(&tStartDelta, srcPtr + 16, sizeof(uint32_t));
 
     dto::Timestamp ts(tEndTSECount, tsoId, tStartDelta);
     return ts;
@@ -635,6 +642,7 @@ void PBRB::setTimestampRow(RowAddr rAddr, dto::Timestamp &ts) {
     memcpy(dstPtr + 16, &tStartDelta, sizeof(uint32_t));
 }
 
+// PlogAddr
 void *PBRB::getPlogAddrRow(RowAddr rAddr) {
     void *retVal = *((void **)((uint8_t *)rAddr + 20));
     return retVal;
@@ -643,6 +651,61 @@ void *PBRB::getPlogAddrRow(RowAddr rAddr) {
 void PBRB::setPlogAddrRow(RowAddr rAddr, void *PlogAddr) {
     uint8_t *dstPtr = (uint8_t *)rAddr;
     memcpy(dstPtr + 20, &PlogAddr, sizeof(void *));
+}
+
+// Status
+dto::DataRecord::Status PBRB::getStatusRow(RowAddr rAddr) {
+    // Validation.
+    K2ASSERT(log::pbrb, sizeof(uint8_t) == sizeof(dto::DataRecord::Status), "Status size != 1");
+
+    dto::DataRecord::Status status;
+    
+    uint8_t *srcPtr = (uint8_t *)rAddr + 28;
+    memcpy(&status, srcPtr, sizeof(uint8_t));
+
+    return status;
+}
+Status PBRB::setStatusRow(RowAddr rAddr, const dto::DataRecord::Status& status) {
+    // Validation.
+    K2ASSERT(log::pbrb, sizeof(uint8_t) == sizeof(dto::DataRecord::Status), "Status size != 1");
+
+    uint8_t *dstPtr = (uint8_t *)rAddr + 28;
+    memcpy(dstPtr, &status, sizeof(uint8_t));
+
+    return Statuses::S200_OK("Set status in row successfully");
+}
+
+// isTombstone
+bool PBRB::getIsTombstoneRow(RowAddr rAddr) {
+    uint8_t tmp;
+    uint8_t *srcPtr = (uint8_t *)rAddr + 29;
+    memcpy(&tmp, srcPtr, sizeof(uint8_t));
+    return tmp ? true : false;
+}
+
+Status PBRB::setIsTombstoneRow(RowAddr rAddr, const bool& isTombstone) {
+
+    uint8_t *dstPtr = (uint8_t *)rAddr + 29;
+    uint8_t tmp = 0;
+    if (isTombstone)
+        tmp = 0xFF;
+    memcpy(dstPtr, &tmp, sizeof(uint8_t));
+
+    return Statuses::S200_OK("Set isTombstone in row successfully");
+}
+
+// request_id
+uint64_t PBRB::getRequestIdRow(RowAddr rAddr) {
+    uint64_t retVal = *((uint64_t *)((uint8_t *)rAddr + 30));
+    return retVal;
+}
+
+Status PBRB::setRequestIdRow(RowAddr rAddr, const uint64_t& request_id) {
+
+    uint8_t *dstPtr = (uint8_t *)rAddr + 30;
+    memcpy(dstPtr, &request_id, sizeof(uint64_t));
+    
+    return Statuses::S200_OK("Set request_id in row successfully");
 }
 
 }
