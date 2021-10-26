@@ -148,7 +148,7 @@ struct SchemaMetaData
     // Construct from a Schema
     void setInfo(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize, uint32_t rowHeaderSize) {
         // read from Schema
-        K2LOG_I(log::pbrb, "set smd info: rowHeaderSize: {}", rowHeaderSize);
+        // K2LOG_I(log::pbrb, "set smd info: rowHeaderSize: {}", rowHeaderSize);
         if (schemaUMap.umap.find(schemaId) == schemaUMap.umap.end())
             return;
 
@@ -173,7 +173,7 @@ struct SchemaMetaData
             // Go to next field.
             currRowOffset += fieldObj.fieldSize;
 
-            K2LOG_I(log::pbrb, "Current type: {}, offset: {}, currRowOffset: {}, rowHeaderSize :{}, nullableBitmapSize: {}", schema->fields[i].type, fieldObj.fieldOffset, currRowOffset, rowHeaderSize, nullableBitmapSize);
+            // K2LOG_I(log::pbrb, "Current type: {}, offset: {}, currRowOffset: {}, rowHeaderSize :{}, nullableBitmapSize: {}", schema->fields[i].type, fieldObj.fieldOffset, currRowOffset, rowHeaderSize, nullableBitmapSize);
         }
         
         // set rowSize
@@ -181,15 +181,15 @@ struct SchemaMetaData
         setOccuBitmapSize(pageSize);
         maxRowCnt = (pageSize - pageHeaderSize - occuBitmapSize) / rowSize;
 
-        K2LOG_I(log::pbrb, "Add new schema:{}", schema->name);
-        std::cout << std::dec << "\nGot Schema: " << schemaId << std::endl 
-                  << "name: " << schema->name << std::endl
-                  << "occuBitmapSize: " << occuBitmapSize << std::endl
-                  << "rowSize: " << rowSize << std::endl
-                  << "\trowHeaderSize: " << rowHeaderSize << std::endl
-                  << "\tnullableBMSize: " << nullableBitmapSize << std::endl
-                  << "\tAllFieldSize: " << rowSize - rowHeaderSize - nullableBitmapSize << std::endl
-                  << "maxRowCnt: " << maxRowCnt << std::endl;
+        // K2LOG_I(log::pbrb, "Add new schema:{}", schema->name);
+        // std::cout << std::dec << "\nGot Schema: " << schemaId << std::endl 
+        //           << "name: " << schema->name << std::endl
+        //           << "occuBitmapSize: " << occuBitmapSize << std::endl
+        //           << "rowSize: " << rowSize << std::endl
+        //           << "\trowHeaderSize: " << rowHeaderSize << std::endl
+        //           << "\tnullableBMSize: " << nullableBitmapSize << std::endl
+        //           << "\tAllFieldSize: " << rowSize - rowHeaderSize - nullableBitmapSize << std::endl
+        //           << "maxRowCnt: " << maxRowCnt << std::endl;
     }
 
     void setNullBitmapSize(uint32_t fieldNumber) {
@@ -388,7 +388,7 @@ public:
 
     // Status: (RowAddr + 28, 1)
     dto::DataRecord::Status getStatusRow(RowAddr rAddr);
-    Status setStatusRow(RowAddr rAddr, const dto::DataRecord::Status& status);
+    Status setStatusRow(RowAddr rAddr, const dto::DataRecord::Status status);
 
     // isTombstone: (RowAddr + 29, 1)
     bool getIsTombstoneRow(RowAddr rAddr);
@@ -467,7 +467,7 @@ public:
         setSchemaIDPage(pagePtr, schemaId);
         setSchemaVerPage(pagePtr, schemaVer);
 
-        K2LOG_I(log::pbrb, "createCacheForSchema, schemaId: {}, pagePtr empty:{}, _freePageList size:{}, pageSize: {}, smd.rowSize: {}, _schemaMap[0].rowSize: {}", schemaId, pagePtr==nullptr,  _freePageList.size(), sizeof(BufferPage), smd.rowSize, _schemaMap[0].rowSize);
+        K2LOG_D(log::pbrb, "createCacheForSchema, schemaId: {}, pagePtr empty:{}, _freePageList size:{}, pageSize: {}, smd.rowSize: {}, _schemaMap[0].rowSize: {}", schemaId, pagePtr==nullptr,  _freePageList.size(), sizeof(BufferPage), smd.rowSize, _schemaMap[0].rowSize);
 
         _freePageList.pop_front();
 
@@ -488,9 +488,16 @@ public:
             //memset(newPage, 0, sizeof(BufferPage));
             initializePage(newPage);
             setSchemaIDPage(newPage, schemaId);
-            setNextPage(newPage, _schemaMap[schemaId].headPage);
+            setSchemaVerPage(newPage, _schemaMap[schemaId].schema->version);
+            
+            BufferPage *tail = _schemaMap[schemaId].headPage;
+            // set nextpage
+            while(getNextPage(tail) != nullptr) {
+                tail = getNextPage(tail);
+            }
 
-            _schemaMap[schemaId].headPage = newPage;
+            setNextPage(tail, newPage);
+
             _freePageList.pop_front();
             K2LOG_I(log::pbrb, "^^^^^^^^^^^^^^^in AllocNewPageForSchema, _freePageList size:{}", _freePageList.size());
             return newPage;
@@ -587,7 +594,7 @@ public:
                                  smd.rowSize * rowOffset;
         for (size_t idx = 0; idx < smd.fieldsInfo.size(); idx++) {   
             readFromPage(pagePtr, rowOffsetInPage + smd.fieldsInfo[idx].fieldOffset, 
-                rowOffsetInPage + smd.fieldsInfo[idx].fieldSize, buf);
+                smd.fieldsInfo[idx].fieldSize, buf);
             auto t = smd.schema->fields[idx].type;
             void *valuePtr = nullptr;
             if (t == k2::dto::FieldType::STRING) {
@@ -626,7 +633,7 @@ public:
         auto isTombstone = getIsTombstoneRow(rowAddr);
         auto request_id = getRequestIdRow(rowAddr);
         std::cout << "\nIn Row: " << rowAddr << std::endl;
-        K2LOG_I(log::pbrb, "Timestamp: {}, pAddr: {}, isWriteIntent: {}, isTombstone: {}, request_id: {}", ts, pAddr, status == dto::DataRecord::WriteIntent, isTombstone, request_id);
+        K2LOG_D(log::pbrb, "Timestamp: {}, pAddr: {}, isWriteIntent: {}, isTombstone: {}, request_id: {}", ts, pAddr, status == dto::DataRecord::WriteIntent, isTombstone, request_id);
     }
 
     void printRowsBySchema(SchemaId sid) {
@@ -690,3 +697,40 @@ public:
 };
 
 }
+
+#define CAST_APPLY_FIELD_VALUE_WITHOUT_STRING(func, a, ...)                        \
+    do {                                                            \
+        switch ((a).type) {                                         \
+            case k2::dto::FieldType::INT16T: {                      \
+                func<int16_t>((a), __VA_ARGS__);                    \
+            } break;                                                \
+            case k2::dto::FieldType::INT32T: {                      \
+                func<int32_t>((a), __VA_ARGS__);                    \
+            } break;                                                \
+            case k2::dto::FieldType::INT64T: {                      \
+                func<int64_t>((a), __VA_ARGS__);                    \
+            } break;                                                \
+            case k2::dto::FieldType::FLOAT: {                       \
+                func<float>((a), __VA_ARGS__);                      \
+            } break;                                                \
+            case k2::dto::FieldType::DOUBLE: {                      \
+                func<double>((a), __VA_ARGS__);                     \
+            } break;                                                \
+            case k2::dto::FieldType::BOOL: {                        \
+                func<bool>((a), __VA_ARGS__);                       \
+            } break;                                                \
+            case k2::dto::FieldType::DECIMAL64: {                   \
+                func<std::decimal::decimal64>((a), __VA_ARGS__);    \
+            } break;                                                \
+            case k2::dto::FieldType::DECIMAL128: {                  \
+                func<std::decimal::decimal128>((a), __VA_ARGS__);   \
+            } break;                                                \
+            case k2::dto::FieldType::FIELD_TYPE: {                  \
+                func<k2::dto::FieldType>((a), __VA_ARGS__);         \
+            } break;                                                \
+            default:                                                \
+                auto msg = fmt::format(                             \
+                    "cannot apply field of type {}", (a).type);     \
+                throw k2::dto::TypeMismatchException(msg);          \
+        }                                                           \
+    } while (0)

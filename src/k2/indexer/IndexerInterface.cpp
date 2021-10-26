@@ -95,8 +95,8 @@ int KeyValueNode::insert_datarecord(dto::DataRecord *datarecord, PBRB *pbrb) {
     set_tombstone(0, datarecord->isTombstone);
     set_exist(0, 1);
     set_inmem(0, 0);
-    K2LOG_I(log::indexer, "After insert new datarecord:");
-    printAll();
+    K2LOG_D(log::indexer, "After insert new datarecord:");
+    // printAll();
     return 0;
 }
 

@@ -32,7 +32,7 @@ void *PBRB::cacheRowHeaderFrom(BufferPage *pagePtr, RowOffset rowOffset, dto::Da
                             smd.rowSize * rowOffset;
 
     void *rowBasePtr = (uint8_t *)(pagePtr) + byteOffsetInPage;
-    K2LOG_I(log::pbrb, "^^^^^^schemaId:{}, RowOffset:{}, occuBitmapSize:{}, rowSize:{}, byteOffsetInPage:{}, rowBasePtr:{}", schemaId, rowOffset, smd.occuBitmapSize, smd.rowSize, byteOffsetInPage, rowBasePtr);
+    K2LOG_D(log::pbrb, "^^^^^^schemaId:{}, RowOffset:{}, occuBitmapSize:{}, rowSize:{}, byteOffsetInPage:{}, rowBasePtr:{}", schemaId, rowOffset, smd.occuBitmapSize, smd.rowSize, byteOffsetInPage, rowBasePtr);
 
     // Copy timestamp
     // uint32_t tsoId = timestamp.tsoId();
@@ -89,14 +89,14 @@ void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset
         
         K2LOG_D(log::pbrb, "Copied k2::String: {}", valueAddr);
         K2LOG_D(log::pbrb, "Copied {} byte(s) to {}", strSize + 1, destPtr);
-        printFieldsRow(pagePtr, rowOffset);
+        // printFieldsRow(pagePtr, rowOffset);
         return rowBasePtr;
     }
 
     // TYPE: OTHERS
     size_t copySize = smd.fieldsInfo[fieldID].fieldSize;
-    K2LOG_I(log::pbrb, "fieldID:{}, fieldOffset:{}, destPtr:{}, copySize:{}, strSize:{}", fieldID, smd.fieldsInfo[fieldID].fieldOffset, destPtr, copySize, strSize);
-    printFieldsRow(pagePtr, rowOffset);
+    K2LOG_D(log::pbrb, "fieldID:{}, fieldOffset:{}, destPtr:{}, copySize:{}, strSize:{}", fieldID, smd.fieldsInfo[fieldID].fieldOffset, destPtr, copySize, strSize);
+    // printFieldsRow(pagePtr, rowOffset);
     // + 4 to move to the real address in simple plog
     memcpy(destPtr, valueAddr, copySize);
 
@@ -284,7 +284,7 @@ RowOffset PBRB::findEmptySlotInPage(BufferPage *pagePtr)
 std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID)
 {
     BufferPage *pagePtr = _schemaMap[schemaID].headPage;
-    K2LOG_I(log::pbrb, "^^^^^^^^findCacheRowPosition, schemaID:{}, pagePtr empty:{}", schemaID, pagePtr==nullptr);
+    K2LOG_D(log::pbrb, "^^^^^^^^findCacheRowPosition, schemaID:{}, pagePtr empty:{}", schemaID, pagePtr==nullptr);
     while (pagePtr != nullptr) {
         RowOffset rowOffset = findEmptySlotInPage(pagePtr);
         if (rowOffset & 0x80000000)
@@ -665,7 +665,7 @@ dto::DataRecord::Status PBRB::getStatusRow(RowAddr rAddr) {
 
     return status;
 }
-Status PBRB::setStatusRow(RowAddr rAddr, const dto::DataRecord::Status& status) {
+Status PBRB::setStatusRow(RowAddr rAddr, const dto::DataRecord::Status status) {
     // Validation.
     K2ASSERT(log::pbrb, sizeof(uint8_t) == sizeof(dto::DataRecord::Status), "Status size != 1");
 

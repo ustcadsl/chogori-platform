@@ -45,7 +45,7 @@ namespace k2 {
         bool isTombstone;
         uint64_t request_id;
         void print() {
-            K2LOG_I(log::indexer, "Node Metadata: [isHot: {}, timestamp: {}, status: {}, isTombstone: {}, request_id: {}", isHot, timestamp, status, isTombstone, request_id);
+            K2LOG_D(log::indexer, "Node Metadata: [isHot: {}, timestamp: {}, status: {}, isTombstone: {}, request_id: {}", isHot, timestamp, status, isTombstone, request_id);
         }
     };
 
