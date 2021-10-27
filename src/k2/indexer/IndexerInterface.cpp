@@ -5,10 +5,10 @@
 namespace k2 {
 
 dto::DataRecord *KeyValueNode::get_datarecord(const dto::Timestamp &timestamp, int &order, PBRB *pbrb) {
-    std::cout << "@get_datarecord: " << timestamp << ", "<< order;
+    K2LOG_D(log::indexer, "get_datarecord: {}", timestamp);
     for (int i = 0; i < 3; ++i)
         if (timestamp.tEndTSECount() >= valuedata[i].timestamp) {
-            std::cout << key << ", " << valuedata[i].timestamp << ", " << valuedata[i].valuepointer << std::endl;
+            // std::cout << key << ", " << valuedata[i].timestamp << ", " << valuedata[i].valuepointer << std::endl;
             order = i;
             return valuedata[i].valuepointer;
         }
@@ -25,6 +25,17 @@ dto::DataRecord *KeyValueNode::get_datarecord(const dto::Timestamp &timestamp, i
     }
 
 NodeVerMetadata KeyValueNode::getNodeVerMetaData(int order, PBRB *pbrb) {
+    if (order >= 3 || order < 0) {
+        K2LOG_D(log::indexer, "order: {} out of range", order);
+        NodeVerMetadata retVal {
+            .isHot=false,
+            .timestamp=dto::Timestamp(),
+            .status=dto::DataRecord::Status(),
+            .isTombstone=false,
+            .request_id=0
+        };
+        return retVal;
+    }
     dto::DataRecord *rec = valuedata[order].valuepointer;
     if (rec == nullptr) {
         NodeVerMetadata retVal;

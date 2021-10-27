@@ -482,6 +482,7 @@ public:
         if (pagePtr == nullptr)
             return createCacheForSchema(schemaId);
         else {
+            K2ASSERT(log::pbrb, _freePageList.size() > 0, "There is no free page in free page list!");
             BufferPage *newPage = _freePageList.front();
             
             // Initialize Page.
@@ -499,7 +500,7 @@ public:
             setNextPage(tail, newPage);
 
             _freePageList.pop_front();
-            K2LOG_I(log::pbrb, "^^^^^^^^^^^^^^^in AllocNewPageForSchema, _freePageList size:{}", _freePageList.size());
+            K2LOG_I(log::pbrb, "Remaining _freePageList size:{}", _freePageList.size());
             return newPage;
         }
     };

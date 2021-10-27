@@ -16,7 +16,7 @@ COMMON_ARGS="--enable_tx_checksum true --thread-affinity false"
 cpo_child_pid=$!
 
 # start nodepool on 1 cores
-./build/src/k2/cmd/nodepool/nodepool -c1 --log_level INFO --tcp_endpoints ${EPS} --k23si_persistence_endpoint ${PERSISTENCE} ${COMMON_ARGS} --prometheus_port 63001 --k23si_cpo_endpoint ${CPO} --tso_endpoint ${TSO} --memory=3G --partition_request_timeout=6s &
+./build/src/k2/cmd/nodepool/nodepool -c1 --log_level INFO --tcp_endpoints ${EPS} --k23si_persistence_endpoint ${PERSISTENCE} ${COMMON_ARGS} --prometheus_port 63001 --k23si_cpo_endpoint ${CPO} --tso_endpoint ${TSO} --memory=6G --partition_request_timeout=6s &
 nodepool_child_pid=$!
 
 # start persistence on 1 cores

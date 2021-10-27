@@ -177,7 +177,7 @@ K23SIPartitionModule::K23SIPartitionModule(dto::CollectionMetadata cmeta, dto::P
     _cmeta(std::move(cmeta)),
     _partition(std::move(partition), _cmeta.hashScheme) {
     K2LOG_I(log::skvsvr, "---------Partition: {}", _partition);//////
-    pbrb = new PBRB(100, &_retentionTimestamp, &indexer);//////
+    pbrb = new PBRB(8192, &_retentionTimestamp, &indexer);//////
 
     K2LOG_I(log::skvsvr, "ctor for cname={}, part={}", _cmeta.name, _partition);
 }
@@ -526,7 +526,12 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
     for (; !_isScanDone(key_it, request, response.results.size());
                         _scanAdvance(key_it, request.reverseDirection, request.key.schemaName)) {
         auto& KVNode = *_indexer.extractFromIter(key_it);
-        dto::DataRecord* record = KVNode.get_datarecord(request.mtr.timestamp);
+        int order;
+        dto::DataRecord* record = KVNode.get_datarecord(request.mtr.timestamp, order, pbrb);
+        // TODO: Use hot record.
+        NodeVerMetadata verMD = KVNode.getNodeVerMetaData(order, pbrb);
+        if (verMD.isHot)
+            record = static_cast<DataRecord *>(pbrb->getPlogAddrRow(record));
         K2LOG_D(log::skvsvr, "Scan at key {}", KVNode.get_key());
         bool needPush = record != nullptr && record->status == dto::DataRecord::WriteIntent && record->timestamp.compareCertain(request.mtr.timestamp) < 0;
         K2LOG_D(log::skvsvr, "Need push={}", needPush);
@@ -727,7 +732,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 // nodePtr->printAll();
                 // debug output
                 // pbrb->printRowsBySchema(SMapIndex);
-
+                pbrb->printFieldsRow(pagePtr, rowOffset);
                 rec->value.fieldData.seek(0);
                 
                 result = rec;
@@ -1472,6 +1477,7 @@ K23SIPartitionModule::_doPush(dto::Key key, dto::Timestamp incumbentId, dto::K23
                             return seastar::make_ready_future<Status>(std::move(status));
                         }
                         _removeWI(node);
+                        node.set_zero_writeintent();
                         break;
                     }
                     case dto::EndAction::Commit: {
@@ -1487,6 +1493,7 @@ K23SIPartitionModule::_doPush(dto::Key key, dto::Timestamp incumbentId, dto::K23
                         }
                         else
                             rec->status = dto::DataRecord::Committed;
+                        node.set_zero_writeintent();
                         break;
                     }
                     default:
@@ -1559,6 +1566,7 @@ Status K23SIPartitionModule::_finalizeTxnWIs(dto::Timestamp txnts, dto::EndActio
             case dto::EndAction::Abort: {
                 K2LOG_D(log::skvsvr, "aborting {}, in txn {}", key, *twim);
                 _removeWI(KVNode);
+                KVNode.set_zero_writeintent();
                 break;
             }
             case dto::EndAction::Commit: {
@@ -1571,6 +1579,7 @@ Status K23SIPartitionModule::_finalizeTxnWIs(dto::Timestamp txnts, dto::EndActio
                 else {
                     WIRec->status = dto::DataRecord::Committed;
                 }
+                KVNode.set_zero_writeintent();
                 break;
             }
             default:
@@ -1611,15 +1620,18 @@ K23SIPartitionModule::handleInspectRecords(dto::K23SIInspectRecordsRequest&& req
 
     std::vector<dto::DataRecord> records;
     records.reserve(size + 1);
-
+    
     dto::DataRecord * rec = nullptr;
     for(int i = 0; i<size; ++i) {
+        // use cold record. (TODO: change to hot row later)
+        if (KVNode.is_inmem(i))
+            rec = static_cast<DataRecord *>(pbrb->getPlogAddrRow(rec));
         if(i < 3) {
             rec = KVNode._getpointer(i);
             K2LOG_D(log::skvsvr, "inspect record {}", rec == nullptr);
         }
         else {
-            rec = rec->prevVersion;
+            rec = KVNode._getpointer(2)->prevVersion;
         }
         dto::DataRecord copy {
             .value=rec->value.share(),
@@ -1659,7 +1671,19 @@ K23SIPartitionModule::handleInspectWIs(dto::K23SIInspectWIsRequest&&) {
             continue;
         }
 
-        dto::DataRecord* rec = _indexer.extractFromIter(it)->begin();
+        KeyValueNode &KVNode = *_indexer.extractFromIter(it);
+        dto::DataRecord* rec = KVNode.begin();
+        if (KVNode.is_inmem(0))
+            rec = static_cast<DataRecord *>(pbrb->getPlogAddrRow(rec));
+        // Check whether statuses are same.
+        K2ASSERT(log::skvsvr, 
+                    (rec->status == dto::DataRecord::WriteIntent) == KVNode.is_writeintent(), 
+                    "Rec isWI: {} != KVNode isWI: {}", 
+                    (rec->status == dto::DataRecord::WriteIntent),
+                    KVNode.is_writeintent());
+        // Not WI. Skip
+        if (!KVNode.is_writeintent())
+            continue;
         dto::DataRecord copy {
                 .value=rec->value.share(),
                 .isTombstone=rec->isTombstone,

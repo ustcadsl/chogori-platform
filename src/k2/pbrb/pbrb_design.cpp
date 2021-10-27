@@ -53,15 +53,15 @@ void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset
 {
     //K2LOG_I(log::pbrb, "function cacheRowFromPlog(BufferPage, RowOffset:{}, field:{}", rowOffset, field);
     if (pagePtr == nullptr) {
-        K2LOG_I(log::pbrb, "Trying to cache row to nullptr!");
+        K2LOG_E(log::pbrb, "Trying to cache row to nullptr!");
         return nullptr;
     }
     if (rowOffset > _schemaMap[getSchemaIDPage(pagePtr)].maxRowCnt) {
-        K2LOG_I(log::pbrb, "Row Offset out of range!");
+        K2LOG_E(log::pbrb, "Row Offset out of range!");
         return nullptr;
     }
     if (isBitmapSet(pagePtr, rowOffset)) {
-        K2LOG_I(log::pbrb, "Conflict: move row to occupied slot, In page, offset:{}", rowOffset);
+        K2LOG_E(log::pbrb, "Conflict: move row to occupied slot, In page, offset:{}", rowOffset);
         return nullptr;
     }
 
@@ -77,18 +77,27 @@ void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset
     
     // TYPE: STRING
     if (isStr) {
-        K2ASSERT(log::pbrb, strSize < FTSize[static_cast<int>(k2::dto::FieldType::STRING)] - 1, "strSize < FTSize[String] - 1");
-        
-        if (strSize > 0)
-            memcpy(destPtr, ((k2::String *) valueAddr)->c_str(), strSize + 1);
+        size_t copySize = strSize;
+        k2::String *strPtr = static_cast<k2::String *>(valueAddr);
+        const size_t maxStrSize = FTSize[static_cast<int>(k2::dto::FieldType::STRING)] - 1;
+        if (strSize > maxStrSize) {
+            K2LOG_W(log::pbrb, "Trying to insert field strSize(: {}) > maxStrSize(: {}), Cut the string",
+                strSize, maxStrSize);
+            k2::String *buf = new k2::String(strPtr->substr(0, maxStrSize));
+            memcpy(destPtr, buf->c_str(), maxStrSize);
+            delete buf;
+            copySize = maxStrSize;
+        }
+        else if (strSize > 0)
+            memcpy(destPtr, strPtr->c_str(), strSize + 1);
         else {
             *(uint8_t *)destPtr = '\0';
             K2LOG_D(log::pbrb, "StrSize == 0, Wrote \\0");
             return rowBasePtr;
         }
         
-        K2LOG_D(log::pbrb, "Copied k2::String: {}", valueAddr);
-        K2LOG_D(log::pbrb, "Copied {} byte(s) to {}", strSize + 1, destPtr);
+        K2LOG_D(log::pbrb, "fieldID:{}, fieldOffset:{}, destPtr:{}, Copied k2::String: {}", fieldID, smd.fieldsInfo[fieldID].fieldOffset, destPtr, strPtr->c_str());
+        K2LOG_D(log::pbrb, "Copied {} byte(s) to {}", copySize + 1, destPtr);
         // printFieldsRow(pagePtr, rowOffset);
         return rowBasePtr;
     }
