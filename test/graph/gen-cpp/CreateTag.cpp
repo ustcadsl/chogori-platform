@@ -380,7 +380,10 @@ public:
         return;
     }
     void addVertices(ExecResponse& _return, const AddVerticesRequest& req){
-
+        //检查传入的数据是否合法，并构造相应的skvrecord
+        //因为需要获得对应schema的信息
+        int index = 0;  //记录处理到Schema中SchemaField的下标
+        
     }
     int32_t add(const int32_t num1, const int32_t num2)
     {
