@@ -76,6 +76,17 @@ struct MySchemaCreateRequest
 };
 inline std::queue<MySchemaCreateRequest> SchemaCreateQ;
 
+
+struct MySchemaGetRequest
+{
+    k2::String collectionName;
+    k2::String schemaName;
+    uint64_t schemaVersion;
+    std::promise<k2::GetSchemaResult> *prom; //返回的future 不同
+};
+inline std::queue<MySchemaCreateRequest> SchemaGetQ;
+
+
 class Client
 {
 public:
@@ -191,13 +202,24 @@ private:
     seastar::future<> _pollForWork()
     {
         return seastar::when_all_succeed(
-                   _pollCreateCollectionQ(), _pollSchemaCreateQ())
+                   _pollCreateCollectionQ(), _pollSchemaCreateQ(), _pollSchemaGetQ())
             .discard_result();
     }
 
     // seastar::future<> _pollBeginQ();
     // seastar::future<> _pollEndQ();
-    // seastar::future<> _pollSchemaGetQ();
+    seastar::future<> _pollSchemaGetQ() {
+        return pollQ(SchemaGetQ, [this](auto &req) {
+            if (_stop) {
+                return seastar::make_exception_future(std::runtime_error("seastar app has been shutdown"));
+            }
+            return _client->getSchema(req.collectionName, req.schemaName, req.schemaVersion)
+                .then([this, &req](auto&& result){
+                    req.prom -> set_value(std::move(result));
+                });
+        });
+    }
+
     seastar::future<> _pollSchemaCreateQ()
     {
         return pollQ(SchemaCreateQ, [this](auto &req)
@@ -382,6 +404,7 @@ public:
     void addVertices(ExecResponse& _return, const AddVerticesRequest& req){
         //检查传入的数据是否合法，并构造相应的skvrecord
         //因为需要获得对应schema的信息
+        
         int index = 0;  //记录处理到Schema中SchemaField的下标
         
     }
