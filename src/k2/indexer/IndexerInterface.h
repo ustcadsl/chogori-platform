@@ -41,7 +41,7 @@ namespace k2 {
     class KeyValueNode {
     private:
         uint64_t flags;
-        dto::Key key;
+        std::unique_ptr<dto::Key> key;
         typedef struct {
             u_int64_t timestamp;
             dto::DataRecord *valuepointer;
@@ -59,9 +59,7 @@ namespace k2 {
 
         KeyValueNode(dto::Key newKey) {
             flags = 0;
-            key.schemaName = newKey.schemaName;
-            key.partitionKey = newKey.partitionKey;
-            key.rangeKey = newKey.rangeKey;
+            key = std::unique_ptr<dto::Key>(new dto::Key{.schemaName = newKey.schemaName, .partitionKey = newKey.partitionKey, .rangeKey = newKey.rangeKey});
             for (int i = 0; i < 3; ++i) {
                 valuedata[i].timestamp = 0;
                 valuedata[i].valuepointer = nullptr;
@@ -72,7 +70,7 @@ namespace k2 {
         }
 
         dto::Key get_key() {
-            return key;
+            return *key;
         }
 
         inline bool _get_flag_i(int i) {
@@ -165,6 +163,7 @@ namespace k2 {
         int insert_datarecord(dto::DataRecord *datarecord) {
             if(size() > 0) {
                 if(valuedata[0].valuepointer->status == dto::DataRecord::Committed) {
+                    K2LOG_D(log::indexer, "Insert new datarecord with first committed");
                     datarecord->prevVersion = valuedata[0].valuepointer;
                     for (int i = 2; i > 0; i--) {
                         valuedata[i] = valuedata[i - 1];
@@ -183,8 +182,9 @@ namespace k2 {
             valuedata[0].timestamp = datarecord->timestamp.tEndTSECount();
             size_inc();
             set_tombstone(0, datarecord->isTombstone);
-            set_exist(0, 1);
-            set_inmem(0, 0);
+            set_exist(0, true);
+            //TODO: inmem = false?
+            set_inmem(0, false);
             return 0;
         }
 
@@ -290,7 +290,7 @@ namespace k2 {
                 set_inmem(j, is_inmem(j + 1));
             }
             if (size_dec()==1) 
-                K2LOG_D(log::indexer, "try to remove with no versions, Key: {} {} {}", key.schemaName, key.partitionKey, key.rangeKey);
+                K2LOG_D(log::indexer, "try to remove with no versions, Key: {} {} {}", key->schemaName, key->partitionKey, key->rangeKey);
             if (valuedata[2].valuepointer != nullptr) {
                 if(valuedata[2].valuepointer->prevVersion != nullptr){
                     valuedata[2].valuepointer = valuedata[2].valuepointer->prevVersion;
@@ -317,30 +317,30 @@ namespace k2 {
         }
     };
 
-    class Indexer
-    {
+    // class Indexer
+    // {
 
-    public:
-        virtual KeyValueNode *insert(dto::Key key) = 0;
+    // public:
+    //     virtual KeyValueNode *insert(dto::Key key) = 0;
 
-        virtual KeyValueNode *find(dto::Key &key) = 0;
+    //     virtual KeyValueNode *find(dto::Key &key) = 0;
 
-        virtual KeyValueNode *begin() = 0;
+    //     virtual KeyValueNode *begin() = 0;
 
-        virtual KeyValueNode *end() = 0;
+    //     virtual KeyValueNode *end() = 0;
 
-        virtual KeyValueNode *getiter() = 0;
+    //     virtual KeyValueNode *getiter() = 0;
 
-        virtual KeyValueNode *beginiter() = 0;
+    //     virtual KeyValueNode *beginiter() = 0;
 
-        virtual KeyValueNode *setiter(dto::Key &key) = 0;
+    //     virtual KeyValueNode *setiter(dto::Key &key) = 0;
 
-        virtual KeyValueNode *inciter() = 0;
+    //     virtual KeyValueNode *inciter() = 0;
 
-        virtual void erase(dto::Key key)=0;
+    //     virtual void erase(dto::Key key)=0;
 
-        virtual size_t size()=0;
-    };
+    //     virtual size_t size()=0;
+    // };
 
 /*
 template<typename IndexerType, typename ValueType>

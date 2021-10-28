@@ -25,8 +25,6 @@ Copyright(c) 2020 Futurewei Cloud
 #include <hot/singlethreaded/HOTSingleThreaded.hpp>
 #include <idx/contenthelpers/IdentityKeyExtractor.hpp>
 
-using namespace std;
-
 namespace k2
 {
     template<typename ValueType>
@@ -47,28 +45,40 @@ namespace k2
         HotIndexer idx;
         HotIterator scanit;
     public:
-        KeyValueNode* insert(dto::Key key);
         HotIterator find(dto::Key &key);
+        HotIterator lower_bound(const dto::Key& key);
+
         HotIterator begin();
         HotIterator end();
-        HotIterator getiter();
-        HotIterator setiter(const dto::Key &key);
-        HotIterator lower_bound(const dto::Key& key);
         HotIterator last();
 
-        void erase(dto::Key key);
-        size_t size();
         KeyValueNode* extractFromIter(HotIterator const& iterator);
+
+        HotIterator getiter();
+        HotIterator setiter(const dto::Key &key);
+
+        KeyValueNode* insert(dto::Key key);
+        void erase(dto::Key key);
+
+        size_t size();        
     };
 
+    //TODO check empty corner case
     inline KeyValueNode* HOTindexer::insert(dto::Key key)
     {
-        KeyValueNode* newkvnode = new KeyValueNode(key);
-        bool ret = idx.insert(newkvnode);
+        KeyValueNode* newKVNode = new KeyValueNode(key);
+        K2LOG_D(log::indexer, "Insert key size = {}",key.schemaName.size()+key.rangeKey.size()+key.partitionKey.size());
+        bool ret = false;
+        ret = idx.insert(newKVNode);
         if (ret) {
-            return newkvnode;
+            return newKVNode;
         }
-        return nullptr;
+        else {
+            delete newKVNode;
+            K2LOG_W(log::indexer, "Insert new KVNode failed");
+            return nullptr;
+        }
+        
     }
     inline HotIterator HOTindexer::find(dto::Key& key)
     {

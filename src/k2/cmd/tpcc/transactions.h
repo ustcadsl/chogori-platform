@@ -55,11 +55,14 @@ template<typename Func>
                 return func().
                     then_wrapped([this] (auto&& fut) {
                         _success = !fut.failed() && fut.get0();
-                        K2LOG_D(log::tpcc, "round {} ended with success={}", _try, _success);
+                        K2LOG_I(log::tpcc, "round {} ended with success={}", _try, _success);
                         return make_ready_future<>();
                     });
             }).then_wrapped([this] (auto&& fut) {
-                fut.ignore_ready_future();
+                if (!fut.failed()) {
+                    fut.ignore_ready_future();
+                }
+
                 if (fut.failed()) {
                     K2LOG_W_EXC(log::tpcc, fut.get_exception(), "Txn failed");
                 } else if (!_success) {
@@ -92,8 +95,12 @@ public:
             return retryStrategy.run([this]() {
                 return attempt();
             }).then_wrapped([this] (auto&& fut) {
-                fut.ignore_ready_future();
-                return make_ready_future<bool>(!fut.failed());
+                bool succeed = !fut.failed();
+                if (succeed)
+                    fut.ignore_ready_future();
+                else
+                    K2LOG_E(log::tpcc, "TPCC Txn failed: {}", fut.get_exception());
+                return make_ready_future<bool>(succeed);
             });
         })
         .handle_exception([] (auto exc) {
@@ -146,12 +153,11 @@ public:
 
 private:
     future<bool> runWithTxn() {
-        // future<> warehouse_update = warehouseUpdate();
+        future<> warehouse_update = warehouseUpdate();
         future<> district_update = districtUpdate();
         future<> CId_get = getCIdByLastNameViaIndex();
 
-        // return when_all_succeed(std::move(warehouse_update), std::move(district_update), std::move(CId_get)).discard_result()
-        return when_all_succeed(std::move(CId_get)).discard_result()
+        return when_all_succeed(std::move(warehouse_update), std::move(district_update), std::move(CId_get)).discard_result()
         .then([this] () {
             future<> history_update = historyUpdate();
             future<> customer_update = customerUpdate();
@@ -161,7 +167,6 @@ private:
                 if (fut.failed()) {
                     _failed = true;
                     K2LOG_W_EXC(log::tpcc, fut.get_exception(), "Payment Txn failed");
-                    fut.ignore_ready_future();
                     return _txn.end(false);
                 }
 
@@ -173,7 +178,6 @@ private:
                 if (fut.failed()) {
                     _failed = true;
                     K2LOG_W_EXC(log::tpcc, fut.get_exception(), "Payment Txn failed");
-                    fut.ignore_ready_future();
                     return make_ready_future<bool>(false);
                 }
 
@@ -257,7 +261,6 @@ private:
 
         return _client.createQuery(tpccCollectionName, "idx_customer_name")
         .then([this](auto&& response) mutable {
-            K2LOG_I(log::tpcc, "Create query success");
             CHECK_READ_STATUS(response);
 
             k2::String lastName = _random.RandowLastNameString();
@@ -884,8 +887,9 @@ public:
                 .then_wrapped([this] (auto&& fut) {
                     if (fut.failed()) {
                         _failed = true;
-                        fut.ignore_ready_future();
-                    }
+                    } else {
+                         fut.ignore_ready_future();
+                    }  
                 });
             })
             .then([this]() {

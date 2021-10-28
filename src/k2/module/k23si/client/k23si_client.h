@@ -209,7 +209,7 @@ private:
             // response from it. The cpo client's collections map must have this collection
             if (auto it=_cpo_client->collections.find(request.collectionName); it != _cpo_client->collections.end()) {
                 auto& krv = it->second->getPartitionForKey(request.key).partition->keyRangeV;
-                K2LOG_I(log::skvclient, "CollectionName {}, keyRangeVersion {}", request.collectionName, krv);
+                K2LOG_D(log::skvclient, "CollectionName {}, keyRangeVersion {}", request.collectionName, krv);
                 _write_ranges[request.collectionName].insert(krv);
             }
             else {
@@ -295,7 +295,7 @@ public:
             (_options.deadline, *request).
             then([this, request=std::move(request)] (auto&& response) {
                 auto& [status, k2response] = response;
-                K2LOG_I(log::skvclient, "Response of write request {} is {}", *request.get(),status);
+                K2LOG_D(log::skvclient, "Response of write request {} is {}", *request.get(),status);
                 _registerRangeForWrite(status, *request);
 
                 _checkResponseStatus(status);

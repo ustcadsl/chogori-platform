@@ -69,7 +69,7 @@ bool K23SIPartitionModule::_validateRequestPartition(const RequestT& req) const 
 }
 
 template <typename RequestT>
-Status K23SIPartitionModule::_validateStaleWrite(const RequestT& request, KeyValueNode KVNode) {
+Status K23SIPartitionModule::_validateStaleWrite(const RequestT& request, const KeyValueNode& KVNode) {
     if (!_validateRetentionWindow(request.mtr.timestamp)) {
         // the request is outside the retention window
         return dto::K23SIStatus::AbortRequestTooOld("write request is outside retention window");
@@ -94,7 +94,7 @@ Status K23SIPartitionModule::_validateStaleWrite(const RequestT& request, KeyVal
     // if a txn committed a value at time T5, then we must also assume they did a read at time T5
     // NB(3) This code does not care if there is a WI. If there is a WI, then this check can help avoid
     // an unnecessary PUSH.
-    dto::DataRecord* latestRec = KVNode.begin();
+    dto::DataRecord* latestRec = const_cast<k2::KeyValueNode&>(KVNode).begin();
     while(latestRec!=nullptr && latestRec->status == dto::DataRecord::WriteIntent) latestRec=latestRec->prevVersion;
     if (latestRec != nullptr && latestRec->status == dto::DataRecord::Committed &&
         request.mtr.timestamp.compareCertain(latestRec->timestamp) <= 0) {
@@ -143,7 +143,7 @@ Status K23SIPartitionModule::_validateReadRequest(const RequestT& request) const
         // server does not have schema
         return dto::K23SIStatus::OperationNotAllowed("schema does not exist in read-type request");
     }
-
+    K2LOG_D(log::skvsvr, "Validate Read Request SUCCESS");
     return dto::K23SIStatus::OK;
 }
 
@@ -167,6 +167,15 @@ Status K23SIPartitionModule::_validateWriteRequest(const dto::K23SIWriteRequest&
         return dto::K23SIStatus::OperationNotAllowed("schema version does not exist");
     }
 
+    if (auto* twim = _twimMgr.getTxnWIMeta(request.mtr.timestamp); twim != nullptr) {
+        if (twim->isAborted()) {
+            return dto::K23SIStatus::AbortConflict("The transaction has been aborted");
+        }
+        else if (twim->isCommitted()) {
+            return dto::K23SIStatus::BadParameter("The transaction has been committed");
+        }
+    }
+
     return _validateStaleWrite(request, KVNode);
 }
 // ********************** Validators
@@ -184,27 +193,50 @@ seastar::future<> K23SIPartitionModule::_registerVerbs() {
 
     RPC().registerRPCObserver<dto::K23SIReadRequest, dto::K23SIReadResponse>
     (dto::Verbs::K23SI_READ, [this](dto::K23SIReadRequest&& request) {
-        return handleRead(std::move(request), FastDeadline(_config.readTimeout()));
+        k2::OperationLatencyReporter reporter(_readLatency); // for reporting metrics
+        return handleRead(std::move(request), FastDeadline(_config.readTimeout()))
+               .then([this, reporter=std::move(reporter)](auto&& response) mutable {
+                    reporter.report();
+                    return std::move(response);
+               });
     });
 
     RPC().registerRPCObserver<dto::K23SIQueryRequest, dto::K23SIQueryResponse>
     (dto::Verbs::K23SI_QUERY, [this](dto::K23SIQueryRequest&& request) {
-        return handleQuery(std::move(request), dto::K23SIQueryResponse{}, FastDeadline(_config.readTimeout()));
+        k2::OperationLatencyReporter reporter(_queryPageLatency); // for reporting metrics
+        return handleQuery(std::move(request), dto::K23SIQueryResponse{}, FastDeadline(_config.readTimeout()))
+                .then([this, reporter=std::move(reporter)] (auto&& response) mutable {
+                    reporter.report();
+                    return std::move(response);
+               });
     });
 
     RPC().registerRPCObserver<dto::K23SIWriteRequest, dto::K23SIWriteResponse>
     (dto::Verbs::K23SI_WRITE, [this](dto::K23SIWriteRequest&& request) {
+        k2::OperationLatencyReporter reporter(_writeLatency); // for reporting metrics
         return handleWrite(std::move(request), FastDeadline(_config.writeTimeout()))
-            .then([this] (auto&& resp) { return _respondAfterFlush(std::move(resp));});
+            .then([this, reporter=std::move(reporter)] (auto&& resp) mutable {
+                return _respondAfterFlush(std::move(resp))
+                        .then([this, reporter=std::move(reporter)] (auto&& response) mutable {
+                            reporter.report();
+                            return std::move(response);
+                        });
+            });
     });
 
     RPC().registerRPCObserver<dto::K23SITxnPushRequest, dto::K23SITxnPushResponse>
     (dto::Verbs::K23SI_TXN_PUSH, [this](dto::K23SITxnPushRequest&& request) {
-        return handleTxnPush(std::move(request));
+        k2::OperationLatencyReporter reporter(_pushLatency); // for reporting metrics
+        return handleTxnPush(std::move(request))
+                .then([this, reporter=std::move(reporter)] (auto&& response) mutable {
+                    reporter.report();
+                    return std::move(response);
+               });
     });
 
     RPC().registerRPCObserver<dto::K23SITxnEndRequest, dto::K23SITxnEndResponse>
     (dto::Verbs::K23SI_TXN_END, [this](dto::K23SITxnEndRequest&& request) {
+        K2LOG_D(log::skvsvr, "Enter End Observer");
         return handleTxnEnd(std::move(request))
             .then([this] (auto&& resp) { return _respondAfterFlush(std::move(resp));});
     });
@@ -217,7 +249,9 @@ seastar::future<> K23SIPartitionModule::_registerVerbs() {
     RPC().registerRPCObserver<dto::K23SITxnFinalizeRequest, dto::K23SITxnFinalizeResponse>
     (dto::Verbs::K23SI_TXN_FINALIZE, [this](dto::K23SITxnFinalizeRequest&& request) {
         return handleTxnFinalize(std::move(request))
-            .then([this] (auto&& resp) { return _respondAfterFlush(std::move(resp));});
+                .then([this] (auto&& resp) {
+                    return _respondAfterFlush(std::move(resp));
+                });
     });
 
     RPC().registerRPCObserver<dto::K23SIPushSchemaRequest, dto::K23SIPushSchemaResponse>
@@ -277,7 +311,37 @@ void K23SIPartitionModule::_unregisterVerbs() {
     api_server.deregisterAPIObserver("InspectAllKeys");
 }
 
+void K23SIPartitionModule::_registerMetrics() {
+    _metric_groups.clear();
+    std::vector<sm::label_instance> labels;
+    labels.push_back(sm::label_instance("total_cores", seastar::smp::count));
+
+    _metric_groups.add_group("Nodepool", {
+        sm::make_gauge("indexer_keys",[this]{ return _indexer.size();},
+                        sm::description("Number of keys in indexer"), labels),
+        sm::make_counter("total_WI", _totalWI, sm::description("Number of WIs created"), labels),
+        sm::make_counter("finalized_WI", _finalizedWI, sm::description("Number of WIs finalized"), labels),
+        sm::make_gauge("record_versions", _recordVersions, sm::description("Number of record versions over all records"), labels),
+        sm::make_counter("total_committed_payload", _totalCommittedPayload, sm::description("Total size of committed payloads"), labels),
+        sm::make_histogram("read_latency", [this]{ return _readLatency.getHistogram();},
+                sm::description("Latency of Read Operations"), labels),
+        sm::make_histogram("write_latency", [this]{ return _writeLatency.getHistogram();},
+                sm::description("Latency of Write Operations"), labels),
+        sm::make_histogram("query_page_latency", [this]{ return _queryPageLatency.getHistogram();},
+                sm::description("Latency of Query Page Operations"), labels),
+        sm::make_histogram("push_latency", [this]{ return _pushLatency.getHistogram();},
+                sm::description("Latency of Pushes"), labels),
+        sm::make_histogram("query_page_scans", [this]{ return _queryPageScans.getHistogram();},
+                sm::description("Number of records scanned by query page operations"), labels),
+        sm::make_histogram("query_page_returns", [this]{ return _queryPageReturns.getHistogram();},
+                sm::description("Number of records returned by query page operations"), labels)
+    });
+}
+
 seastar::future<> K23SIPartitionModule::start() {
+
+    _registerMetrics();
+
     _cpo.init(_config.cpoEndpoint());
     if (_cmeta.retentionPeriod < _config.minimumRetentionPeriod()) {
         K2LOG_W(log::skvsvr,
@@ -383,6 +447,7 @@ void K23SIPartitionModule::_scanAdvance(IndexerIterator& it, bool reverseDirecti
 // Helper for handleQuery. Returns an iterator to start the scan at, accounting for
 // desired schema and (eventually) reverse direction scan
 IndexerIterator K23SIPartitionModule::_initializeScan(const dto::Key& start, bool reverse, bool exclusiveKey) {
+    K2LOG_D(log::skvsvr, "Initialize {} scanner with start key {}, exclusive key = {}", reverse, start, exclusiveKey);
     auto key_it = _indexer.lower_bound(start);
     // For reverse direction scan, key_it may not be in range because of how lower_bound works, so fix that here.
     // IF start key is empty, it means this reverse scan start from end of table OR
@@ -391,7 +456,9 @@ IndexerIterator K23SIPartitionModule::_initializeScan(const dto::Key& start, boo
     // ELSE IF lower_bound returns a key bigger than start, find the first key not bigger than start;
     if (reverse) {
         if (start.partitionKey == "" || key_it == _indexer.end()) {
+            K2LOG_D(log::skvsvr, "Empty partition key or end iterator");
             key_it = _indexer.last();
+            K2LOG_D(log::skvsvr, "Empty partition key or end iterator end");
         } else if ((_indexer.extractFromIter(key_it))->get_key() == start && exclusiveKey) {
             _scanAdvance(key_it, reverse, start.schemaName);
         } else if ((_indexer.extractFromIter(key_it))->get_key() > start) {
@@ -509,6 +576,7 @@ seastar::future<std::tuple<Status, dto::K23SIQueryResponse>>
 K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQueryResponse&& response, FastDeadline deadline) {
     K2LOG_D(log::skvsvr, "Partition: {}, received query {}", _partition, request);
 
+    uint64_t numScans = 0;
     Status validateStatus = _validateReadRequest(request);
     if (!validateStatus.is2xxOK()) {
         return RPCResponse(std::move(validateStatus), dto::K23SIQueryResponse{});
@@ -520,6 +588,7 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
     IndexerIterator key_it = _initializeScan(request.key, request.reverseDirection, request.exclusiveKey);
     for (; !_isScanDone(key_it, request, response.results.size());
                         _scanAdvance(key_it, request.reverseDirection, request.key.schemaName)) {
+        ++numScans;
         auto& KVNode = *_indexer.extractFromIter(key_it);
         dto::DataRecord* record = KVNode.get_datarecord(request.mtr.timestamp);
         K2LOG_D(log::skvsvr, "Scan at key {}", KVNode.get_key());
@@ -580,6 +649,9 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
 
         K2LOG_D(log::skvsvr, "About to PUSH in query request");
         request.key = (_indexer.extractFromIter(key_it))->get_key(); // if we retry, do so with the key we're currently iterating on
+        // add metrics
+        _queryPageScans.add(numScans);
+        _queryPageReturns.add(response.results.size());
         return _doPush(request.key, record->timestamp, request.mtr, deadline)
         .then([this, request=std::move(request),
                         resp=std::move(response), deadline](auto&& retryChallenger) mutable {
@@ -612,6 +684,9 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
 
     response.nextToScan = _getContinuationToken(key_it, request, response, response.results.size());
     K2LOG_D(log::skvsvr, "nextToScan: {}, exclusiveToken: {}", response.nextToScan, response.exclusiveToken);
+
+    _queryPageScans.add(numScans);
+    _queryPageReturns.add(response.results.size());
     return RPCResponse(dto::K23SIStatus::OK("Query success"), std::move(response));
 }
 
@@ -677,20 +752,14 @@ std::size_t K23SIPartitionModule::_findField(const dto::Schema schema, k2::Strin
 template <typename T>
 void _advancePayloadPosition(const dto::SchemaField& field, Payload& payload, bool& success) {
     (void) field;
-    T value{};
-    success = payload.read(value);
+    payload.skip<T>();
+    success = true;
 }
 
 template <typename T>
 void _copyPayloadBaseToUpdate(const dto::SchemaField& field, Payload& base, Payload& update, bool& success) {
     (void) field;
-    T value{};
-    success = base.read(value);
-    if (!success) {
-        return;
-    }
-
-    update.write(value);
+    success = base.copyToPayload<T>(update);
 }
 
 template <typename T>
@@ -723,8 +792,9 @@ bool K23SIPartitionModule::_isUpdatedField(uint32_t fieldIdx, std::vector<uint32
 }
 
 bool K23SIPartitionModule::_makeFieldsForSameVersion(dto::Schema& schema, dto::K23SIWriteRequest& request, dto::DataRecord& version) {
+    K2LOG_D(log::skvsvr, "Make Fields For Same Version");
     Payload basePayload = version.value.fieldData.shareAll();   // base payload
-    Payload payload(Payload::DefaultAllocator);                     // payload for new record
+    Payload payload(Payload::DefaultAllocator());                     // payload for new record
 
     for (std::size_t i = 0; i < schema.fields.size(); ++i) {
         if (_isUpdatedField(i, request.fieldsForPartialUpdate)) {
@@ -810,7 +880,7 @@ bool K23SIPartitionModule::_makeFieldsForDiffVersion(dto::Schema& schema, dto::S
     std::size_t baseCursor = 0; // indicate fieldsOffset cursor
 
     Payload basePayload = version.value.fieldData.shareAll();   // base payload
-    Payload payload(Payload::DefaultAllocator);                     // payload for new record
+    Payload payload(Payload::DefaultAllocator());                     // payload for new record
 
     // make every fields in schema for new full-record-WI
     for (std::size_t i = 0; i < schema.fields.size(); ++i) {
@@ -879,7 +949,7 @@ bool K23SIPartitionModule::_makeFieldsForDiffVersion(dto::Schema& schema, dto::S
             // this field is to be updated.
             if (request.value.excludedFields[i] == false) {
                 // request's payload has a value.
-                // 1. write() value from req's SKVRecord to payload
+                // 1. write() value from req's SKVRecorqd to payload
                 bool success = false;
                 K2_DTO_CAST_APPLY_FIELD_VALUE(_copyPayloadBaseToUpdate, schema.fields[i], request.value.fieldData, payload, success);
                 if (!success) return false;
@@ -935,7 +1005,7 @@ bool K23SIPartitionModule::_makeProjection(dto::SKVRecord::Storage& fullRec, dto
     auto schemaVer = schemaIt->second.find(fullRec.schemaVersion);
     dto::Schema& schema = *(schemaVer->second);
     std::vector<bool> excludedFields(schema.fields.size(), true);   // excludedFields for projection
-    Payload projectedPayload(Payload::DefaultAllocator);            // payload for projection
+    Payload projectedPayload(Payload::DefaultAllocator());            // payload for projection
 
     for (uint32_t i = 0; i < schema.fields.size(); ++i) {
         if (fullRec.excludedFields.size() && fullRec.excludedFields[i]) {
@@ -1032,17 +1102,34 @@ K23SIPartitionModule::handleWrite(dto::K23SIWriteRequest&& request, FastDeadline
 
 seastar::future<std::tuple<Status, dto::K23SIWriteResponse>>
 K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadline deadline) {
-    K2LOG_D(log::skvsvr, "processing write: {}", request);
+    K2LOG_D(log::skvsvr, "key {} ,processing write: {}", request.key, request);
     IndexerIterator it = _indexer.find(request.key);
-    KeyValueNode* nodePtr;
+    KeyValueNode* nodePtr = nullptr;
+    // MapIterator mapIt = _mapIndexer.find(request.key);
+    // KeyValueNode* nodePtrMap = nullptr;
+
     if(it == _indexer.end()) {
         //new KeyValueNode if there is no
         K2LOG_D(log::skvsvr, "Insert new KeyValueNode for key{}", request.key);
         nodePtr = _indexer.insert(request.key);
+        K2ASSERT(log::skvsvr, nodePtr!=nullptr, "Insert failed and return nullptr");
     }
     else {
+        K2LOG_D(log::skvsvr, "PartialUpdate and get node from indexer");
         nodePtr = _indexer.extractFromIter(it);
+        K2ASSERT(log::skvsvr, nodePtr!=nullptr, "Result of extractFrom iter is nullptr");
     }
+
+    // if(mapIt == _mapIndexer.end()) {
+    //      //new KeyValueNode if there is no
+    //      K2LOG_I(log::skvsvr, "Map Insert new KeyValueNode for key{}", request.key);
+    //      nodePtrMap = _mapIndexer.insert(request.key);
+    // }
+    // else {
+    //     K2LOG_I(log::skvsvr, "Map PartialUpdate and get node from indexer");
+    //     nodePtrMap = _mapIndexer.extractFromIter(mapIt);
+    //     K2ASSERT(log::skvsvr, nodePtrMap!=nullptr, "Result of extractFrom iter is nullptr");
+    // }
     //TODO check nodePtr is not null
     Status validateStatus = _validateWriteRequest(request, *nodePtr);
     K2LOG_D(log::skvsvr, "write for {} validated with status {}", request, validateStatus);
@@ -1055,10 +1142,25 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
         // we may come here after a TRH create. Make sure to flush that
         return RPCResponse(std::move(validateStatus), dto::K23SIWriteResponse{});
     }
+    // Map Version
+    // Status validateStatusMap = _validateWriteRequest(request, *nodePtrMap);
+    // K2LOG_D(log::skvsvr, "Map write for {} validated with status {}", request, validateStatusMap);
+    // if (!validateStatusMap.is2xxOK()) {
+    //     if (nodePtrMap->begin() == nullptr) {
+    //         // remove the key from indexer if there are no versions in node
+    //         _mapIndexer.erase(request.key);
+    //     }
+    //     K2LOG_D(log::skvsvr, "rejecting write {} due to {}", request, validateStatusMap);
+    //     // we may come here after a TRH create. Make sure to flush that
+    //     return RPCResponse(std::move(validateStatusMap), dto::K23SIWriteResponse{});
+    // }
 
     // check to see if we should push or is this a write from same txn
     KeyValueNode& KVNode = *nodePtr;
+    // KeyValueNode& KVNodeMap = *nodePtrMap;
+    // rec is used both in hot and map version
     dto::DataRecord* rec = nodePtr->begin();
+    K2LOG_D(log::skvsvr, "status of begin is {}", rec!=nullptr &&rec->status==dto::DataRecord::Committed);
     if (rec != nullptr && rec->status  == dto::DataRecord::WriteIntent && rec->timestamp != request.mtr.timestamp) {
         // this is a write request finding a WI from a different transaction. Do a push with the remaining
         // deadline time.
@@ -1086,9 +1188,15 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
     }
 
     // Note that if we are here and a WI exists, it must be from the txn of the current request
-    dto::DataRecord* head = rec;
+    // Exists precondition can be set by the user (e.g. with a delete to know if a record was actually
+    // delete) and it is set for partial updates
+    if (request.precondition == dto::ExistencePrecondition::Exists && (!rec || rec->isTombstone)) {
+        K2LOG_D(log::skvsvr, "Request {} not accepted since Exists precondition failed", request);
+        _readCache->insertInterval(request.key, request.key, request.mtr.timestamp);
+        return RPCResponse(dto::K23SIStatus::ConditionFailed("Exists precondition failed"), dto::K23SIWriteResponse{});
+    }
 
-    if (request.rejectIfExists && head && !head->isTombstone) {
+    if (request.precondition == dto::ExistencePrecondition::NotExists && rec && !rec->isTombstone) {
         // Need to add to read cache to prevent an erase coming in before this requests timestamp
         // If the condition passes (ie, there was no previous version and the insert succeeds) then
         // we do not need to insert into the read cache because the write intent will handle conflicts
@@ -1103,22 +1211,18 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
 
     if (request.fieldsForPartialUpdate.size() > 0) {
         // parse the partial record to full record
-        if (!head || head->isTombstone) {
-            K2LOG_D(log::skvsvr, "partial update request {} not accepted since there is no previous version to update", request);
-            // cannot parse partial record without a version
-            return RPCResponse(dto::K23SIStatus::KeyNotFound("can not partial update with no/deleted version"), dto::K23SIWriteResponse{});
-        }
-        if (!_parsePartialRecord(request, *head)) {
-            K2LOG_D(log::skvsvr, "can not parse partial record for key {}", request.key);
-            head->value.fieldData.seek(0);
-            return RPCResponse(dto::K23SIStatus::BadParameter("missing fields or can not interpret partialUpdate"), dto::K23SIWriteResponse{});
+        if (!_parsePartialRecord(request, *rec)) {
+            K2LOG_I(log::skvsvr, "can not parse partial record for key {}", request.key);
+            rec->value.fieldData.seek(0);
+            _readCache->insertInterval(request.key, request.key, request.mtr.timestamp);
+            return RPCResponse(dto::K23SIStatus::ConditionFailed("missing fields or can not interpret partialUpdate"), dto::K23SIWriteResponse{});
         }
     }
 
 
     // all checks passed - we're ready to place this WI as the latest version
     auto status = _createWI(std::move(request), KVNode);
-    K2LOG_D(log::skvsvr, "WI creation with status {}", status);
+    // auto status = _createWI(std::move(request), KVNodeMap);
     return RPCResponse(std::move(status), dto::K23SIWriteResponse{});
 }
 
@@ -1136,7 +1240,10 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, KeyValueNode& 
     if (!status.is2xxOK()) {
         return status;
     }
+
+    // the TWIM accepted the write. Add it as a WI now  
     _persistence->append(*rec);
+    _totalWI++;
     return Statuses::S201_Created("WI created");
 }
 
@@ -1248,14 +1355,18 @@ K23SIPartitionModule::_doPush(dto::Key key, dto::Timestamp incumbentId, dto::K23
                             return seastar::make_ready_future<Status>(std::move(status));
                         }
                         _removeWI(node);
+                        _finalizedWI++;
                         break;
                     }
                     case dto::EndAction::Commit: {
                         if (auto status = _twimMgr.commitWrite(request.incumbentMTR.timestamp, key); !status.is2xxOK()) {
                             K2LOG_W(log::skvsvr, "Unable to commit write in {} with local txn metadata due to {}", request.incumbentMTR, status);
                             return seastar::make_ready_future<Status>(std::move(status));
-                        }
+                        }                        
+                        _totalCommittedPayload += rec->value.fieldData.getSize();
                         rec->status = dto::DataRecord::Committed;
+                        _recordVersions++;
+                        _finalizedWI++;
                         break;
                     }
                     default:
@@ -1310,7 +1421,7 @@ Status K23SIPartitionModule::_finalizeTxnWIs(dto::Timestamp txnts, dto::EndActio
     }
     K2ASSERT(log::skvsvr, twim->isCommitted() || twim->isAborted(), "Twim {} has not ended yet", *twim);
     for (auto& key: twim->writeKeys) {
-        IndexerIterator idxIt = _indexer.find(const_cast<Key &>(key));
+        IndexerIterator idxIt = _indexer.find(const_cast<dto::Key &>(key));
         K2ASSERT(log::skvsvr, idxIt != _indexer.end(),
                  "TWIM {} has registered WI for key {} but key is not in indexer", *twim, key);
 
@@ -1321,16 +1432,33 @@ Status K23SIPartitionModule::_finalizeTxnWIs(dto::Timestamp txnts, dto::EndActio
         K2ASSERT(log::skvsvr, WIRec->timestamp == txnts,
                  "TWIM {} has registered WI for key{}, but WI is from different transaction {}",
                  *twim, key, WIRec->timestamp);
+        // Map version
+        // MapIterator idxItMap = _mapIndexer.find(const_cast<dto::Key &>(key));
+        // K2ASSERT(log::skvsvr, idxItMap != _mapIndexer.end(),
+        //          "TWIM {} has registered WI for key {} but key is not in indexer", *twim, key);
+        // KeyValueNode& KVNodeMap = *_mapIndexer.extractFromIter(idxItMap);
+        // dto::DataRecord* WIRecMap = KVNodeMap.begin();        
+        // K2ASSERT(log::skvsvr, WIRecMap!=nullptr&&WIRecMap->status==dto::DataRecord::WriteIntent,
+        //          "TWIM {} has registered Map WI for key{}, but key does not have a WI", *twim, key);
+        // K2ASSERT(log::skvsvr, WIRecMap->timestamp == txnts,
+        //          "TWIM {} has registered Map WI for key{}, but WI is from different transaction {}",
+        //          *twim, key, WIRecMap->timestamp);
 
         switch (action) {
             case dto::EndAction::Abort: {
                 K2LOG_D(log::skvsvr, "aborting {}, in txn {}", key, *twim);
                 _removeWI(KVNode);
+                // _removeWI(KVNodeMap);
                 break;
             }
             case dto::EndAction::Commit: {
                 K2LOG_D(log::skvsvr, "committing {}, in txn {}", key, *twim);
+                
+                _totalCommittedPayload += WIRec->value.fieldData.getSize();
                 WIRec->status = dto::DataRecord::Committed;
+                // _totalCommittedPayload += WIRecMap->value.fieldData.getSize();
+                // WIRecMap->status = dto::DataRecord::Committed;
+                _recordVersions++;
                 break;
             }
             default:
@@ -1341,6 +1469,7 @@ Status K23SIPartitionModule::_finalizeTxnWIs(dto::Timestamp txnts, dto::EndActio
         }
     }
 
+    _finalizedWI++;
     return dto::K23SIStatus::OK;
 }
 

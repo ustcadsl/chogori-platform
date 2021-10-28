@@ -65,7 +65,7 @@ struct VersionSet {
     // This allows us to
     // - perform finalization in a rate-limited fashion (i.e. have only some WIs finalized for a txn)
     // - finalize out WIs which actively trigger a conflict, without requiring finalization for the entire txn.
-    std::optional<WriteIntent> WI;
+    std::optional<dto::WriteIntent> WI;
     VersionsT committed;
     bool empty() const {
         return !WI.has_value() && committed.empty();
@@ -74,10 +74,10 @@ struct VersionSet {
 */
 
 // the type holding versions for all keys, i.e. the indexer
-// typedef HOTindexer IndexerT;
-// typedef HotIterator IndexerIterator;
-typedef mapindexer IndexerT;
-typedef MapIterator IndexerIterator;
+typedef HOTindexer IndexerT;
+typedef HotIterator IndexerIterator;
+// typedef mapindexer IndexerT;
+// typedef MapIterator IndexerIterator;
 
 class K23SIPartitionModule {
 public: // lifecycle
@@ -166,7 +166,7 @@ private: // methods
     // validate writes are not stale - older than the newest committed write or past a recent read.
     // return true if request is valid
     template <typename RequestT>
-    Status _validateStaleWrite(const RequestT& req, KeyValueNode versions);
+    Status _validateStaleWrite(const RequestT& req, const KeyValueNode& versions);
 
     // validate an incoming write request
     Status _validateWriteRequest(const dto::K23SIWriteRequest& request, const KeyValueNode& versions);
@@ -249,6 +249,8 @@ private: // methods
     // helper used to finalize all local WIs for a give transaction
     Status _finalizeTxnWIs(dto::Timestamp txnts, dto::EndAction action);
 
+    void _registerMetrics();
+
 private:  // members
     // the metadata of our collection
     dto::CollectionMetadata _cmeta;
@@ -260,6 +262,7 @@ private:  // members
     // (newest item is at front of the deque)
     // Duplicates are not allowed
     IndexerT _indexer;
+    mapindexer _mapIndexer;
 
     // manage transaction records as a coordinator
     TxnManager _txnMgr;
@@ -288,6 +291,21 @@ private:  // members
     std::shared_ptr<Persistence> _persistence;
 
     CPOClient _cpo;
+
+    sm::metric_groups _metric_groups;
+
+    //metrics
+    uint64_t _totalWI{0}; // for number of active WIs
+    uint64_t _recordVersions{0};
+    uint64_t _totalCommittedPayload{0}; //total committed user payload size
+    uint64_t _finalizedWI{0}; // total number of finalized WI
+
+    k2::ExponentialHistogram _readLatency;
+    k2::ExponentialHistogram _writeLatency;
+    k2::ExponentialHistogram _queryPageLatency;
+    k2::ExponentialHistogram _pushLatency;
+    k2::ExponentialHistogram _queryPageScans;
+    k2::ExponentialHistogram _queryPageReturns;
 };
 
 } // ns k2

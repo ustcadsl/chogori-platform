@@ -538,7 +538,7 @@ void K2TxnHandle::_prepareQueryRequest(Query& query) {
 // Get one set of paginated results for a query. User may need to call again with same query
 // object to get more results
 seastar::future<QueryResult> K2TxnHandle::query(Query& query) {
-    K2LOG_I(log::skvclient, "Client prepare query");
+    K2LOG_D(log::skvclient, "Client prepare query");
     if (!_valid) {
         return seastar::make_exception_future<QueryResult>(K23SIClientException("Invalid use of K2TxnHandle"));
     }
