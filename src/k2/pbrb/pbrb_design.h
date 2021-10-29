@@ -540,6 +540,9 @@ public:
     // Copy the field of row from DataRecord of query to (pagePtr, rowOffset)
     void *cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, void* field, size_t strSize, uint32_t fieldID, bool isStr);
     
+    // Copy the payload of row from DataRecord of query to (pagePtr, rowOffset)
+    void *cacheRowPayloadFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, Payload& rowData);
+
     // find an empty slot between the beginOffset and endOffset in the page
     RowOffset findEmptySlotInPage(BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset);
 
@@ -686,7 +689,7 @@ public:
     // Transport Functions:
     
     // PBRB Row -> SKVRecord
-    dto::SKVRecord *generateSKVRecordByRow(RowAddr rAddr, const String &collName, std::shared_ptr<dto::Schema> schema);
+    dto::SKVRecord *generateSKVRecordByRow(RowAddr rAddr, const String &collName, std::shared_ptr<dto::Schema> schema, bool isPayloadRow);
     dto::DataRecord *generateDataRecord(dto::SKVRecord *skvRecord, void *hotAddr);
     // getSchemaVer by hotAddr in SimpleSchema
     uint32_t getSchemaVer(void *hotAddr) {

@@ -94,10 +94,14 @@ Status K23SIPartitionModule::_validateStaleWrite(const RequestT& request, KeyVal
     // if a txn committed a value at time T5, then we must also assume they did a read at time T5
     // NB(3) This code does not care if there is a WI. If there is a WI, then this check can help avoid
     // an unnecessary PUSH.
+
     dto::DataRecord* latestRec = KVNode.begin();
-    if (KVNode.is_inmem(0))
-        latestRec = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(static_cast<void *>(latestRec)));
-    while(latestRec != nullptr && latestRec->status == dto::DataRecord::WriteIntent) latestRec=latestRec->prevVersion;
+    //NodeVerMetadata verMD = KVNode.getNodeVerMetaData(0, pbrb);
+    if (KVNode.is_inmem(0)){
+        latestRec = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(latestRec));
+    }
+        
+    //while(latestRec != nullptr && latestRec->status == dto::DataRecord::WriteIntent) latestRec=latestRec->prevVersion;
     if (latestRec != nullptr && latestRec->status == dto::DataRecord::Committed &&
         request.mtr.timestamp.compareCertain(latestRec->timestamp) <= 0) {
         // newest version is the latest committed and its newer than the request
@@ -656,8 +660,8 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     int order;
     K2LOG_D(log::skvsvr, "Ready to read datarecord");
     DataRecord* rec = nodePtr->get_datarecord(request.mtr.timestamp, order, pbrb);
-    if (rec != nullptr)
-        K2LOG_D(log::skvsvr, "Node info ====== Timestamp: {}; Order: {}, SchemaVersion: {}", request.mtr.timestamp, order, rec->value.schemaVersion);
+    //if (rec != nullptr)
+        //K2LOG_D(log::skvsvr, "Node info ====== Timestamp: {}; Order: {}, SchemaVersion: {}", request.mtr.timestamp, order, rec->value.schemaVersion);
     DataRecord* result = nullptr;
     if (rec != nullptr) {
         
@@ -714,6 +718,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 auto rowAddr = pbrb->cacheRowHeaderFrom(pagePtr, rowOffset, rec);
                 K2LOG_D(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
                 
+                #ifdef FIXEDFIELD_ROW
                 // copy fields
                 for(uint32_t j=0; j < schema.fields.size(); j++){
                     if (rec->value.excludedFields.size() && rec->value.excludedFields[j]) {
@@ -723,6 +728,12 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                     bool success = false;
                     _cacheFieldValueToPBRB(schema.fields[j], rec->value.fieldData, success, pagePtr, rowOffset, j);
                 }
+                #endif
+
+                #ifdef PAYLOAD_ROW
+                    pbrb->cacheRowPayloadFromDataRecord(pagePtr, rowOffset, rec->value.fieldData);//////
+                #endif
+
                 pbrb->setRowBitMapPage(pagePtr, rowOffset);
 
                 // update indexer.
@@ -732,7 +743,9 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 // nodePtr->printAll();
                 // debug output
                 // pbrb->printRowsBySchema(SMapIndex);
-                pbrb->printFieldsRow(pagePtr, rowOffset);
+                #ifdef FIXEDFIELD_ROW
+                    pbrb->printFieldsRow(pagePtr, rowOffset);
+                #endif
                 rec->value.fieldData.seek(0);
                 
                 result = rec;
@@ -741,9 +754,16 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 // case 3: hot version
                 K2LOG_D(log::skvsvr, "Case 3: Hot Version in KVNode");
                 void *hotAddr = static_cast<void *>(rec);
-                dto::SKVRecord *sRec = pbrb->generateSKVRecordByRow(hotAddr, request.collectionName, schemaVer->second);
-                result = pbrb->generateDataRecord(sRec, hotAddr);
-
+                #ifdef PAYLOAD_ROW
+                    dto::SKVRecord *sRec = pbrb->generateSKVRecordByRow(hotAddr, request.collectionName, schemaVer->second, true);
+                    result = pbrb->generateDataRecord(sRec, hotAddr);
+                    result->value.fieldData.seek(0);
+                #endif
+                
+                #ifdef FIXEDFIELD_ROW
+                    dto::SKVRecord *sRec = pbrb->generateSKVRecordByRow(hotAddr, request.collectionName, schemaVer->second, false);
+                    result = pbrb->generateDataRecord(sRec, hotAddr);
+                #endif 
                 // TODO: Evict expired versions.
             }
         }
@@ -1245,7 +1265,7 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
     }
     //TODO check nodePtr is not null
     Status validateStatus = _validateWriteRequest(request, *nodePtr);
-    K2LOG_D(log::skvsvr, "write for {} validated with status {}", request, validateStatus);
+    //K2LOG_D(log::skvsvr, "write for {} validated with status {}", request, validateStatus);
     if (!validateStatus.is2xxOK()) {
         if (nodePtr->begin() == nullptr) {
             // remove the key from indexer if there are no versions in node
@@ -1262,6 +1282,10 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
 
     // nodePtr->printAll();
     bool isHot = nodePtr->is_inmem(0);
+    /*if(isHot){
+        rec = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(rec));
+        isHot = false;
+    }*/
 
     NodeVerMetadata verMD = nodePtr->getNodeVerMetaData(0, pbrb);
 

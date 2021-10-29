@@ -203,6 +203,8 @@ public:
     // The user can later use the Storage-based constructor of the SKVRecord recreate a usable record.
     const Storage& getStorage();
 
+    void setStorage(void* srcAddr, size_t payloadRowSize);//////
+
     SKVRecord() = default;
     // The constructor for an SKVRecord that a user of the SKV client would use to create a request
     SKVRecord(const String& collection, std::shared_ptr<Schema> s);

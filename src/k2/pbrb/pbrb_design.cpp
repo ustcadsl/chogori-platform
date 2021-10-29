@@ -113,6 +113,42 @@ void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset
 }
 
 
+// Copy the payload of row from DataRecord of query to (pagePtr, rowOffset)
+void *PBRB::cacheRowPayloadFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, Payload& rowData)
+{
+    //K2LOG_I(log::pbrb, "function cacheRowFromPlog(BufferPage, RowOffset:{}, field:{}", rowOffset, field);
+    if (pagePtr == nullptr) {
+        K2LOG_I(log::pbrb, "Trying to cache row to nullptr!");
+        return nullptr;
+    }
+    if (rowOffset > _schemaMap[getSchemaIDPage(pagePtr)].maxRowCnt) {
+        K2LOG_I(log::pbrb, "Row Offset out of range!");
+        return nullptr;
+    }
+    if (isBitmapSet(pagePtr, rowOffset)) {
+        K2LOG_I(log::pbrb, "Conflict: move row to occupied slot, In page, offset:{}", rowOffset);
+        return nullptr;
+    }
+
+    SchemaId schemaId = getSchemaIDPage(pagePtr);
+    SchemaMetaData smd = _schemaMap[schemaId];
+    uint32_t byteOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
+                            smd.rowSize * rowOffset;
+
+    void *rowBasePtr = (void *) ((uint8_t *)(pagePtr) + byteOffsetInPage + smd.fieldsInfo[0].fieldOffset);
+    size_t rowPayloadSize = rowData.getSize();
+    if(rowPayloadSize > smd.rowSize) { //TODO: long payload exceeds row size
+        rowPayloadSize = smd.rowSize - smd.fieldsInfo[0].fieldOffset - 1; //////
+        K2LOG_I(log::pbrb, "********cut long payload row, rowData.getSize:{}, row size:{}, rowPayloadSize:{}", rowData.getSize(), smd.rowSize, rowPayloadSize);
+    }
+    memcpy(rowBasePtr, &rowPayloadSize, sizeof(size_t));
+    rowBasePtr = (void *) ((uint8_t *)(pagePtr) + byteOffsetInPage + smd.fieldsInfo[0].fieldOffset + sizeof(size_t));
+    rowData.read(rowBasePtr, rowPayloadSize); ///
+    //K2LOG_I(log::pbrb, "********rowOffset:{}, row size:{}, smd.rowSize:{}, rowPayloadSize:{}", rowOffset, rowData.getSize(), smd.rowSize, rowPayloadSize);
+
+    return rowBasePtr;
+}
+
 // Copy memory from plog to (pagePtr, rowOffset)
 void *PBRB::cacheRowFromPlog(BufferPage *pagePtr, RowOffset rowOffset, PLogAddr pAddress)
 {

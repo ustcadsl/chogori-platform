@@ -48,6 +48,9 @@ Copyright(c) 2020 Futurewei Cloud
 #include <k2/pbrb/indexer.h>
 #include <k2/pbrb/pbrb_design.h>
 
+//#define PAYLOAD_ROW
+#define FIXEDFIELD_ROW
+
 namespace k2 {
 
 /*

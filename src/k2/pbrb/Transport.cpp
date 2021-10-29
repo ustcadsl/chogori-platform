@@ -20,7 +20,7 @@ void _copyFieldFromHotRow(const dto::SchemaField& field, void *srcAddr, dto::SKV
 }
 
 // PBRB Row -> SKVRecord.
-dto::SKVRecord *PBRB::generateSKVRecordByRow(RowAddr rAddr, const String &collName, std::shared_ptr<dto::Schema> schema) {
+dto::SKVRecord *PBRB::generateSKVRecordByRow(void *rAddr, const String &collName, std::shared_ptr<dto::Schema> schema, bool isPayloadRow) {
 
     dto::SKVRecord *record = new dto::SKVRecord(collName, schema);
     // read smd to get fields info.
@@ -35,35 +35,44 @@ dto::SKVRecord *PBRB::generateSKVRecordByRow(RowAddr rAddr, const String &collNa
     assert(_schemaMap.find(sid) != _schemaMap.end());
     const SchemaMetaData &smd = _schemaMap[sid];
     
-    // Copy Fields.
-    assert(smd.schema->fields.size() == smd.fieldsInfo.size() && smd.fieldsInfo.size() > 0);
-    
-    K2LOG_D(log::pbrb, "field(s) count: {}", smd.schema->fields.size());
-    for (uint32_t idx = 0; idx < smd.schema->fields.size(); idx++) {
-        // TODO: add nullable fields.
-        auto fieldOffset = smd.fieldsInfo[idx].fieldOffset;
-        RowAddr srcAddr = static_cast<RowAddr>((uint8_t *)rAddr + fieldOffset);
-        auto field = smd.schema->fields[idx];
+    if(!isPayloadRow){//////
+        // Copy Fields.
+        assert(smd.schema->fields.size() == smd.fieldsInfo.size() && smd.fieldsInfo.size() > 0);
+        K2LOG_D(log::pbrb, "field(s) count: {}", smd.schema->fields.size());
+        for (uint32_t idx = 0; idx < smd.schema->fields.size(); idx++) {
+            // TODO: add nullable fields.
+            auto fieldOffset = smd.fieldsInfo[idx].fieldOffset;
+            RowAddr srcAddr = static_cast<RowAddr>((uint8_t *)rAddr + fieldOffset);
+            auto field = smd.schema->fields[idx];
 
-        if (field.type == k2::dto::FieldType::STRING) {
-            char *cstr = (char *)(srcAddr);
-            String str(cstr);
-            // -----! NOTICE: size need -1 here. !-----
-            K2LOG_D(log::pbrb, "Copy Field {}: (Type: STRING, FieldOffset: {}, value: {}, size: {}", idx, smd.fieldsInfo[idx].fieldOffset, str, str.size());
-            // Serialize into record
-            record->serializeNext<String>(str);
+            if (field.type == k2::dto::FieldType::STRING) {
+                char *cstr = (char *)(srcAddr);
+                String str(cstr);
+                // -----! NOTICE: size need -1 here. !-----
+                K2LOG_D(log::pbrb, "Copy Field {}: (Type: STRING, FieldOffset: {}, value: {}, size: {}", idx, smd.fieldsInfo[idx].fieldOffset, str, str.size());
+                // Serialize into record
+                record->serializeNext<String>(str);
+            }
+            else {
+                bool success;
+                CAST_APPLY_FIELD_VALUE_WITHOUT_STRING(_copyFieldFromHotRow, field, srcAddr, record, success);
+                if (!success)
+                    K2LOG_W(log::pbrb, "unable to serialize field");
+            }
         }
-        else {
-            bool success;
-            CAST_APPLY_FIELD_VALUE_WITHOUT_STRING(_copyFieldFromHotRow, field, srcAddr, record, success);
-            if (!success)
-                K2LOG_W(log::pbrb, "unable to serialize field");
-        }
+
+    }else{/////
+        void* srcAddr = (void*) ((uint8_t *)rAddr + smd.fieldsInfo[0].fieldOffset); //row header offset
+        size_t payloadRowSize;
+        memcpy(&payloadRowSize, srcAddr, sizeof(size_t));
+        srcAddr = (void*) ((uint8_t *)rAddr + smd.fieldsInfo[0].fieldOffset + sizeof(size_t));
+        K2LOG_D(log::pbrb, "####payloadRowSize:{}, smd.fieldsInfo[0].fieldOffset:{}", payloadRowSize, smd.fieldsInfo[0].fieldOffset);
+        //memcpy((void*)&(record->getStorage().fieldData), srcAddr, payloadRowSize);
+        record->setStorage(srcAddr, payloadRowSize);
     }
 
     return record;
 }
-
 
 
 dto::DataRecord *PBRB::generateDataRecord(dto::SKVRecord *skvRecord, void *hotAddr) {
