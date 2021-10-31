@@ -147,7 +147,7 @@ public:
     ConfigVar<std::vector<String>> _tcpRemotes{"tcp_remotes"};
     ConfigVar<String> _cpo{"cpo"};
     ConfigDuration create_collection_deadline{"create_collection_deadline", 1s};
-    ConfigDuration retention_window{"retention_window", 600s};
+    ConfigDuration retention_window{"retention_window", 10s}; //600s
     ConfigDuration txn_end_deadline{"txn_end_deadline", 60s};
 
     uint64_t read_ops{0};

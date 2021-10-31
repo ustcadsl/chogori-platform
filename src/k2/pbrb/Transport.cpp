@@ -26,9 +26,9 @@ dto::SKVRecord *PBRB::generateSKVRecordByRow(void *rAddr, const String &collName
     // read smd to get fields info.
     auto retVal = findRowByAddr(rAddr);
     BufferPage *pagePtr = retVal.first;
-    RowOffset rowOffset = retVal.second;
+    //RowOffset rowOffset = retVal.second;
 
-    K2LOG_I(log::pbrb, "Row: {} (Page: {}, Offset: {})", rAddr, (void *)pagePtr, rowOffset);
+    //K2LOG_I(log::pbrb, "Row: {} (Page: {}, Offset: {})", rAddr, (void *)pagePtr, rowOffset);
 
     // const reference
     SchemaId sid = getSchemaIDPage(pagePtr);

@@ -273,6 +273,10 @@ private:  // members
   
     Index indexer; //////
 
+    long pbrbHitNum = 0; //////
+
+    //long NvmReadNum = 0; //////
+
     // manage transaction records as a coordinator
     TxnManager _txnMgr;
 

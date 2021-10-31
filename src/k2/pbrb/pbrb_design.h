@@ -21,6 +21,8 @@
 #include <k2/dto/ControlPlaneOracle.h>
 #include <k2/indexer/IndexerInterface.h>
 
+#include <k2/indexer/MapIndexer.h>
+//#include <k2/indexer/HOTIndexer.h>
 #include "plog.h"
 #include "schema.h"
 
@@ -229,12 +231,12 @@ private:
 public:
     //SchemaMetaData tempSmeta;
     //int *watermark;
-    k2::dto::Timestamp *watermark;
+    k2::dto::Timestamp watermark;
     //Initialize a PBRB cache
     //PBRB(int maxPageNumber, int *wm, Index *indexer)
     PBRB(int maxPageNumber, k2::dto::Timestamp *wm, Index *indexer)
     {
-        watermark = wm;
+        watermark = *wm;
         this->_maxPageNumber = maxPageNumber;
         auto aligned_val = std::align_val_t{_pageSize}; //page size = 64KB
 
@@ -501,9 +503,14 @@ public:
 
             _freePageList.pop_front();
             K2LOG_I(log::pbrb, "Remaining _freePageList size:{}", _freePageList.size());
+
             return newPage;
         }
     };
+
+    float totalPageUsage() {
+        return 1- ((float)_freePageList.size()/(float)_maxPageNumber);
+    }
 
     void outputHeader(BufferPage *pagePtr) {
         std::cout << "\nMagic: " << std::hex << getMagicPage(pagePtr) << std::endl << std::oct
@@ -588,7 +595,9 @@ public:
 //    rowPosition pickRowToEviction(SchemaId schemaID, evictPolicy policy);
 
     //evict rows from PBRB cache in the background
-    void doBackgroundPBRBGC();
+    void doBackgroundPBRBGC(mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod);
+
+    float getAveragePageListUsage();
 
     // 4. Debugging Output Function.
     void printFieldsRow(const BufferPage *pagePtr, RowOffset rowOffset) {

@@ -36,10 +36,10 @@ struct K23SIConfig {
     // transactions to execute. If the value is too big, then we force our memory requirements to be higher -
     // we (keep more versions). If the value is too small, then we will have to refresh current time from the TSO too
     // often and cause load issues.
-    ConfigDuration minimumRetentionPeriod{"retention_minimum", 1h};
+    ConfigDuration minimumRetentionPeriod{"retention_minimum", 10s}; //1h
 
     // how often to update our retention timestamp from the TSO.
-    ConfigDuration retentionTimestampUpdateInterval{"retention_ts_update_interval", 60s};
+    ConfigDuration retentionTimestampUpdateInterval{"retention_ts_update_interval", 5s};//60s
 
     // timeout for read requests (including potential PUSH operation)
     ConfigDuration readTimeout{"read_timeout", 100ms};

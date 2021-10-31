@@ -316,10 +316,10 @@ private:
             auto readpsec = (double)_client.read_ops/totalsecs;
             auto writepsec = (double)_client.write_ops/totalsecs;
             auto querypsec = (double)_client.query_ops/totalsecs;
-            K2LOG_I(log::tpcc, "completedTxns={} ({} per sec)", _completedTxns, cntpsec);
-            K2LOG_I(log::tpcc, "read ops {} per sec", readpsec);
-            K2LOG_I(log::tpcc, "write ops {} per sec", writepsec);
-            K2LOG_I(log::tpcc, "query ops {} per sec", querypsec);
+            K2LOG_I(log::tpcc, "completedTxns={} ({} per sec), totalsecs:{}", _completedTxns, cntpsec, totalsecs);
+            K2LOG_I(log::tpcc, "read ops {} per sec, read number:{}", readpsec, _client.read_ops);
+            K2LOG_I(log::tpcc, "write ops {} per sec, write number:{}", writepsec, _client.write_ops);
+            K2LOG_I(log::tpcc, "query ops {} per sec, query number:{}", querypsec, _client.query_ops);
             K2LOG_I(log::tpcc, "newOrderTxns={} ", _newOrderTxns);
             //K2LOG_I(log::tpcc, "newOrderTxn latency={}", _newOrderLatency);
             K2LOG_I(log::tpcc, "PaymentTxns={} ", _paymentTxns);

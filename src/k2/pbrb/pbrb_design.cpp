@@ -234,7 +234,7 @@ void *PBRB::cacheColdRow(PLogAddr pAddress, String key)
     // 1. has hot row:
     if (kvNode.hasCachedVer()) {
         for (int i = kvNode.rowNum - 1;i >= 0;i--) {
-            if (kvNode.isCached[i] && kvNode.timestamp[i] < (int) watermark->tStartTSECount()) {
+            if (kvNode.isCached[i] && kvNode.timestamp[i] < (int) watermark.tStartTSECount()) {
             //if (kvNode.isCached[i] && kvNode.timestamp[i] < *watermark) {
                 replaceAddr = kvNode.addr[i];
                 PLogAddr coldAddr = evictRow(kvNode.addr[i]);
@@ -456,6 +456,72 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
     return std::make_pair(nullptr, 0);
 }
 
+float PBRB::getAveragePageListUsage() {
+    float pageListUsageSum = 0.0;
+    int pageListNum = 0;
+    float averagePageListUsage = 0.0;
+    for (auto &schemaEntry : _schemaMap) {
+        //SchemaId sID = schemaEntry.first;
+        SchemaMetaData sMeta = schemaEntry.second;
+        BufferPage *pagePtr = sMeta.headPage;
+        long totalHowRowsOfaPageList = 0;
+        long totalMaxRow = 0;
+        while (pagePtr) {
+            //outputHeader(pagePtr);
+            totalHowRowsOfaPageList += getHotRowsNumPage(pagePtr);
+            totalMaxRow += sMeta.maxRowCnt;
+            pagePtr = getNextPage(pagePtr);
+        }     
+        pageListUsageSum += (float)totalHowRowsOfaPageList/(float)totalMaxRow;
+        K2LOG_I(log::pbrb, "totalHowRowsOfaPageList:{}, totalMaxRow:{}, sMeta.maxRowCnt:{}", totalHowRowsOfaPageList, totalMaxRow, sMeta.maxRowCnt);
+        pageListNum++;
+    }
+    averagePageListUsage = pageListUsageSum/(float)pageListNum;
+    return averagePageListUsage;
+}
+
+void PBRB::doBackgroundPBRBGC(mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod) {
+    if ((float)_freePageList.size()/(float)_maxPageNumber >= 0.4) {
+        return;
+    }
+    if(newWaterMark.compareCertain(watermark) > 0) watermark = newWaterMark;
+    float avgPageListUsage = getAveragePageListUsage();
+
+    if (avgPageListUsage <= 0.6) {
+        return;
+    } else {  //if (avgPageListUsage > 0.6 && avgPageListUsage <= 0.8) {
+        //float ratio = (float)((avgPageListUsage-0.6)/(1-0.6));
+        int ratio = (avgPageListUsage-0.6)*100;
+        watermark = watermark + retentionPeriod*ratio/(100-60); //Change the watermark dynamiclly according to retentionTime and avgPageListUsage
+        K2LOG_I(log::pbrb, "set a newer waterMark:{}, original waterMark:{}, avgPageListUsage:{}, retentionPeriod*ratio/40:{}", watermark, newWaterMark, avgPageListUsage, retentionPeriod*ratio/40);
+    } 
+
+    MapIndexer::iterator indexIterator = _indexer.begin();
+    for (; indexIterator!=_indexer.end(); indexIterator++) {
+        KeyValueNode* nodePtr = indexIterator->second;
+        for (int i = 0; i < 3; i++) {
+            if (!nodePtr->is_inmem(i)) continue;
+            //K2LOG_I(log::pbrb, "######watermark:{}", watermark);
+            if (nodePtr->compareTimestamp(i, watermark) < 0) {
+                //K2LOG_I(log::pbrb, "evict row:{}, order:{}", nodePtr->get_key(), i);
+                void* HotRowAddr = static_cast<void *> (nodePtr->_getpointer(i));
+                auto pair = findRowByAddr(HotRowAddr);
+                BufferPage *pagePtr = pair.first;
+                RowOffset rowOff = pair.second;
+                dto::DataRecord *coldAddr = static_cast<dto::DataRecord *> (getPlogAddrRow(HotRowAddr));
+                nodePtr->setColdAddr(i, coldAddr);
+                nodePtr->set_inmem(i, 0);
+                //nodePtr->printAll();
+                removeHotRow(pagePtr, rowOff);
+                //TODO: release heap space
+            }
+        }
+    }
+    //float avgPageListUsage1 = getAveragePageListUsage();
+    //K2LOG_I(log::pbrb, "####before GC avgPageListUsage:{}, after GC avgPageListUsage:{}", avgPageListUsage, avgPageListUsage1);
+    
+    //TODO: merge pages that with low usage
+}
 
 //mark the row as unoccupied when evicting a hot row
 void PBRB::removeHotRow(BufferPage *pagePtr, RowOffset offset)

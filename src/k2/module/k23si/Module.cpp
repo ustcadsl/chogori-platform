@@ -181,7 +181,7 @@ K23SIPartitionModule::K23SIPartitionModule(dto::CollectionMetadata cmeta, dto::P
     _cmeta(std::move(cmeta)),
     _partition(std::move(partition), _cmeta.hashScheme) {
     K2LOG_I(log::skvsvr, "---------Partition: {}", _partition);//////
-    pbrb = new PBRB(8192, &_retentionTimestamp, &indexer);//////
+    pbrb = new PBRB(8192, &_retentionTimestamp, &indexer);//////8192
 
     K2LOG_I(log::skvsvr, "ctor for cname={}, part={}", _cmeta.name, _partition);
 }
@@ -312,6 +312,8 @@ seastar::future<> K23SIPartitionModule::start() {
                         _retentionTimestamp = ts - _cmeta.retentionPeriod;
                         _txnMgr.updateRetentionTimestamp(_retentionTimestamp);
                         _twimMgr.updateRetentionTimestamp(_retentionTimestamp);
+                        // Trigger background PBRB GC according to the new _retentionTimestamp
+                        pbrb->doBackgroundPBRBGC(_indexer, _retentionTimestamp,  _cmeta.retentionPeriod); 
                     });
             });
             _retentionUpdateTimer.armPeriodic(_config.retentionTimestampUpdateInterval());
@@ -660,8 +662,8 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     int order;
     K2LOG_D(log::skvsvr, "Ready to read datarecord");
     DataRecord* rec = nodePtr->get_datarecord(request.mtr.timestamp, order, pbrb);
-    //if (rec != nullptr)
-        //K2LOG_D(log::skvsvr, "Node info ====== Timestamp: {}; Order: {}, SchemaVersion: {}", request.mtr.timestamp, order, rec->value.schemaVersion);
+    if (rec != nullptr)
+        K2LOG_D(log::skvsvr, "Node info ====== Timestamp: {}; Order: {}, SchemaVersion: {}", request.mtr.timestamp, order, rec->value.schemaVersion);
     DataRecord* result = nullptr;
     if (rec != nullptr) {
         
@@ -670,6 +672,8 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             // return directly.
             K2LOG_D(log::skvsvr, "Case 1: Cold Version not in KVNode");
             result = rec;
+            //(void) seastar::sleep(500ns); // To simulate reading from NVM
+            //NvmReadNum++;
         }
         
         else if (order >= 0) {
@@ -717,7 +721,10 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 RowOffset rowOffset = retVal.second;
                 auto rowAddr = pbrb->cacheRowHeaderFrom(pagePtr, rowOffset, rec);
                 K2LOG_D(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
-                
+                /////////update waterMark/////////
+                //pbrb->doBackgroundPBRBGC(_indexer, _retentionTimestamp,  _cmeta.retentionPeriod);
+                ////////////////////////
+
                 #ifdef FIXEDFIELD_ROW
                 // copy fields
                 for(uint32_t j=0; j < schema.fields.size(); j++){
@@ -749,10 +756,14 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 rec->value.fieldData.seek(0);
                 
                 result = rec;
+                //(void) seastar::sleep(500ns); // To simulate reading from NVM
+                //NvmReadNum++;
+                //K2LOG_I(log::skvsvr, "Case 2: Read from NVM, sleep:{} us, NvmReadNum:{}", (double)(_End-_Start), NvmReadNum);
             }
             else {
                 // case 3: hot version
-                K2LOG_D(log::skvsvr, "Case 3: Hot Version in KVNode");
+                pbrbHitNum++;
+                //K2LOG_I(log::skvsvr, "Case 3: Hot Version in KVNode, pbrbHitNum:{}", pbrbHitNum);
                 void *hotAddr = static_cast<void *>(rec);
                 #ifdef PAYLOAD_ROW
                     dto::SKVRecord *sRec = pbrb->generateSKVRecordByRow(hotAddr, request.collectionName, schemaVer->second, true);

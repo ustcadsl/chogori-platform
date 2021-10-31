@@ -204,6 +204,23 @@ namespace k2 {
 
         int insert_datarecord(dto::DataRecord *datarecord, PBRB *pbrb);
 
+        /*dto::DataRecord *get_dataHotRecord(int order) {
+            if (is_inmem(order) == false) return nullptr;
+            retrun valuedata[i].valuepointer;
+        }*/
+        void setColdAddr(int order, dto::DataRecord *coldRecord) {
+            valuedata[order].valuepointer = coldRecord;
+        }
+
+        int compareTimestamp(int order, dto::Timestamp &timestamp) {
+            //K2LOG_I(log::indexer, "watermark:{}, version:{}", timestamp, valuedata[order].timestamp);
+            if (timestamp.tEndTSECount() > valuedata[order].timestamp) {
+                return -1;
+            } else {
+                return 1;
+            }
+        }
+
         int insert_hot_datarecord(const dto::Timestamp &timestamp, dto::DataRecord *datarecord) {
             for (int i = 0; i < 3; ++i)
                 if (timestamp.tEndTSECount() == valuedata[i].timestamp) {
