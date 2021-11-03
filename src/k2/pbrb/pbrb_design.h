@@ -419,7 +419,7 @@ public:
         setHotRowsNumPage(pagePtr, getHotRowsNumPage(pagePtr) - 1);
     }
 
-    bool isBitmapSet(BufferPage *pagePtr, RowOffset rowOffset)
+    inline bool isBitmapSet(BufferPage *pagePtr, RowOffset rowOffset)
     {
         uint32_t byteIndex = rowOffset / 8;
         uint32_t offset = rowOffset % 8;
@@ -542,19 +542,19 @@ public:
     void *cacheRowFromPlog(BufferPage *pagePtr, RowOffset rowOffset, PLogAddr pAddress);
 
     // Copy the header of row from DataRecord of query to (pagePtr, rowOffset)
-    void *cacheRowHeaderFrom(BufferPage *pagePtr, RowOffset rowOffset, dto::DataRecord* rec);
+    void *cacheRowHeaderFrom(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, dto::DataRecord* rec);
 
     // Copy the field of row from DataRecord of query to (pagePtr, rowOffset)
-    void *cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, void* field, size_t strSize, uint32_t fieldID, bool isStr);
+    void *cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, void* field, size_t strSize, uint32_t fieldID, bool isStr);
     
     // Copy the payload of row from DataRecord of query to (pagePtr, rowOffset)
-    void *cacheRowPayloadFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, Payload& rowData);
+    void *cacheRowPayloadFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, Payload& rowData);
 
     // find an empty slot between the beginOffset and endOffset in the page
-    RowOffset findEmptySlotInPage(BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset);
+    RowOffset findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset);
 
     // find an empty slot in the page
-    RowOffset findEmptySlotInPage(BufferPage *pagePtr);
+    RowOffset findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr);
 
     std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID);
 
@@ -667,11 +667,11 @@ public:
         }
     }
 
-    void *getAddrByPageAndOffset(BufferPage *pagePtr, RowOffset offset) {
-        auto sid = getSchemaIDPage(pagePtr);
-        assert(_schemaMap.find(sid) != _schemaMap.end());
-        size_t byteOffsetInPage = _pageHeaderSize + _schemaMap[sid].occuBitmapSize + 
-                                  _schemaMap[sid].rowSize * offset;
+    void *getAddrByPageAndOffset(uint32_t schemaId, BufferPage *pagePtr, RowOffset offset) {
+        //auto sid = getSchemaIDPage(pagePtr);
+        assert(_schemaMap.find(schemaId) != _schemaMap.end());
+        size_t byteOffsetInPage = _pageHeaderSize + _schemaMap[schemaId].occuBitmapSize + 
+                                  _schemaMap[schemaId].rowSize * offset;
         void *address = (void *) ((uint8_t *)pagePtr + byteOffsetInPage);
         return address;
     }
@@ -698,7 +698,7 @@ public:
     // Transport Functions:
     
     // PBRB Row -> SKVRecord
-    dto::SKVRecord *generateSKVRecordByRow(RowAddr rAddr, const String &collName, std::shared_ptr<dto::Schema> schema, bool isPayloadRow);
+    dto::SKVRecord *generateSKVRecordByRow(uint32_t schemaId, RowAddr rAddr, const String &collName, std::shared_ptr<dto::Schema> schema, bool isPayloadRow);
     dto::DataRecord *generateDataRecord(dto::SKVRecord *skvRecord, void *hotAddr);
     // getSchemaVer by hotAddr in SimpleSchema
     uint32_t getSchemaVer(void *hotAddr) {

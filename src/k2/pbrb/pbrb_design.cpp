@@ -11,13 +11,14 @@ namespace pbrb {
     }
 }
 // Copy the header of row from DataRecord of query to (pagePtr, rowOffset)
-void *PBRB::cacheRowHeaderFrom(BufferPage *pagePtr, RowOffset rowOffset, dto::DataRecord* rec) {
+void *PBRB::cacheRowHeaderFrom(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, dto::DataRecord* rec) {
     //K2LOG_I(log::pbrb, "function cacheRowFromPlog(BufferPage, RowOffset:{}, PlogAddr", rowOffset);
     if (pagePtr == nullptr) {
         K2LOG_I(log::pbrb, "Trying to cache row to nullptr!");
         return nullptr;
     }
-    if (rowOffset > _schemaMap[getSchemaIDPage(pagePtr)].maxRowCnt) {
+    //if (rowOffset > _schemaMap[getSchemaIDPage(pagePtr)].maxRowCnt) {
+    if (rowOffset > _schemaMap[schemaId].maxRowCnt) {
         K2LOG_I(log::pbrb, "Row Offset out of range!");
         return nullptr;
     }
@@ -26,7 +27,7 @@ void *PBRB::cacheRowHeaderFrom(BufferPage *pagePtr, RowOffset rowOffset, dto::Da
         return nullptr;
     }
 
-    SchemaId schemaId = getSchemaIDPage(pagePtr);
+    //SchemaId schemaId = getSchemaIDPage(pagePtr);
     SchemaMetaData smd = _schemaMap[schemaId];
     uint32_t byteOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
                             smd.rowSize * rowOffset;
@@ -49,14 +50,15 @@ void *PBRB::cacheRowHeaderFrom(BufferPage *pagePtr, RowOffset rowOffset, dto::Da
 }
 
 // Copy the field of row from DataRecord of query to (pagePtr, rowOffset)
-void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, void* valueAddr, size_t strSize, uint32_t fieldID, bool isStr)
+void *PBRB::cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, void* valueAddr, size_t strSize, uint32_t fieldID, bool isStr)
 {
     //K2LOG_I(log::pbrb, "function cacheRowFromPlog(BufferPage, RowOffset:{}, field:{}", rowOffset, field);
     if (pagePtr == nullptr) {
         K2LOG_E(log::pbrb, "Trying to cache row to nullptr!");
         return nullptr;
     }
-    if (rowOffset > _schemaMap[getSchemaIDPage(pagePtr)].maxRowCnt) {
+    //if (rowOffset > _schemaMap[getSchemaIDPage(pagePtr)].maxRowCnt) {
+    if (rowOffset > _schemaMap[schemaId].maxRowCnt) {
         K2LOG_E(log::pbrb, "Row Offset out of range!");
         return nullptr;
     }
@@ -65,7 +67,7 @@ void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset
         return nullptr;
     }
 
-    SchemaId schemaId = getSchemaIDPage(pagePtr);
+    //SchemaId schemaId = getSchemaIDPage(pagePtr);
     SchemaMetaData smd = _schemaMap[schemaId];
     uint32_t byteOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
                             smd.rowSize * rowOffset;
@@ -114,14 +116,15 @@ void *PBRB::cacheRowFieldFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset
 
 
 // Copy the payload of row from DataRecord of query to (pagePtr, rowOffset)
-void *PBRB::cacheRowPayloadFromDataRecord(BufferPage *pagePtr, RowOffset rowOffset, Payload& rowData)
+void *PBRB::cacheRowPayloadFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, Payload& rowData)
 {
     //K2LOG_I(log::pbrb, "function cacheRowFromPlog(BufferPage, RowOffset:{}, field:{}", rowOffset, field);
     if (pagePtr == nullptr) {
         K2LOG_I(log::pbrb, "Trying to cache row to nullptr!");
         return nullptr;
     }
-    if (rowOffset > _schemaMap[getSchemaIDPage(pagePtr)].maxRowCnt) {
+    //if (rowOffset > _schemaMap[getSchemaIDPage(pagePtr)].maxRowCnt) {
+    if (rowOffset > _schemaMap[schemaId].maxRowCnt) {
         K2LOG_I(log::pbrb, "Row Offset out of range!");
         return nullptr;
     }
@@ -130,7 +133,7 @@ void *PBRB::cacheRowPayloadFromDataRecord(BufferPage *pagePtr, RowOffset rowOffs
         return nullptr;
     }
 
-    SchemaId schemaId = getSchemaIDPage(pagePtr);
+    //SchemaId schemaId = getSchemaIDPage(pagePtr);
     SchemaMetaData smd = _schemaMap[schemaId];
     uint32_t byteOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
                             smd.rowSize * rowOffset;
@@ -282,11 +285,10 @@ void *PBRB::cacheColdRow(PLogAddr pAddress, String key)
 }
 
 //find an empty slot between the beginOffset and endOffset in the page
-RowOffset PBRB::findEmptySlotInPage(BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset)
+RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset)
 {
-    uint32_t schemaId = getSchemaIDPage(pagePtr);
-    
-    uint32_t maxRowCnt = _schemaMap[schemaId].maxRowCnt;
+    //uint32_t schemaId = getSchemaIDPage(pagePtr);
+    uint32_t maxRowCnt = _schemaMap[schemaID].maxRowCnt;
     
     if (endOffset > maxRowCnt)
         return 0xFFFFFFFF;
@@ -306,21 +308,37 @@ RowOffset PBRB::findEmptySlotInPage(BufferPage *pagePtr, RowOffset beginOffset, 
 }
 
 //find an empty slot in the page
-RowOffset PBRB::findEmptySlotInPage(BufferPage *pagePtr)
+/*RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr)
 {
-    uint32_t schemaId = getSchemaIDPage(pagePtr);
-    
-    uint32_t maxRowCnt = _schemaMap[schemaId].maxRowCnt;
+    //uint32_t schemaId = getSchemaIDPage(pagePtr);
+    uint32_t maxRowCnt = _schemaMap[schemaID].maxRowCnt;
+    uint8_t globalByte = 0;
+    uint8_t curByte = 0;
     for (uint32_t i = 0; i < maxRowCnt; i++)
     {
         uint32_t byteIndex = i / 8;
-        uint8_t curByte = readFromPage<uint8_t>(pagePtr, _pageHeaderSize + byteIndex, 1);
-
+        if(i % 8 ==0) {
+            globalByte = readFromPage<uint8_t>(pagePtr, _pageHeaderSize + byteIndex, 1);
+            //K2LOG_I(log::pbrb, "######globalByte:{}, byteIndex:{}", globalByte, byteIndex);
+        }
         uint32_t Offset = i % 8;
-        curByte = curByte >> Offset;
+        curByte = globalByte >> Offset;
         uint8_t bitValue = curByte & (uint8_t) 0x1;
         if (bitValue == 0)
             return i; //find an empty slot, return the offset
+    }
+    return 0xFFFFFFFF; //not find an empty slot
+}*/
+
+RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr)
+{
+    //uint32_t schemaId = getSchemaIDPage(pagePtr);
+    const SchemaMetaData& smd = _schemaMap[schemaID];
+    uint32_t maxRowCnt = smd.maxRowCnt;
+    for (uint32_t i = 0; i < maxRowCnt; i++)
+    {
+        if(!isBitmapSet(pagePtr, i))
+            return i;
     }
     return 0xFFFFFFFF; //not find an empty slot
 }
@@ -329,9 +347,9 @@ RowOffset PBRB::findEmptySlotInPage(BufferPage *pagePtr)
 std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID)
 {
     BufferPage *pagePtr = _schemaMap[schemaID].headPage;
-    K2LOG_D(log::pbrb, "^^^^^^^^findCacheRowPosition, schemaID:{}, pagePtr empty:{}", schemaID, pagePtr==nullptr);
+    //K2LOG_D(log::pbrb, "^^^^^^^^findCacheRowPosition, schemaID:{}, pagePtr empty:{}", schemaID, pagePtr==nullptr);
     while (pagePtr != nullptr) {
-        RowOffset rowOffset = findEmptySlotInPage(pagePtr);
+        RowOffset rowOffset = findEmptySlotInPage(schemaID, pagePtr);
         if (rowOffset & 0x80000000)
             // go to next page;
             pagePtr = getNextPage(pagePtr);
@@ -352,7 +370,7 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
     // 1. has hot row:
     if (kvNode.hasCachedVer()) {
         pagePtr = getPageAddr(kvNode.addr[0]);
-        rowOffset = findEmptySlotInPage(pagePtr);
+        rowOffset = findEmptySlotInPage(schemaID, pagePtr);
         if (rowOffset & 0x80000000)
             return findCacheRowPosition(schemaID);
         else {
@@ -405,7 +423,7 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
 
         // insert into next page...
         else if (prevPageAddr == nullptr && nextPageAddr != nullptr) {
-            RowOffset off = findEmptySlotInPage(nextPageAddr);
+            RowOffset off = findEmptySlotInPage(schemaID, nextPageAddr);
             if (off & 0x80000000)
                 return findCacheRowPosition(schemaID);
             else
@@ -414,7 +432,7 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
 
         // insert into prev page...
         else if (prevPageAddr != nullptr && nextPageAddr == nullptr) {
-            RowOffset off = findEmptySlotInPage(prevPageAddr);
+            RowOffset off = findEmptySlotInPage(schemaID, prevPageAddr);
             if (off & 0x80000000)
                 return findCacheRowPosition(schemaID);
             else
@@ -424,9 +442,9 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
         // insert into page with lower occupancy rate...
         else {
             if (prevPageAddr == nextPageAddr) {
-                RowOffset off = findEmptySlotInPage(prevPageAddr, prevOff + 1, nextOff);
+                RowOffset off = findEmptySlotInPage(schemaID, prevPageAddr, prevOff + 1, nextOff);
                 if (off & 0x80000000)
-                    off = findEmptySlotInPage(prevPageAddr);
+                    off = findEmptySlotInPage(schemaID, prevPageAddr);
                 if (off & 0x80000000)
                     return findCacheRowPosition(schemaID);
                 return std::make_pair(prevPageAddr, off);
@@ -435,17 +453,17 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
             uint16_t prevHotNum = getHotRowsNumPage(prevPageAddr);
             uint16_t nextHotNum = getHotRowsNumPage(nextPageAddr);
             if (prevHotNum <= nextHotNum) {
-                RowOffset off = findEmptySlotInPage(prevPageAddr, prevOff + 1, _schemaMap[schemaID].maxRowCnt);
+                RowOffset off = findEmptySlotInPage(schemaID, prevPageAddr, prevOff + 1, _schemaMap[schemaID].maxRowCnt);
                 if (off & 0x80000000)
-                    off = findEmptySlotInPage(prevPageAddr);
+                    off = findEmptySlotInPage(schemaID, prevPageAddr);
                 if (off & 0x80000000)
                     return findCacheRowPosition(schemaID);
                 return std::make_pair(prevPageAddr, off);
             }
             else {
-                RowOffset off = findEmptySlotInPage(nextPageAddr, 0, nextOff);
+                RowOffset off = findEmptySlotInPage(schemaID, nextPageAddr, 0, nextOff);
                 if (off & 0x80000000)
-                    off = findEmptySlotInPage(nextPageAddr);
+                    off = findEmptySlotInPage(schemaID, nextPageAddr);
                 if (off & 0x80000000)
                     return findCacheRowPosition(schemaID);
                 return std::make_pair(nextPageAddr, off);
@@ -464,16 +482,16 @@ float PBRB::getAveragePageListUsage() {
         //SchemaId sID = schemaEntry.first;
         SchemaMetaData sMeta = schemaEntry.second;
         BufferPage *pagePtr = sMeta.headPage;
-        long totalHowRowsOfaPageList = 0;
+        long totalHotRowsOfaPageList = 0;
         long totalMaxRow = 0;
         while (pagePtr) {
             //outputHeader(pagePtr);
-            totalHowRowsOfaPageList += getHotRowsNumPage(pagePtr);
+            totalHotRowsOfaPageList += getHotRowsNumPage(pagePtr);
             totalMaxRow += sMeta.maxRowCnt;
             pagePtr = getNextPage(pagePtr);
         }     
-        pageListUsageSum += (float)totalHowRowsOfaPageList/(float)totalMaxRow;
-        K2LOG_I(log::pbrb, "totalHowRowsOfaPageList:{}, totalMaxRow:{}, sMeta.maxRowCnt:{}", totalHowRowsOfaPageList, totalMaxRow, sMeta.maxRowCnt);
+        pageListUsageSum += (float)totalHotRowsOfaPageList/(float)totalMaxRow;
+        K2LOG_I(log::pbrb, "totalHotRowsOfaPageList:{}, totalMaxRow:{}, sMeta.maxRowCnt:{}", totalHotRowsOfaPageList, totalMaxRow, sMeta.maxRowCnt);
         pageListNum++;
     }
     averagePageListUsage = pageListUsageSum/(float)pageListNum;
@@ -559,8 +577,8 @@ void *PBRB::copyRowInPages(BufferPage *srcPagePtr, RowOffset srcOffset,
     SchemaId srcSid = getSchemaIDPage(dstPagePtr);
     assert(dstSid == srcSid);                       // SchemaIds should be same.
     assert(!isBitmapSet(dstPagePtr, dstOffset));    // dst position should be empty.
-    void *src = getAddrByPageAndOffset(srcPagePtr, srcOffset);
-    void *dst = getAddrByPageAndOffset(dstPagePtr, dstOffset);
+    void *src = getAddrByPageAndOffset(dstSid, srcPagePtr, srcOffset);
+    void *dst = getAddrByPageAndOffset(srcSid, dstPagePtr, dstOffset);
 
     memcpy(dst, src, _schemaMap[dstSid].rowSize);
     setRowBitMapPage(dstPagePtr, dstOffset);

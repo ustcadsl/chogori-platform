@@ -48,8 +48,10 @@ Copyright(c) 2020 Futurewei Cloud
 #include <k2/pbrb/indexer.h>
 #include <k2/pbrb/pbrb_design.h>
 
-//#define PAYLOAD_ROW
-#define FIXEDFIELD_ROW
+#define PAYLOAD_ROW
+//#define FIXEDFIELD_ROW
+#define READ_BREAKDOWN
+//#define NO_READ_BREAKDOWN
 
 namespace k2 {
 
@@ -201,7 +203,7 @@ private: // methods
     // judge whether fieldIdx is in fieldsForPartialUpdate. return true if yes(is in fieldsForPartialUpdate).
     bool _isUpdatedField(uint32_t fieldIdx, std::vector<uint32_t> fieldsForPartialUpdate);
 
-    void _cacheFieldValueToPBRB(const dto::SchemaField& field, Payload& payload, bool& success, BufferPage *pagePtr, RowOffset rowOffset, uint32_t fieldID);
+    void _cacheFieldValueToPBRB(uint32_t schemaId, const dto::SchemaField& field, Payload& payload, bool& success, BufferPage *pagePtr, RowOffset rowOffset, uint32_t fieldID);
 
     // Helper for iterating over the indexer, modifies it to end() if iterator would go past the target schema
     // or if it would go past begin() for reverse scan. Starting iterator must not be end() and must
@@ -273,9 +275,34 @@ private:  // members
   
     Index indexer; //////
 
-    long pbrbHitNum = 0; //////
+    long pbrbHitNum[10] = {0}; //////
 
-    //long NvmReadNum = 0; //////
+    long NvmReadNum[10] = {0}; //////
+
+    long writeCount[10]={0};
+    long readCount[10]={0};
+
+    long totalReadSize[10]={0};
+
+    double totalReadms[10]={0}; //////
+
+    double totalCopyFeildms[10]={0}; //////
+
+    double totalIndexms[10]={0}; //////
+
+    double totalGetAddrms[10] ={0}; //////
+
+    double totalFindPositionms[10] = {0};
+
+    double totalHeaderms[10] = {0}; 
+
+    double totalUpdateCachems[10] = {0};
+
+    double totalUpdateKVNodems[10] = {0}; 
+
+    double totalReadNVMrus[10] = {0}; 
+
+    double totalReadPBRBms[10] = {0}; 
 
     // manage transaction records as a coordinator
     TxnManager _txnMgr;
