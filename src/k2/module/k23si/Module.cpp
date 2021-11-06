@@ -1112,6 +1112,9 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
         //new KeyValueNode if there is no
         K2LOG_D(log::skvsvr, "Insert new KeyValueNode for key{}", request.key);
         nodePtr = _indexer.insert(request.key);
+        IndexerIterator findIt = _indexer.find(request.key);
+        K2ASSERT(log::skvsvr, findIt != _indexer.end() && _indexer.extractFromIter(findIt)==nodePtr, "Can not find inserted key");
+        K2LOG_I(log::skvsvr, "New KVNode @{} and findIt return {}", (void*)nodePtr, (void*)(_indexer.extractFromIter(findIt)));
         K2ASSERT(log::skvsvr, nodePtr!=nullptr, "Insert failed and return nullptr");
     }
     else {

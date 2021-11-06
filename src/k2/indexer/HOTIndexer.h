@@ -18,7 +18,7 @@ Copyright(c) 2020 Futurewei Cloud
 */
 
 #pragma once
-
+#include "log.h"
 #include "IndexerInterface.h"
 
 #include <k2/common/Common.h>
@@ -62,12 +62,9 @@ namespace k2
 
         size_t size();        
     };
-
-    //TODO check empty corner case
     inline KeyValueNode* HOTindexer::insert(dto::Key key)
     {
         KeyValueNode* newKVNode = new KeyValueNode(key);
-        K2LOG_D(log::indexer, "Insert key size = {}",key.schemaName.size()+key.rangeKey.size()+key.partitionKey.size());
         bool ret = false;
         ret = idx.insert(newKVNode);
         if (ret) {
@@ -78,7 +75,6 @@ namespace k2
             K2LOG_W(log::indexer, "Insert new KVNode failed");
             return nullptr;
         }
-        
     }
     inline HotIterator HOTindexer::find(dto::Key& key)
     {

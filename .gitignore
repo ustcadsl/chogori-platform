@@ -12,3 +12,4 @@ cluster/__pycache__/
 *.log
 *.txt
 /cmake-build-debug/
+/chogori-seastar-rd/
