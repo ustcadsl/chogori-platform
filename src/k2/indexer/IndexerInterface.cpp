@@ -84,6 +84,15 @@ int KeyValueNode::insert_datarecord(dto::DataRecord *datarecord, PBRB *pbrb) {
         else
             status = pbrb->getStatusRow(valuedata[0].valuepointer);
         if(status == dto::DataRecord::Committed) {
+            //remove the last version of the KVNode and remove it from PBRB if it is cached
+            if(is_inmem(2)){ //////
+                void* HotRowAddr = static_cast<void *> (valuedata[2].valuepointer);
+                auto pair = pbrb->findRowByAddr(HotRowAddr);
+                BufferPage *pagePtr = pair.first;
+                RowOffset rowOff = pair.second;
+                pbrb->removeHotRow(pagePtr, rowOff);
+            } //////
+
             datarecord->prevVersion = valuedata[0].valuepointer;
             for (int i = 2; i > 0; i--) {
                 valuedata[i] = valuedata[i - 1];

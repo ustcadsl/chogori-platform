@@ -513,6 +513,7 @@ public:
     }
 
     void outputHeader(BufferPage *pagePtr) {
+        K2LOG_I(log::pbrb, "in outputHeader getHotRowsNumPage:{}", getHotRowsNumPage(pagePtr));
         std::cout << "\nMagic: " << std::hex << getMagicPage(pagePtr) << std::endl << std::oct
                   << "SchemaId: " << getSchemaIDPage(pagePtr) << std::endl
                   << "SchemaVer: " << getSchemaVerPage(pagePtr) << std::endl
@@ -597,7 +598,11 @@ public:
     //evict rows from PBRB cache in the background
     void doBackgroundPBRBGC(mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod);
 
-    float getAveragePageListUsage();
+    void doBackgroundPageListGC(String schemaName, uint32_t schemaID, mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod);
+
+    float getAveragePageListUsage(float& maxPageListUsage);
+
+    float getCurPageListUsage(uint32_t schemaID);
 
     // 4. Debugging Output Function.
     void printFieldsRow(const BufferPage *pagePtr, RowOffset rowOffset) {

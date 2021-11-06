@@ -709,6 +709,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     clock_t  _recordEnd = clock(); //////
     double Recordms = (double)(_recordEnd-_recordStart)/CLOCKS_PER_SEC*1000; //////
     totalGetAddrms[indexFlag] += Recordms; //////
+    nodePtr->printAll();
 
     if (rec != nullptr)
         K2LOG_D(log::skvsvr, "Node info ====== Timestamp: {}; Order: {}, SchemaVersion: {}", request.mtr.timestamp, order, rec->value.schemaVersion);
@@ -719,7 +720,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
         if (order == -1) {
             // case 1: cold version (not in kvnode)
             // return directly.
-            K2LOG_D(log::skvsvr, "Case 1: Cold Version not in KVNode");
+            K2LOG_I(log::skvsvr, "Case 1: Cold Version not in KVNode");
             result = rec;
             //(void) seastar::sleep(500ns); // To simulate reading from NVM
             NvmReadNum[indexFlag]++;
@@ -742,7 +743,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             auto schemaVer = schemaIt->second.find(sVer);
             K2ASSERT(log::skvsvr, schemaVer != schemaIt->second.end(), "sVer: {}", sVer);
             dto::Schema& schema = *(schemaVer->second);
-            K2LOG_D(log::skvsvr, "------request.key: {}, schemaName: {}, schemaVer:{}", request.key, request.key.schemaName, schemaVer->first);
+            K2LOG_I(log::skvsvr, "------request.key: {}, schemaName: {}, schemaVer:{}", request.key, request.key.schemaName, schemaVer->first);
 
             uint32_t SMapIndex = pbrb->mapCachedSchema(request.key.schemaName, schemaVer->first);
             if(SMapIndex == 0){ //add a new schema to PBRB schema metadata
@@ -768,6 +769,13 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex); 
                 BufferPage *pagePtr = retVal.first;
                 RowOffset rowOffset = retVal.second;
+                /*if (pagePtr==nullptr) {
+                    pbrb->doBackgroundPageListGC(request.key.schemaName, SMapIndex, _indexer, _retentionTimestamp,  _cmeta.retentionPeriod); 
+                    retVal = pbrb->findCacheRowPosition(SMapIndex);
+                    pagePtr = retVal.first;
+                    rowOffset = retVal.second;
+                }*/
+        if (pagePtr!=nullptr) { //find empty slot
                 clock_t  _findPositionEnd = clock(); //////
                 double Positionms = (double)(_findPositionEnd - _findPositionStart)/CLOCKS_PER_SEC*1000; //////
                 totalFindPositionms[indexFlag] += Positionms; //////
@@ -809,18 +817,19 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 // update indexer.
                 clock_t _updateKBNStart = clock();
                 void *hotAddr = pbrb->getAddrByPageAndOffset(SMapIndex, pagePtr, rowOffset);
-                nodePtr->insert_hot_datarecord(rec->timestamp, static_cast<dto::DataRecord *>(hotAddr));
+                int returnValue= nodePtr->insert_hot_datarecord(rec->timestamp, static_cast<dto::DataRecord *>(hotAddr));
+                K2LOG_D(log::skvsvr, "Cache request.key: {} in KVNode and PBRB, schemaID:{}, returnValue:{}, order:{}", request.key, SMapIndex, returnValue, order);
                 K2LOG_D(log::skvsvr, "Stored hot address: {} in node", hotAddr);
                 clock_t  _updateKVNEnd = clock(); //////
                 double UpdateKVNms = (double)(_updateKVNEnd-_updateKBNStart)/CLOCKS_PER_SEC*1000; //////
                 totalUpdateKVNodems[indexFlag] += UpdateKVNms; //////
-                // nodePtr->printAll();
+                //nodePtr->printAll();
                 // pbrb->printRowsBySchema(SMapIndex);
                 /*#ifdef FIXEDFIELD_ROW
                     pbrb->printFieldsRow(pagePtr, rowOffset);
                 #endif*/
                 rec->value.fieldData.seek(0);
-                
+        }
                 result = rec;
                 //(void) seastar::sleep(500ns); // To simulate reading from NVM
                 NvmReadNum[indexFlag]++;
@@ -851,6 +860,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                     result = pbrb->generateDataRecord(sRec, hotAddr);
                 #endif
                 //result = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(rec));
+                nodePtr->printAll();
                 // TODO: Evict expired versions.
                 clock_t  _readPBRBEnd = clock(); //////
                 double readPBRBms = (double)(_readPBRBEnd-_readPBRBtart)/CLOCKS_PER_SEC*1000; //////
@@ -978,7 +988,13 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex); 
                 BufferPage *pagePtr = retVal.first;
                 RowOffset rowOffset = retVal.second;
-
+                /*if (pagePtr==nullptr) {
+                    pbrb->doBackgroundPageListGC(request.key.schemaName, SMapIndex, _indexer, _retentionTimestamp,  _cmeta.retentionPeriod); 
+                    retVal = pbrb->findCacheRowPosition(SMapIndex);
+                    pagePtr = retVal.first;
+                    rowOffset = retVal.second;
+                }*/
+        if (pagePtr!=nullptr) { //find empty slot    
                 auto rowAddr = pbrb->cacheRowHeaderFrom(SMapIndex, pagePtr, rowOffset, rec);
                 K2LOG_D(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
                 ////////////////////////
@@ -1009,6 +1025,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                     pbrb->printFieldsRow(pagePtr, rowOffset);
                 #endif*/
                 rec->value.fieldData.seek(0);
+        }
                 result = rec;
                 //K2LOG_I(log::skvsvr, "Case 2: Read from NVM, sleep:{} us, NvmReadNum:{}", (double)(_End-_Start), NvmReadNum);
             }
@@ -1509,7 +1526,8 @@ K23SIPartitionModule::handleWrite(dto::K23SIWriteRequest&& request, FastDeadline
 
 seastar::future<std::tuple<Status, dto::K23SIWriteResponse>>
 K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadline deadline) {
-    K2LOG_D(log::skvsvr, "processing write: {}", request);
+    //K2LOG_D(log::skvsvr, "processing write: {}", request);
+    K2LOG_I(log::skvsvr, "processing write, key: {}", request.key);
     IndexerIterator it = _indexer.find(request.key);
     KeyValueNode* nodePtr;
     if(it == _indexer.end()) {

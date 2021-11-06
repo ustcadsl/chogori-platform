@@ -343,6 +343,28 @@ RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr)
     return 0xFFFFFFFF; //not find an empty slot
 }
 
+/*RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr)
+{
+	//uint32_t schemaId = getSchemaIDPage(pagePtr); 
+	const SchemaMetaData& smd = _schemaMap[schemaID];
+	uint32_t maxRowCnt = smd.maxRowCnt;
+	for (uint32_t i = 0; i < smd.occuBitmapSize; i++) {
+		uint8_t bitmap = pagePtr->content[_pageHeaderSize + i];
+		if (bitmap == 0xFF)
+			continue;
+		for (uint32_t j = 0; j < 8; j++) {
+			if ((bitmap >> j & 0x1) == 0) {
+				if (i * 8 + j < maxRowCnt)
+					return i * 8 + j;
+				else
+					// out of range.
+					return 0xFFFFFFFF;
+			}
+		}
+	}
+	return 0xFFFFFFFF; //not find an empty slot
+}*/
+
 //find an empty slot by querying the page one by one in turn
 std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID)
 {
@@ -474,49 +496,85 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
     return std::make_pair(nullptr, 0);
 }
 
-float PBRB::getAveragePageListUsage() {
+float PBRB::getAveragePageListUsage(float& maxPageListUsage) {
     float pageListUsageSum = 0.0;
     int pageListNum = 0;
     float averagePageListUsage = 0.0;
     for (auto &schemaEntry : _schemaMap) {
-        //SchemaId sID = schemaEntry.first;
+        uint32_t sID = schemaEntry.first;
         SchemaMetaData sMeta = schemaEntry.second;
         BufferPage *pagePtr = sMeta.headPage;
         long totalHotRowsOfaPageList = 0;
         long totalMaxRow = 0;
+        float curPageListUsage = 0.0;
         while (pagePtr) {
             //outputHeader(pagePtr);
             totalHotRowsOfaPageList += getHotRowsNumPage(pagePtr);
             totalMaxRow += sMeta.maxRowCnt;
             pagePtr = getNextPage(pagePtr);
         }     
-        pageListUsageSum += (float)totalHotRowsOfaPageList/(float)totalMaxRow;
-        K2LOG_I(log::pbrb, "totalHotRowsOfaPageList:{}, totalMaxRow:{}, sMeta.maxRowCnt:{}", totalHotRowsOfaPageList, totalMaxRow, sMeta.maxRowCnt);
+        curPageListUsage = (float)totalHotRowsOfaPageList/(float)totalMaxRow;
+        if(curPageListUsage > maxPageListUsage) maxPageListUsage = curPageListUsage;
+        //pageListUsageSum += (float)totalHotRowsOfaPageList/(float)totalMaxRow;
+        pageListUsageSum += curPageListUsage;
+        K2LOG_I(log::pbrb, "schemaID:{}, totalHotRowsOfaPageList:{}, totalMaxRow:{}, sMeta.maxRowCnt:{}, maxPageListUsage:{}", sID, totalHotRowsOfaPageList, totalMaxRow, sMeta.maxRowCnt, maxPageListUsage);
         pageListNum++;
     }
     averagePageListUsage = pageListUsageSum/(float)pageListNum;
+    K2LOG_I(log::pbrb, "####averagePageListUsage:{}, maxPageListUsage:{}", averagePageListUsage, maxPageListUsage);
     return averagePageListUsage;
 }
 
-void PBRB::doBackgroundPBRBGC(mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod) {
-    if ((float)_freePageList.size()/(float)_maxPageNumber >= 0.4) {
-        return;
+float PBRB::getCurPageListUsage(uint32_t schemaID) {
+    float curPageListUsage = 0.0;
+    int pageCount = 0;
+    long totalHotRowsOfaPageList = 0;
+    long totalMaxRow = 0;
+    for (auto &schemaEntry : _schemaMap) {
+        uint32_t sID = schemaEntry.first;
+        if(sID == schemaID){
+            SchemaMetaData sMeta = schemaEntry.second;
+            BufferPage *pagePtr = sMeta.headPage;
+            while (pagePtr) {
+                //outputHeader(pagePtr);
+                pageCount++;
+                totalHotRowsOfaPageList += getHotRowsNumPage(pagePtr);
+                totalMaxRow += sMeta.maxRowCnt;
+                pagePtr = getNextPage(pagePtr);
+            }     
+            curPageListUsage = (float)totalHotRowsOfaPageList/(float)totalMaxRow;
+            break;       
+        }
     }
-    if(newWaterMark.compareCertain(watermark) > 0) watermark = newWaterMark;
-    float avgPageListUsage = getAveragePageListUsage();
+    K2LOG_I(log::pbrb, "####schemaID:{}, curPageListUsage:{}, pageCount:{}, totalHotRowsOfaPageList:{}, totalMaxRow:{}", schemaID, curPageListUsage, pageCount, totalHotRowsOfaPageList, totalMaxRow);
+    return curPageListUsage;
+}
 
+void PBRB::doBackgroundPBRBGC(mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod) {
+    K2LOG_I(log::pbrb, "####in doBackgroundPBRBGC, _freePageList.size:{}", _freePageList.size());
+    /*if ((float)_freePageList.size()/(float)_maxPageNumber >= 0.2) { //0.1
+        return;
+    }*/
+    if(newWaterMark.compareCertain(watermark) > 0) watermark = newWaterMark;
+    float maxPageListUsage = 0.0;
+    float avgPageListUsage = getAveragePageListUsage(maxPageListUsage);
+
+    //if (avgPageListUsage <= 0.1 && maxPageListUsage < 0.2) { //0.9, 0.95
     if (avgPageListUsage <= 0.6) {
         return;
     } else {  //if (avgPageListUsage > 0.6 && avgPageListUsage <= 0.8) {
         //float ratio = (float)((avgPageListUsage-0.6)/(1-0.6));
-        int ratio = (avgPageListUsage-0.6)*100;
-        watermark = watermark + retentionPeriod*ratio/(100-60); //Change the watermark dynamiclly according to retentionTime and avgPageListUsage
-        K2LOG_I(log::pbrb, "set a newer waterMark:{}, original waterMark:{}, avgPageListUsage:{}, retentionPeriod*ratio/40:{}", watermark, newWaterMark, avgPageListUsage, retentionPeriod*ratio/40);
+        retentionPeriod/(100);
+        //int ratio = (avgPageListUsage-0.9)*100;
+        //watermark = watermark + retentionPeriod*ratio/(100-90); //Change the watermark dynamiclly according to retentionTime and avgPageListUsage
+        //watermark = watermark + retentionPeriod*ratio/(100); //Change the watermark dynamiclly according to retentionTime and avgPageListUsage
+        K2LOG_I(log::pbrb, "set a newer waterMark:{}, original waterMark:{}, avgPageListUsage:{}, _freePageList size:{}", watermark, newWaterMark, avgPageListUsage, _freePageList.size());
     } 
 
-    MapIndexer::iterator indexIterator = _indexer.begin();
+    MapIterator indexIterator = _indexer.begin();
     for (; indexIterator!=_indexer.end(); indexIterator++) {
         KeyValueNode* nodePtr = indexIterator->second;
+        //K2LOG_I(log::pbrb, "######in doBackgroundPBRBGC, schemaName:{}, key:{}", nodePtr->get_key().schemaName, nodePtr->get_key());
         for (int i = 0; i < 3; i++) {
             if (!nodePtr->is_inmem(i)) continue;
             //K2LOG_I(log::pbrb, "######watermark:{}", watermark);
@@ -530,14 +588,58 @@ void PBRB::doBackgroundPBRBGC(mapindexer& _indexer, dto::Timestamp& newWaterMark
                 nodePtr->setColdAddr(i, coldAddr);
                 nodePtr->set_inmem(i, 0);
                 //nodePtr->printAll();
+                //outputHeader(pagePtr);
+                //K2LOG_I(log::pbrb, "before removeHotRow, schemaName:{}, getHotRowsNumPage(pagePtr):{}", nodePtr->get_key().schemaName, getHotRowsNumPage(pagePtr));
+                removeHotRow(pagePtr, rowOff);
+                //K2LOG_I(log::pbrb, "after removeHotRow getHotRowsNumPage(pagePtr):{}", getHotRowsNumPage(pagePtr));
+                //TODO: release heap space
+            }
+        }
+    }
+    float avgPageListUsage1 = getAveragePageListUsage(maxPageListUsage);
+    K2LOG_I(log::pbrb, "####before GC avgPageListUsage:{}, after GC avgPageListUsage:{}, _freePageList:{}", avgPageListUsage, avgPageListUsage1, _freePageList.size());
+    
+    //TODO: merge pages that with low usage
+}
+
+void PBRB::doBackgroundPageListGC(String schemaName, uint32_t schemaID, mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod) {
+    K2LOG_I(log::pbrb, "####in doBackgroundPageListGC, _freePageList.size:{}, schemaID:{}, schemaName:{}", _freePageList.size(), schemaID, schemaName);
+    //if(newWaterMark.compareCertain(watermark) > 0) watermark = newWaterMark;
+    //int ratio = (avgPageListUsage-0.9)*100;
+    dto::Timestamp tempWaterMark = newWaterMark;
+    retentionPeriod/(100-90);
+    //watermark = watermark + retentionPeriod*ratio/(100-90); //Change the watermark dynamiclly according to retentionTime and avgPageListUsage
+    //watermark = watermark + retentionPeriod*ratio/(100); //Change the watermark dynamiclly according to retentionTime and avgPageListUsage
+    tempWaterMark = tempWaterMark + retentionPeriod*1/4;
+    K2LOG_I(log::pbrb, "set a newer tempWaterMark:{}, newWaterMark:{}, retentionPeriod*3/4:{}", tempWaterMark, newWaterMark, retentionPeriod*3/4);
+    long totalKeyN = 0;
+    MapIterator indexIterator = _indexer.begin();
+    //MapIndexer::iterator indexIterator = _indexer.begin();
+    for (; indexIterator!=_indexer.end(); indexIterator++) {
+        totalKeyN++;
+        KeyValueNode* nodePtr = indexIterator->second;
+        //K2LOG_I(log::pbrb, "######key schemaName:{}, schemaName:{}", nodePtr->get_key().schemaName, schemaName);
+        for (int i = 0; i < 3; i++) {
+            if (!nodePtr->is_inmem(i)) continue;
+            if(nodePtr->get_key().schemaName != schemaName) continue;
+            //K2LOG_I(log::pbrb, "located schemaName:{}", schemaName);
+            if (nodePtr->compareTimestamp(i, tempWaterMark) < 0) {
+                K2LOG_I(log::pbrb, "evict row:{}, order:{}", nodePtr->get_key(), i);
+                void* HotRowAddr = static_cast<void *> (nodePtr->_getpointer(i));
+                auto pair = findRowByAddr(HotRowAddr);
+                BufferPage *pagePtr = pair.first;
+                RowOffset rowOff = pair.second;
+                dto::DataRecord *coldAddr = static_cast<dto::DataRecord *> (getPlogAddrRow(HotRowAddr));
+                nodePtr->setColdAddr(i, coldAddr);
+                nodePtr->set_inmem(i, 0);
+                //nodePtr->printAll();
                 removeHotRow(pagePtr, rowOff);
                 //TODO: release heap space
             }
         }
     }
-    //float avgPageListUsage1 = getAveragePageListUsage();
-    //K2LOG_I(log::pbrb, "####before GC avgPageListUsage:{}, after GC avgPageListUsage:{}", avgPageListUsage, avgPageListUsage1);
-    
+    float curPageListUsage = getCurPageListUsage(schemaID);
+    K2LOG_I(log::pbrb, "####after doBackgroundPageListGC, curPageListUsage:{}, totalKeyN:{}, schemaName:{}, schemaID:{}", curPageListUsage, totalKeyN, schemaName, schemaID);
     //TODO: merge pages that with low usage
 }
 
