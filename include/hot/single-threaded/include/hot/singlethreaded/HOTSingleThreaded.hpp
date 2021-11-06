@@ -118,7 +118,6 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline b
 	uint8_t byteArray[idx::contenthelpers::MAX_STRING_KEY_LENGTH];
 	memset(byteArray, 0, sizeof(byteArray));
 	idx::contenthelpers::interpretAsByteArray(fixedSizeKey, byteArray);
-	// std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> keyBytes = std::move(idx::contenthelpers::interpretAsByteArray(fixedSizeKey));
 	bool wasContained = false;
 
 	if(isRootANode()) {
@@ -237,7 +236,7 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline b
 	
 	bool inserted = true;
 	auto const & fixedSizeKey = idx::contenthelpers::toFixSizedKey(idx::contenthelpers::toBigEndianByteOrder(extractKey(value)));
-	uint8_t byteArray[idx::contenthelpers::MAX_STRING_KEY_LENGTH];
+	uint8_t byteArray[idx::contenthelpers::MAX_STRING_KEY_LENGTH]; // Change MAX_STRING_KEY_LENGTH to 64
 	memset(byteArray, 0, sizeof(byteArray));
 	uint16_t byteLength = idx::contenthelpers::interpretAsByteArray(fixedSizeKey, byteArray);
 	

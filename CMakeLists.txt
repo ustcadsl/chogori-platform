@@ -21,6 +21,8 @@ find_package (fmt REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package (yaml-cpp REQUIRED) # required for configuration file parsing
 
+enable_testing()
+
 add_subdirectory(include)
 add_subdirectory (src)
 add_subdirectory (test)

@@ -328,7 +328,7 @@ private:
 
         return _cpo_client.partitionRequest
             <dto::K23SIInspectTxnRequest, dto::K23SIInspectTxnResponse, dto::Verbs::K23SI_INSPECT_TXN>
-            (Deadline<>(1s), *request).
+            (Deadline<>(5s), *request).
             finally([request] () { delete request; });
     }
 
@@ -537,8 +537,8 @@ seastar::future<> runScenario03() {
                     K2LOG_I(log::k23si, "Insert second key {} with diff schemaName", key2);
                     auto& [status, resp] = response;
                     K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
-                    return seastar::make_ready_future<>();
-                    // return seastar::sleep(1s);
+                    // return seastar::make_ready_future<>();
+                    return seastar::sleep(2s);
                 })
                 // End transacton
                 .then([this, &trh, &mtr, &key1, &key2] {

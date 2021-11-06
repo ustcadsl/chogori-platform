@@ -21,6 +21,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include "log.h"
 #include "IndexerInterface.h"
 
+#include <vector>
 #include <k2/common/Common.h>
 #include <hot/singlethreaded/HOTSingleThreaded.hpp>
 #include <idx/contenthelpers/IdentityKeyExtractor.hpp>
@@ -43,8 +44,10 @@ namespace k2
     class HOTindexer{
     private:
         HotIndexer idx;
-        HotIterator scanit;
+        std::vector<k2::KeyValueNode*> mKeyValueNodePtr;
+
     public:
+        ~HOTindexer();
         HotIterator find(dto::Key &key);
         HotIterator lower_bound(const dto::Key& key);
 
@@ -54,7 +57,6 @@ namespace k2
 
         KeyValueNode* extractFromIter(HotIterator const& iterator);
 
-        HotIterator getiter();
         HotIterator setiter(const dto::Key &key);
 
         KeyValueNode* insert(dto::Key key);
@@ -62,12 +64,20 @@ namespace k2
 
         size_t size();        
     };
+    inline HOTindexer::~HOTindexer() {
+        for(auto i = mKeyValueNodePtr.begin(); i!= mKeyValueNodePtr.end(); ++i) {
+            delete *i;
+        }
+    }
+
     inline KeyValueNode* HOTindexer::insert(dto::Key key)
     {
         KeyValueNode* newKVNode = new KeyValueNode(key);
         bool ret = false;
+        K2LOG_D(log::indexer, "Insert key {} and new KVNode @{}", key, (void*)(newKVNode));
         ret = idx.insert(newKVNode);
         if (ret) {
+            mKeyValueNodePtr.emplace_back(newKVNode);
             return newKVNode;
         }
         else {
@@ -87,10 +97,6 @@ namespace k2
     inline HotIterator HOTindexer::end()
     {
         return idx.end();
-    }
-    inline HotIterator HOTindexer::getiter()
-    {
-        return scanit;
     }
     inline HotIterator HOTindexer::setiter(const dto::Key &key)
     {

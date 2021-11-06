@@ -66,6 +66,19 @@ namespace k2 {
             }
         }
 
+        KeyValueNode(KeyValueNode&& other)//move constructor
+        :flags(other.flags), key(std::move(other.key)){
+            K2LOG_D(log::indexer, "In Move Constructor key {}", *key);
+            for(int i = 0; i< 3; ++i) {
+                valuedata[i].timestamp = other.valuedata[i].timestamp;
+                valuedata[i].valuepointer = other.valuedata[i].valuepointer;
+            }
+            for(int i = 0; i< 3; ++i) {
+                other.valuedata[i].valuepointer = nullptr;
+            }
+            other.flags = 0;
+        }
+
         ~KeyValueNode() {
         }
 
