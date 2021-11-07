@@ -202,14 +202,12 @@ public:
                                      }
                                      catch (const std::exception &exc)
                                      {
-                                         // K2LOG_W(log::k2ss, "Caught exception during poll of {}: {}", typeid(Q).name(), exc.what());
                                          req.prom->set_exception(std::current_exception());
                                          //返回异常
                                          return seastar::make_ready_future();
                                      }
                                      catch (...)
                                      {
-                                         // K2LOG_W(log::k2ss, "Caught unknown exception during poll of {}", typeid(Q).name());
                                          req.prom->set_exception(std::current_exception());
                                          //返回异常
                                          return seastar::make_ready_future();
@@ -239,7 +237,6 @@ private:
             }
             return _client->beginTxn(req.opts)
                 .then([this, &req](auto&& txn) {
-                    K2LOG_D(log::k2ss, "txn: {}", txn.mtr());
                     auto mtr = txn.mtr();
                     (*_txns)[txn.mtr()] = std::move(txn);
                     req.prom->set_value(mtr);  // send a copy to the promise
@@ -253,7 +250,6 @@ private:
             }
             auto fiter = _txns->find(req.mtr);
             if (fiter == _txns->end()) {
-                K2LOG_W(log::k2ss, "invalid txn id: {}", req.mtr);
                 // PG sends Abort after a failed Commit call (in this case we don't fail the abort)
                 req.prom->set_value(req.shouldCommit ?
                 k2::EndResult(k2::dto::K23SIStatus::OperationNotAllowed("invalid txn id")) :
@@ -262,7 +258,6 @@ private:
             }
             return fiter->second.end(req.shouldCommit)
                 .then([this, &req](auto&& endResult) {
-                    K2LOG_D(log::k2ss, "Ended txn: {}, with result: {}", req.mtr, endResult);
                     _txns->erase(req.mtr);
                     req.prom->set_value(std::move(endResult));
                 });
@@ -313,14 +308,12 @@ private:
             }
             auto fiter = _txns->find(req.mtr);
             if (fiter == _txns->end()) {
-                K2LOG_W(log::k2ss, "invalid txn id: {}", req.mtr);
                 req.prom->set_value(k2::WriteResult(k2::dto::K23SIStatus::OperationNotAllowed("invalid txn id"), k2::dto::K23SIWriteResponse{}));
                 return seastar::make_ready_future();
             }
             k2::dto::SKVRecord copy = req.record.deepCopy();
             return fiter->second.write(copy, req.erase, req.precondition)
                 .then([this, &req](auto&& writeResult) {
-                    K2LOG_D(log::k2ss, "Written... {}", writeResult);
                     req.prom->set_value(std::move(writeResult));
                 });
         });
