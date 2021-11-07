@@ -18,7 +18,7 @@ class MetaServiceHandler : virtual public MetaServiceIf {
     // Your initialization goes here
   }
 
-  void createSpace(ExecResp& _return, const CreateSpaceReq& req) {
+  int32_t createSpace(const CreateSpaceReq& req) {
     // Your implementation goes here
     printf("createSpace\n");
   }
@@ -28,14 +28,9 @@ class MetaServiceHandler : virtual public MetaServiceIf {
     printf("add\n");
   }
 
-  void createTag(ExecResp& _return, const CreateTagReq& req) {
+  int32_t createTag(const CreateTagReqTest& req) {
     // Your implementation goes here
     printf("createTag\n");
-  }
-
-  void addVertices(ExecResponse& _return, const AddVerticesRequest& req) {
-    // Your implementation goes here
-    printf("addVertices\n");
   }
 
 };

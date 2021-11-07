@@ -1,9 +1,5 @@
-
 //create tag
 //tag is a schema;
-
-//test git
-
 
 //When the user creates a schema, it sends it as a request to the CPO. After validation, 
 //the CPO pushes the schema to all k2 storage nodes that own a partition of the collection
@@ -54,9 +50,7 @@ using namespace ::apache::thrift::server;
 static std::unordered_map<std::string, int32_t> spaceTable;
 
 static std::unordered_map<std::string, int32_t> tagTable;
-static std::unordered_map<std::string, std::vector<std::string>> name2Eps = {
-    {"test1", {"tcp+k2rpc://0.0.0.0:10000"}},{"test2", {"tcp+k2rpc://0.0.0.0:10001"}},{"test3", {"tcp+k2rpc://0.0.0.0:10002"}}
-};
+
 bool finish = false;
 
 struct MyCollectionCreateRequest
@@ -77,41 +71,6 @@ struct MySchemaCreateRequest
 };
 inline std::queue<MySchemaCreateRequest> SchemaCreateQ;
 
-
-struct MySchemaGetRequest
-{
-    k2::String collectionName;
-    k2::String schemaName;
-    uint64_t schemaVersion;
-    std::promise<k2::GetSchemaResult> *prom; //返回的future 不同
-};
-inline std::queue<MySchemaCreateRequest> SchemaGetQ;
-
-struct MyWriteRequest {
-    k2::dto::K23SI_MTR mtr;
-    // k2::K2TxnHandle txn;
-    bool erase = false;
-    //前提条件默认为None，暂时不做处理
-    k2::dto::ExistencePrecondition precondition = k2::dto::ExistencePrecondition::None;
-    k2::dto::SKVRecord record;
-    std::promise<k2::WriteResult> *prom;
-};
-inline std::queue<MySchemaCreateRequest> WriteRequestQ;
-
-struct MyBeginTxnRequest {
-    k2::K2TxnOptions opts;
-    std::promise<k2::dto::K23SI_MTR> *prom;
-    k2::TimePoint startTime;
-};
-inline std::queue<MyBeginTxnRequest> BeginTxnQ;
-
-struct MyEndTxnRequest {
-    k2::dto::K23SI_MTR mtr;
-    bool shouldCommit;
-    std::promise<k2::EndResult> *prom;
-};
-inline std::queue<MyBeginTxnRequest> EndTxnQ;
-
 class Client
 {
 public:
@@ -119,13 +78,12 @@ public:
     {
         K2LOG_I(log::k23si, "Ctor");
         _client = new K23SIClient(K23SIClientConfig());
-        _txns = new std::unordered_map<k2::dto::K23SI_MTR, k2::K2TxnHandle>();
     }
 
     ~Client()
     {
         delete _client;
-        delete _txns;
+        // delete _txns;
     }
 
     // required for seastar::distributed interface
@@ -228,59 +186,13 @@ private:
     seastar::future<> _pollForWork()
     {
         return seastar::when_all_succeed(
-                   _pollCreateCollectionQ(), _pollSchemaCreateQ(), _pollSchemaGetQ(), _pollBeginQ(), _pollEndQ(), _pollWriteQ())
+                   _pollCreateCollectionQ(), _pollSchemaCreateQ())
             .discard_result();
     }
 
-    seastar::future<> _pollBeginQ(){
-        return pollQ(BeginTxnQ, [this](auto& req){
-            if (_stop) {
-                return seastar::make_exception_future(std::runtime_error("seastar app has been shutdown"));
-            }
-            return _client->beginTxn(req.opts)
-                .then([this, &req](auto&& txn) {
-                    K2LOG_D(log::k2ss, "txn: {}", txn.mtr());
-                    auto mtr = txn.mtr();
-                    (*_txns)[txn.mtr()] = std::move(txn);
-                    req.prom->set_value(mtr);  // send a copy to the promise
-                });
-        });
-    }
-    seastar::future<> _pollEndQ(){
-        return pollQ(EndTxnQ, [this](auto& req) {
-            if (_stop) {
-                return seastar::make_exception_future(std::runtime_error("seastar app has been shutdown"));
-            }
-            auto fiter = _txns->find(req.mtr);
-            if (fiter == _txns->end()) {
-                K2LOG_W(log::k2ss, "invalid txn id: {}", req.mtr);
-                // PG sends Abort after a failed Commit call (in this case we don't fail the abort)
-                req.prom->set_value(req.shouldCommit ?
-                k2::EndResult(k2::dto::K23SIStatus::OperationNotAllowed("invalid txn id")) :
-                k2::EndResult(k2::dto::K23SIStatus::OK("")));
-                return seastar::make_ready_future();
-            }
-            return fiter->second.end(req.shouldCommit)
-                .then([this, &req](auto&& endResult) {
-                    K2LOG_D(log::k2ss, "Ended txn: {}, with result: {}", req.mtr, endResult);
-                    _txns->erase(req.mtr);
-                    req.prom->set_value(std::move(endResult));
-                });
-        });
-    }
-
-    seastar::future<> _pollSchemaGetQ() {
-        return pollQ(SchemaGetQ, [this](auto &req) {
-            if (_stop) {
-                return seastar::make_exception_future(std::runtime_error("seastar app has been shutdown"));
-            }
-            return _client->getSchema(req.collectionName, req.schemaName, req.schemaVersion)
-                .then([this, &req](auto&& result){
-                    req.prom -> set_value(std::move(result));
-                });
-        });
-    }
-
+    // seastar::future<> _pollBeginQ();
+    // seastar::future<> _pollEndQ();
+    // seastar::future<> _pollSchemaGetQ();
     seastar::future<> _pollSchemaCreateQ()
     {
         return pollQ(SchemaCreateQ, [this](auto &req)
@@ -306,25 +218,7 @@ private:
     // seastar::future<> _pollReadQ();
     // seastar::future<> _pollCreateScanReadQ();
     // seastar::future<> _pollScanReadQ();
-    seastar::future<> _pollWriteQ(){
-        return pollQ(WriteRequestQ, [this](auto& req) mutable {
-            if (_stop) {
-                return seastar::make_exception_future(std::runtime_error("seastar app has been shutdown"));
-            }
-            auto fiter = _txns->find(req.mtr);
-            if (fiter == _txns->end()) {
-                K2LOG_W(log::k2ss, "invalid txn id: {}", req.mtr);
-                req.prom->set_value(k2::WriteResult(k2::dto::K23SIStatus::OperationNotAllowed("invalid txn id"), k2::dto::K23SIWriteResponse{}));
-                return seastar::make_ready_future();
-            }
-            k2::dto::SKVRecord copy = req.record.deepCopy();
-            return fiter->second.write(copy, req.erase, req.precondition)
-                .then([this, &req](auto&& writeResult) {
-                    K2LOG_D(log::k2ss, "Written... {}", writeResult);
-                    req.prom->set_value(std::move(writeResult));
-                });
-        });
-    }
+    // seastar::future<> _pollWriteQ();
     // seastar::future<> _pollUpdateQ();
     seastar::future<> _pollCreateCollectionQ()
     {
@@ -350,7 +244,6 @@ private:
     // seastar::future<> _pollDropCollectionQ();
 
     bool _stop = false;
-    std::unordered_map<k2::dto::K23SI_MTR, k2::K2TxnHandle>* _txns;
 };
 
 void start(int argc, char **argv)
@@ -395,11 +288,7 @@ public:
         bool isRepeated = false;
         int32_t spaceID;
         std::vector<k2::String> endpoints;
-        std::vector<std::string> stdEndpoints = name2Eps[req.properties.space_name];
-        for (const std::string& ep : stdEndpoints) {
-            endpoints.emplace_back(ep);
-        }
-        
+        endpoints.push_back("tcp+k2rpc://0.0.0.0:10000");
         //rangeEnds
         std::vector<k2::String> rangeEnds;
         rangeEnds.push_back("");
@@ -411,8 +300,7 @@ public:
                 isRepeated = true;
                 _return.code = ErrorCode::E_EXISTED;
                 _return.id.space_id = spaceTable[req.properties.space_name];
-              
-                _return.id.__set_space_id( _return.id.space_id);
+                //返回错误信息。
                 return;
             }
 
@@ -432,13 +320,10 @@ public:
                     .hashScheme = dto::HashScheme::HashCRC32C,
                     .storageDriver = k2::dto::StorageDriver::K23SI,
                     .capacity{},
-                    .retentionPeriod = 24h
-                },
+                    .retentionPeriod = 24h},
                 .clusterEndpoints = std::move(endpoints),
-                .rangeEnds = std::move(rangeEnds)
-            },
-            .prom = new std::promise<k2::Status>()
-        };
+                .rangeEnds = std::move(rangeEnds)},
+            .prom = new std::promise<k2::Status>()};
 
         // pushQ(collectionCreateQ, std::move(request));
 
@@ -458,9 +343,8 @@ public:
                 // return -2;
                 std::cout << status << std::endl;
                 _return.code = ErrorCode::E_RPC_FAILURE;
-                _return.id.space_id = -1;
-               
-                _return.id.__set_space_id( _return.id.space_id);
+                _return.id.__set_space_id(-1);
+                std::cout << "\n\n _return.id.space_id  " << spaceTable[req.properties.space_name] << std::endl;
                 return;
             }
             else
@@ -468,11 +352,6 @@ public:
                 _return.code = ErrorCode::SUCCEEDED;
                 _return.id.space_id = spaceTable[req.properties.space_name];
                 std::cout << "\n\n _return.id.space_id  " << _return.id.space_id << std::endl;
-             
-              _return.id.__set_space_id( _return.id.space_id);
-
-
-
                 return;
             }
             std::cout << "\n\n\n\nline242\n\n\n\n";
@@ -483,179 +362,6 @@ public:
             return;
         }
         return;
-    }
-    // void addVertices(ExecResponse& _return, const AddVerticesRequest& req){
-    //     //检查传入的数据是否合法，并构造相应的skvrecord
-    //     //因为需要获得对应schema的信息
-    //     std::vector<k2::GetSchemaResult> results;
-    //     for(auto iter = req.prop_names.begin(); iter != req.prop_names.end(); iter++){
-    //         MySchemaGetRequest request{
-    //             .collectionName = std::to_string(req.space_id),
-    //             .schemaName = std::to_string(iter -> first),
-    //         };
-    //     }
-        
-    //     pushQ(SchemaGetQ, request);
-    //     int index = 0;  //记录处理到Schema中SchemaField的下标
-        
-    // }
-
-    void addVertices(ExecResponse& _return, const AddVerticesRequest& req){
-        //因为只支持结点的必要属性，可忽略请求中 prop_names字段
-        //假设NewVertex中值均按照schema的顺序排列，只需按顺序序列化字段即可，无需获得schema比对字段
-        //只需遍历parts中所有的NewVertex即可
-        //在内部做一个从tagid到schema的映射，以防多个相同tag的结点都从数据库中请求相同的schema
-        std::unordered_map<int32_t, std::shared_ptr<k2::dto::Schema>> table;
-        std::vector<MyWriteRequest> request_list;
-
-
-        //开始一个事务
-        k2::K2TxnOptions options{};
-        options.syncFinalize = true;
-        MyBeginTxnRequest qr{.opts = options, .prom = new std::promise<k2::dto::K23SI_MTR>(), .startTime = k2::Clock::now()};
-        pushQ(BeginTxnQ, std::move(qr));
-        k2::dto::K23SI_MTR mtr;
-        try {
-            auto result = qr.prom->get_future();
-            mtr = result.get();
-        }
-        catch (...) {
-            _return.code = ErrorCode::E_UNKNOWN;
-            return;
-        }
-        for(auto iter = req.parts.begin(); iter != req.parts.end(); iter++){
-            for(auto item = iter -> second.begin(); item != iter -> second.end(); item++){
-                //item是单独的一个NewVertex
-                for(auto tag_iter = item -> tags.begin(); tag_iter != item -> tags.end(); tag_iter++){
-                    //tag_iter对应一个NewTag
-                    std::shared_ptr<k2::dto::Schema> s;
-                    if(table.find(tag_iter -> tag_id) != table.end()){
-                        s = table[tag_iter -> tag_id];
-                    }
-                    else{
-                        MySchemaGetRequest request{
-                            .collectionName = std::to_string(req.space_id),
-                            .schemaName = std::to_string(tag_iter -> tag_id),
-                            .schemaVersion = 1, //目前所有schema的version均为1，之后可能需要进一步修改
-                            .prom = new std::promise<k2::GetSchemaResult>()
-                        };
-                        pushQ(SchemaGetQ, request);
-                        try{
-                            auto result = request.prom->get_future();
-                            auto schemaResult = result.get();
-                            auto status = schemaResult.status;
-                            if (!status.is2xxOK()){
-                                //获取schema时出错
-                                _return.code = ErrorCode::E_NOT_FOUND;
-                                return;
-                            }
-                            s = schemaResult.schema;
-                            table[tag_iter -> tag_id] = s;
-                        }
-                        catch (...){
-                            _return.code = ErrorCode::E_UNKNOWN;
-                            return;
-                        }
-                    }
-                    k2::dto::SKVRecord skvRecord(std::to_string(req.space_id), s);
-                    /*
-                    {dto::FieldType::INT16T, "Type", false, false},
-                    {dto::FieldType::INT16T, "PartID", false, false},
-                    {dto::FieldType::INT64T, "VertexID", false, false},
-                    {dto::FieldType::INT32T, "TagID", false, false}
-                    必要属性如上所示，只需依次序列化即可
-                    */
-                    try{
-                        skvRecord.serializeNext<int16_t>(tag_iter -> props[0]);
-                        skvRecord.serializeNext<int16_t>(tag_iter -> props[1]);
-                        skvRecord.serializeNext<int64_t>(tag_iter -> props[2]);
-                        skvRecord.serializeNext<int32_t>(tag_iter -> props[3]);
-                    }
-                    catch (...){
-                        _return.code = ErrorCode::E_UNKNOWN;
-                        return;
-                    }
-                    MyWriteRequest write_request {
-                        .mtr = mtr,
-                        .record = skvRecord,
-                        .prom = new std::promise<k2::WriteResult>()
-                    };
-                    request_list.insert(write_request);
-                    // pushQ(WriteRequestQ, write_request);     //为防止由于出错，只有部分结点被加入，在遍历完结点后pushQ
-                }
-            }
-        }
-        //已经构建了所有结点的增加请求
-        for(auto iter = request_list.begin(); iter != request_list.end(); iter++){
-            pushQ(WriteRequestQ, *(iter)); 
-        }
-        bool isSucceed = true;
-        for(auto iter = request_list.begin(); iter != request_list.end(); iter++){
-            try{
-                auto result = iter -> prom->get_future();
-                auto WriteResult = result.get();
-                auto status = WriteResult.status;
-                if (!status.is2xxOK()){
-                    isSucceed = false;
-                    break;
-                }
-            }
-            catch (...){
-                _return.code = ErrorCode::E_UNKNOWN;
-                return;
-            }
-        }
-        if(isSucceed){
-            _return.code = ErrorCode::SUCCEEDED;
-            //正常结束事务
-            // struct MyEndTxnRequest {
-            //     k2::dto::K23SI_MTR mtr;
-            //     bool shouldCommit;
-            //     std::promise<k2::EndResult> *prom;
-            // };
-            MyEndTxnRequest end_txn_req {
-                .mtr = mtr,
-                .shouldCommit = true,
-                .prom = new std::promise<k2::EndResult>()
-            };
-            pushQ(EndTxnQ, end_txn_req);
-            try{
-                auto result = end_txn_req.prom->get_future();
-                auto EndResult = result.get();
-                auto status = EndResult.status;
-                if (!status.is2xxOK()){
-                    _return.code = ErrorCode::E_UNKNOWN;
-                }
-                return;
-            }
-            catch (...){
-                _return.code = ErrorCode::E_UNKNOWN;
-                return;
-            }
-        }
-        else{
-            //结束事务，不提交,需细化errorcode
-            _return.code = ErrorCode::E_UNKNOWN;
-            MyEndTxnRequest end_txn_req {
-                .mtr = mtr,
-                .shouldCommit = false,
-                .prom = new std::promise<k2::EndResult>()
-            };
-            pushQ(EndTxnQ, end_txn_req);
-            try{
-                auto result = end_txn_req.prom->get_future();
-                auto EndResult = result.get();
-                auto status = EndResult.status;
-                if (!status.is2xxOK()){
-                    _return.code = ErrorCode::E_UNKNOWN;
-                }
-                return;
-            }
-            catch (...){
-                _return.code = ErrorCode::E_UNKNOWN;
-                return;
-            }
-        }
     }
 
     int32_t add(const int32_t num1, const int32_t num2)
@@ -682,7 +388,6 @@ public:
             isRepeated = true;
             _return.code = ErrorCode::E_EXISTED;
             _return.id.tag_id = tagTable[req.tag_name];
-            _return.id.__set_tag_id (_return.id.tag_id);
             //返回错误信息。
             return;
         }
@@ -715,7 +420,7 @@ public:
 
         std::cout<<"\n\n\n before TagKey";
 
-       
+       // TagSchema.setPartitionKeyFieldsByName
 
         TagSchema.setPartitionKeyFieldsByName(std::vector<String>{"Type", "PartID"});
         TagSchema.setRangeKeyFieldsByName(std::vector<String>{"VertexID", "TagID"});
@@ -739,17 +444,15 @@ public:
             TagSchema.fields.insert(TagSchema.fields.end(), GraphSchema.begin(), GraphSchema.end());
         }
 
-        std::cout<<"\n\n\n Schemafield";
+         std::cout<<"\n\n\n Schemafield";
 
         MySchemaCreateRequest request{
             .req = k2::dto::CreateSchemaRequest{
                 .collectionName = std::to_string(spaceID),
-                .schema = std::move(TagSchema)
-            },
-            .prom = new std::promise<k2::CreateSchemaResult>()
-        };
+                .schema = std::move(TagSchema)},
+            .prom = new std::promise<k2::CreateSchemaResult>()};
 
-        std::cout<<"\n\n\n Request";
+         std::cout<<"\n\n\n Request";
 
         /*        MySchemaCreateRequest request = {
             .req = k2::dto::CreateSchemaRequest{
@@ -786,15 +489,13 @@ public:
                 K2LOG_I(log::k23si, "fail to create a tag");
                 // return -2;
                 _return.code = ErrorCode::E_RPC_FAILURE;
-               
-                _return.id.__set_tag_id (-1);
+                _return.id.tag_id = -1;
                 return;
             }
             else
             {
                 _return.code = ErrorCode::SUCCEEDED;
                 _return.id.tag_id = tagTable[req.tag_name];
-                _return.id.__set_tag_id( _return.id.tag_id);
                 return;
             }
         }
@@ -810,8 +511,7 @@ public:
 
 int main(int argc, char **argv)
 {
-    //int port = 9090;
-     int port = 9703;
+    int port = 9090;
     std::thread t(start, argc, argv);
     // t.join();
     // seastar::thread th([argc, argv]{

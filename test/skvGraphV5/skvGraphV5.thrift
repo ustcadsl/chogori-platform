@@ -1,8 +1,7 @@
-#thrift的编译命令： thrift -r --gen cpp skvGraphV6.thrift
-#skv-graph v6;
+#thrift的编译命令： thrift -r --gen cpp skvGraphV1.thrift
+#skv-graph v5;
 #creat space, space like a database in DB;
 #create tag(vertex ), tag defined a vertex's shcema 
-
 
 # struct schema  
 
@@ -12,7 +11,6 @@ typedef i32  PartitionID
 typedef i32  TagID
 typedef i32  Port
 
-
 // These are all data types supported in the graph properties
 enum PropertyType {
     UNKNOWN = 0,
@@ -20,7 +18,7 @@ enum PropertyType {
     // Simple types
     BOOL = 1,
     INT64 = 2,          // This is the same as INT in v1
-    VID = 3,            // Deprecated, only supported by v1  V2弃用，仅在V1 版本中使用
+    VID = 3,            // Deprecated, only supported by v1 弃用，仅在V1 版本中使用
     FLOAT = 4,
     DOUBLE = 5,
     STRING = 6,
@@ -127,7 +125,7 @@ struct ExecResp {
     // For custom kv operations, it is useless.
     2: ID               id,
     // Valid if ret equals E_LEADER_CHANGED.
-   // 3: HostAddr  leader,
+    3: HostAddr  leader,
 }
 
 struct ColumnTypeDef {   //定义每一列的类型
@@ -179,136 +177,40 @@ struct ColumnDef {
 }
 
 
-struct SKVGraphSchema {
-    1: list<ColumnDef> columns,  //定义具体的schema
-    2: optional SchemaProp schema_prop, //定义schema的ttl的信息，不使用
+struct GraphSchema {
+    1: list<ColumnDef> columns,
+    2: optional SchemaProp schema_prop,
 }
 
 
 
-// Tags related operations
+/* Tags related operations       ID 建立一个table 来处理对应的映射关系
 struct CreateTagReq {
-    1: GraphSpaceID         space_id,
-    2: binary               tag_name,
-    3: SKVGraphSchema       skv_graph_schema,
+#    1: GraphSpaceID        space_id,
+    1: binary               space_name;  //
+    2: binary               tag_name,   //schema name
+    3: Schema               Schema,
+    4: bool                 if_not_exists,
+}
+*/
+
+struct CreateTagReqTest {
+    1: binary               space_name;  //
+    2: binary               tag_name,   //schema name
+    3: GraphSchema          graph_schema,
     4: bool                 if_not_exists,
 }
 
-
-
-
-#storage service
-
-struct PartitionResult {
-    1: required ErrorCode           code,
-    2: required PartitionID  part_id,
-    // Only valid when code is E_LEADER_CHANAGED.
- //   3: optional common.HostAddr     leader,
-}
-
-struct ResponseCommon {
-    // Only contains the partition that returns error
-    1: required list<PartitionResult>   failed_parts,
-    // Query latency from storage service
-    2: required i32                     latency_in_us,
-}
-
-struct ExecResponse {
-  //  1: required ResponseCommon result,
-    1: required ErrorCode code;   //返回Errorcode作为测试
-}
-
-
-enum NullType {
-    __NULL__ = 0,
-    NaN      = 1,
-    BAD_DATA = 2,
-    BAD_TYPE = 3,
-    ERR_OVERFLOW = 4,
-    UNKNOWN_PROP = 5,
-    DIV_BY_ZERO = 6,
-    OUT_OF_RANGE = 7,
-} 
-
-
-//只支持基本类型
-union Value {
-    1: NullType                                 nVal;
-    2: bool                                     bVal;
-    3: i64                                      iVal;
-    4: double                                   fVal;
-    5: binary                                   sVal;
- /* 6: Date                                     dVal;
-    7: Time                                     tVal;
-    8: DateTime                                 dtVal;
-    9: Vertex (cpp.type = "nebula::Vertex")     vVal (cpp.ref_type = "unique");
-    10: Edge (cpp.type = "nebula::Edge")        eVal (cpp.ref_type = "unique");
-    11: Path (cpp.type = "nebula::Path")        pVal (cpp.ref_type = "unique");
-    12: NList (cpp.type = "nebula::List")       lVal (cpp.ref_type = "unique");
-    13: NMap (cpp.type = "nebula::Map")         mVal (cpp.ref_type = "unique");
-    14: NSet (cpp.type = "nebula::Set")         uVal (cpp.ref_type = "unique");
-    15: DataSet (cpp.type = "nebula::DataSet")  gVal (cpp.ref_type = "unique");
-*/
-}
-
-
-
-//add Vertex
-struct NewTag {
-    1: TagID         tag_id,
-    2: list<Value>   props,
-}
-
-struct NewVertex {
-    //1: Value id,      //VID, 使用i64代替 Nebula的 Value定义的数据结构
-    1: i64  id,
-    2: list<NewTag> tags,
-}
-
-struct AddVerticesRequest {
-    1: GraphSpaceID                      space_id,
-    // partId => vertices
-    2: map<PartitionID, list<NewVertex>>   
-     (cpp.template = "std::unordered_map")  parts,  
-    // A map from TagID -> list of prop_names
-    // The order of the property names should match the data order specified
-    //   in the NewVertex.NewTag.props
-    3: map<TagID, list<binary>>         
-     (cpp.template = "std::unordered_map")    prop_names,
-    // if ture, when (vertexID,tagID) already exists, do nothing
-    4: bool                                     if_not_exists,
-}
-
-
-
-
-
-
 service  MetaService { 
-//meta service
-    # space 
-    ExecResp createSpace(1: CreateSpaceReq req),
 
+    # space 
+ //   i32 createSpace(1: CreateSpaceReq req),
     
     //test  for connection
-    i32 add(1:i32 num1, 2:i32 num2)
+     i32 add(1:i32 num1, 2:i32 num2)
 
     # tag
-    ExecResp createTag(1: CreateTagReq req);
-
-
-
-    
-//storage service
-    # 2.1 CURD of vertex 
-
-    ExecResponse addVertices(1: AddVerticesRequest req);
-
-
-// transaction service  参数仅作为测试
-    ExecResponse beginTx(1: i32 TxnOptions);
-    ExecResponse endTx(1: i32 shouldCommit);
-    
+    i32 createTag(1: CreateTagReqTest req);
 
     
 }

@@ -26,6 +26,8 @@ class MetaServiceIf {
   virtual int32_t add(const int32_t num1, const int32_t num2) = 0;
   virtual void createTag(ExecResp& _return, const CreateTagReq& req) = 0;
   virtual void addVertices(ExecResponse& _return, const AddVerticesRequest& req) = 0;
+  virtual void beginTx(ExecResponse& _return, const int32_t TxnOptions) = 0;
+  virtual void endTx(ExecResponse& _return, const int32_t shouldCommit) = 0;
 };
 
 class MetaServiceIfFactory {
@@ -66,6 +68,12 @@ class MetaServiceNull : virtual public MetaServiceIf {
     return;
   }
   void addVertices(ExecResponse& /* _return */, const AddVerticesRequest& /* req */) override {
+    return;
+  }
+  void beginTx(ExecResponse& /* _return */, const int32_t /* TxnOptions */) override {
+    return;
+  }
+  void endTx(ExecResponse& /* _return */, const int32_t /* shouldCommit */) override {
     return;
   }
 };
@@ -496,6 +504,216 @@ class MetaService_addVertices_presult {
 
 };
 
+typedef struct _MetaService_beginTx_args__isset {
+  _MetaService_beginTx_args__isset() : TxnOptions(false) {}
+  bool TxnOptions :1;
+} _MetaService_beginTx_args__isset;
+
+class MetaService_beginTx_args {
+ public:
+
+  MetaService_beginTx_args(const MetaService_beginTx_args&) noexcept;
+  MetaService_beginTx_args& operator=(const MetaService_beginTx_args&) noexcept;
+  MetaService_beginTx_args() noexcept
+                           : TxnOptions(0) {
+  }
+
+  virtual ~MetaService_beginTx_args() noexcept;
+  int32_t TxnOptions;
+
+  _MetaService_beginTx_args__isset __isset;
+
+  void __set_TxnOptions(const int32_t val);
+
+  bool operator == (const MetaService_beginTx_args & rhs) const
+  {
+    if (!(TxnOptions == rhs.TxnOptions))
+      return false;
+    return true;
+  }
+  bool operator != (const MetaService_beginTx_args &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const MetaService_beginTx_args & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+
+class MetaService_beginTx_pargs {
+ public:
+
+
+  virtual ~MetaService_beginTx_pargs() noexcept;
+  const int32_t* TxnOptions;
+
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _MetaService_beginTx_result__isset {
+  _MetaService_beginTx_result__isset() : success(false) {}
+  bool success :1;
+} _MetaService_beginTx_result__isset;
+
+class MetaService_beginTx_result {
+ public:
+
+  MetaService_beginTx_result(const MetaService_beginTx_result&) noexcept;
+  MetaService_beginTx_result& operator=(const MetaService_beginTx_result&) noexcept;
+  MetaService_beginTx_result() noexcept {
+  }
+
+  virtual ~MetaService_beginTx_result() noexcept;
+  ExecResponse success;
+
+  _MetaService_beginTx_result__isset __isset;
+
+  void __set_success(const ExecResponse& val);
+
+  bool operator == (const MetaService_beginTx_result & rhs) const
+  {
+    if (!(success == rhs.success))
+      return false;
+    return true;
+  }
+  bool operator != (const MetaService_beginTx_result &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const MetaService_beginTx_result & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _MetaService_beginTx_presult__isset {
+  _MetaService_beginTx_presult__isset() : success(false) {}
+  bool success :1;
+} _MetaService_beginTx_presult__isset;
+
+class MetaService_beginTx_presult {
+ public:
+
+
+  virtual ~MetaService_beginTx_presult() noexcept;
+  ExecResponse* success;
+
+  _MetaService_beginTx_presult__isset __isset;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+
+};
+
+typedef struct _MetaService_endTx_args__isset {
+  _MetaService_endTx_args__isset() : shouldCommit(false) {}
+  bool shouldCommit :1;
+} _MetaService_endTx_args__isset;
+
+class MetaService_endTx_args {
+ public:
+
+  MetaService_endTx_args(const MetaService_endTx_args&) noexcept;
+  MetaService_endTx_args& operator=(const MetaService_endTx_args&) noexcept;
+  MetaService_endTx_args() noexcept
+                         : shouldCommit(0) {
+  }
+
+  virtual ~MetaService_endTx_args() noexcept;
+  int32_t shouldCommit;
+
+  _MetaService_endTx_args__isset __isset;
+
+  void __set_shouldCommit(const int32_t val);
+
+  bool operator == (const MetaService_endTx_args & rhs) const
+  {
+    if (!(shouldCommit == rhs.shouldCommit))
+      return false;
+    return true;
+  }
+  bool operator != (const MetaService_endTx_args &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const MetaService_endTx_args & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+
+class MetaService_endTx_pargs {
+ public:
+
+
+  virtual ~MetaService_endTx_pargs() noexcept;
+  const int32_t* shouldCommit;
+
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _MetaService_endTx_result__isset {
+  _MetaService_endTx_result__isset() : success(false) {}
+  bool success :1;
+} _MetaService_endTx_result__isset;
+
+class MetaService_endTx_result {
+ public:
+
+  MetaService_endTx_result(const MetaService_endTx_result&) noexcept;
+  MetaService_endTx_result& operator=(const MetaService_endTx_result&) noexcept;
+  MetaService_endTx_result() noexcept {
+  }
+
+  virtual ~MetaService_endTx_result() noexcept;
+  ExecResponse success;
+
+  _MetaService_endTx_result__isset __isset;
+
+  void __set_success(const ExecResponse& val);
+
+  bool operator == (const MetaService_endTx_result & rhs) const
+  {
+    if (!(success == rhs.success))
+      return false;
+    return true;
+  }
+  bool operator != (const MetaService_endTx_result &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const MetaService_endTx_result & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _MetaService_endTx_presult__isset {
+  _MetaService_endTx_presult__isset() : success(false) {}
+  bool success :1;
+} _MetaService_endTx_presult__isset;
+
+class MetaService_endTx_presult {
+ public:
+
+
+  virtual ~MetaService_endTx_presult() noexcept;
+  ExecResponse* success;
+
+  _MetaService_endTx_presult__isset __isset;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+
+};
+
 class MetaServiceClient : virtual public MetaServiceIf {
  public:
   MetaServiceClient(std::shared_ptr< ::apache::thrift::protocol::TProtocol> prot) {
@@ -533,6 +751,12 @@ class MetaServiceClient : virtual public MetaServiceIf {
   void addVertices(ExecResponse& _return, const AddVerticesRequest& req) override;
   void send_addVertices(const AddVerticesRequest& req);
   void recv_addVertices(ExecResponse& _return);
+  void beginTx(ExecResponse& _return, const int32_t TxnOptions) override;
+  void send_beginTx(const int32_t TxnOptions);
+  void recv_beginTx(ExecResponse& _return);
+  void endTx(ExecResponse& _return, const int32_t shouldCommit) override;
+  void send_endTx(const int32_t shouldCommit);
+  void recv_endTx(ExecResponse& _return);
  protected:
   std::shared_ptr< ::apache::thrift::protocol::TProtocol> piprot_;
   std::shared_ptr< ::apache::thrift::protocol::TProtocol> poprot_;
@@ -552,6 +776,8 @@ class MetaServiceProcessor : public ::apache::thrift::TDispatchProcessor {
   void process_add(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_createTag(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_addVertices(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+  void process_beginTx(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+  void process_endTx(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
  public:
   MetaServiceProcessor(::std::shared_ptr<MetaServiceIf> iface) :
     iface_(iface) {
@@ -559,6 +785,8 @@ class MetaServiceProcessor : public ::apache::thrift::TDispatchProcessor {
     processMap_["add"] = &MetaServiceProcessor::process_add;
     processMap_["createTag"] = &MetaServiceProcessor::process_createTag;
     processMap_["addVertices"] = &MetaServiceProcessor::process_addVertices;
+    processMap_["beginTx"] = &MetaServiceProcessor::process_beginTx;
+    processMap_["endTx"] = &MetaServiceProcessor::process_endTx;
   }
 
   virtual ~MetaServiceProcessor() {}
@@ -626,6 +854,26 @@ class MetaServiceMultiface : virtual public MetaServiceIf {
     return;
   }
 
+  void beginTx(ExecResponse& _return, const int32_t TxnOptions) override {
+    size_t sz = ifaces_.size();
+    size_t i = 0;
+    for (; i < (sz - 1); ++i) {
+      ifaces_[i]->beginTx(_return, TxnOptions);
+    }
+    ifaces_[i]->beginTx(_return, TxnOptions);
+    return;
+  }
+
+  void endTx(ExecResponse& _return, const int32_t shouldCommit) override {
+    size_t sz = ifaces_.size();
+    size_t i = 0;
+    for (; i < (sz - 1); ++i) {
+      ifaces_[i]->endTx(_return, shouldCommit);
+    }
+    ifaces_[i]->endTx(_return, shouldCommit);
+    return;
+  }
+
 };
 
 // The 'concurrent' client is a thread safe client that correctly handles
@@ -670,6 +918,12 @@ class MetaServiceConcurrentClient : virtual public MetaServiceIf {
   void addVertices(ExecResponse& _return, const AddVerticesRequest& req) override;
   int32_t send_addVertices(const AddVerticesRequest& req);
   void recv_addVertices(ExecResponse& _return, const int32_t seqid);
+  void beginTx(ExecResponse& _return, const int32_t TxnOptions) override;
+  int32_t send_beginTx(const int32_t TxnOptions);
+  void recv_beginTx(ExecResponse& _return, const int32_t seqid);
+  void endTx(ExecResponse& _return, const int32_t shouldCommit) override;
+  int32_t send_endTx(const int32_t shouldCommit);
+  void recv_endTx(ExecResponse& _return, const int32_t seqid);
  protected:
   std::shared_ptr< ::apache::thrift::protocol::TProtocol> piprot_;
   std::shared_ptr< ::apache::thrift::protocol::TProtocol> poprot_;
