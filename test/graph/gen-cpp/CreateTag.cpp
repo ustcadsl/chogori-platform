@@ -85,7 +85,7 @@ struct MySchemaGetRequest
     uint64_t schemaVersion;
     std::promise<k2::GetSchemaResult> *prom; //返回的future 不同
 };
-inline std::queue<MySchemaCreateRequest> SchemaGetQ;
+inline std::queue<MySchemaGetRequest> SchemaGetQ;
 
 struct MyWriteRequest {
     k2::dto::K23SI_MTR mtr;
@@ -93,10 +93,10 @@ struct MyWriteRequest {
     bool erase = false;
     //前提条件默认为None，暂时不做处理
     k2::dto::ExistencePrecondition precondition = k2::dto::ExistencePrecondition::None;
-    k2::dto::SKVRecord record;
+    k2::SKVRecord record;
     std::promise<k2::WriteResult> *prom;
 };
-inline std::queue<MySchemaCreateRequest> WriteRequestQ;
+inline std::queue<MyWriteRequest> WriteRequestQ;
 
 struct MyBeginTxnRequest {
     k2::K2TxnOptions opts;
@@ -110,7 +110,7 @@ struct MyEndTxnRequest {
     bool shouldCommit;
     std::promise<k2::EndResult> *prom;
 };
-inline std::queue<MyBeginTxnRequest> EndTxnQ;
+inline std::queue<MyEndTxnRequest> EndTxnQ;
 
 class Client
 {
@@ -366,7 +366,7 @@ void pushQ(Q &queue, Request &&r)
     }
     else
     {
-        queue.push(r);
+        queue.push(std::forward<Request>(r));
     }
     // queue.push(std::forward<Request>(r));
     // queue.push(r);
@@ -559,10 +559,10 @@ public:
                     必要属性如上所示，只需依次序列化即可
                     */
                     try{
-                        skvRecord.serializeNext<int16_t>(tag_iter -> props[0]);
-                        skvRecord.serializeNext<int16_t>(tag_iter -> props[1]);
-                        skvRecord.serializeNext<int64_t>(tag_iter -> props[2]);
-                        skvRecord.serializeNext<int32_t>(tag_iter -> props[3]);
+                        skvRecord.serializeNext<int16_t>(tag_iter -> props[0].iVal);
+                        skvRecord.serializeNext<int16_t>(tag_iter -> props[1].iVal);
+                        skvRecord.serializeNext<int64_t>(tag_iter -> props[2].iVal);
+                        skvRecord.serializeNext<int32_t>(tag_iter -> props[3].iVal);
                     }
                     catch (...){
                         _return.code = ErrorCode::E_UNKNOWN;
@@ -570,17 +570,17 @@ public:
                     }
                     MyWriteRequest write_request {
                         .mtr = mtr,
-                        .record = skvRecord,
+                        .record = std::move(skvRecord),
                         .prom = new std::promise<k2::WriteResult>()
                     };
-                    request_list.insert(write_request);
+                    request_list.push_back(std::move(write_request));
                     // pushQ(WriteRequestQ, write_request);     //为防止由于出错，只有部分结点被加入，在遍历完结点后pushQ
                 }
             }
         }
         //已经构建了所有结点的增加请求
         for(auto iter = request_list.begin(); iter != request_list.end(); iter++){
-            pushQ(WriteRequestQ, *(iter)); 
+            pushQ(WriteRequestQ, std::move(*(iter))); 
         }
         bool isSucceed = true;
         for(auto iter = request_list.begin(); iter != request_list.end(); iter++){
@@ -657,7 +657,12 @@ public:
         return num1 + num2;
         printf("add\n");
     }
-
+    void beginTx(ExecResponse& _return, const int32_t TxnOptions){
+        return;
+    }
+    void endTx(ExecResponse& _return, const int32_t shouldCommit){
+        return;
+    }
     //tag
     void createTag(ExecResp &_return, const CreateTagReq &req)
     {
