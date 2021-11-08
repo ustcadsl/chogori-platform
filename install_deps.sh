@@ -18,3 +18,7 @@ mkdir -p build
 cd build
 cmake .. && make -j install
 
+if [ ! -d "pmdk" ]; then git clone https://github.com/pmem/pmdk; fi
+cd pmdk
+make -j
+make install

@@ -20,6 +20,7 @@ cd chogori-seastar-rd
 ninja -C build/release
 ninja -C build/release test
 ninja -C build/release install
+
 ```
 
 ## Persisting the container-local changes

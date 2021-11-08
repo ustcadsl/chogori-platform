@@ -94,7 +94,6 @@ String Status::getDescription() const {
             return "Temporary Redirect";
         case 308:
             return "Permanent Redirect";
-
         case 400:
             return "Bad Request";
         case 401:
