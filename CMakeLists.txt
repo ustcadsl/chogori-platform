@@ -27,6 +27,7 @@ find_package (yaml-cpp REQUIRED) # required for configuration file parsing
 
 add_subdirectory (src)
 add_subdirectory (test)
+include(/opt/vesoft/third-party/include/thrift/ThriftLibrary.cmake)
 
 # install the cmake config for the entire project so that it can be used by upstream
 # via find_package(k2 REQUIRED)

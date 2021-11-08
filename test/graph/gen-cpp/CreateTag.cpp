@@ -27,29 +27,29 @@ enum class FieldType : uint8_t {
 };
 */
 
-#include <k2/appbase/AppEssentials.h>
-#include <k2/appbase/Appbase.h>
-#include <k2/cpo/client/CPOClient.h>
-#include <k2/module/k23si/client/k23si_client.h>
-#include <seastar/core/sleep.hh>
-#include <seastar/core/thread.hh>
-using namespace k2;
-#include "Log.h"
+
 
 #include "MetaService.h"
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/server/TSimpleServer.h>
 #include <thrift/transport/TServerSocket.h>
 #include <thrift/transport/TBufferTransports.h>
-#include <queue>
-#include <future>
-#include <tuple>
-#include <list>
 
 using namespace ::apache::thrift;
 using namespace ::apache::thrift::protocol;
 using namespace ::apache::thrift::transport;
 using namespace ::apache::thrift::server;
+
+
+
+#include <future>
+#include <tuple>
+#include <list>
+#include "k2_includes.h"
+#include "k2_client.h"
+#include "queue_defs.h"
+using namespace k2;
+#include "Log.h"
 
 static std::unordered_map<std::string, int32_t> spaceTable;
 
@@ -57,319 +57,14 @@ static std::unordered_map<std::string, int32_t> tagTable;
 static std::unordered_map<std::string, std::vector<std::string>> name2Eps = {
     {"test1", {"tcp+k2rpc://0.0.0.0:10000"}},{"test2", {"tcp+k2rpc://0.0.0.0:10001"}},{"test3", {"tcp+k2rpc://0.0.0.0:10002"}}
 };
-bool finish = false;
-
-struct MyCollectionCreateRequest
-{
-    k2::dto::CollectionCreateRequest req;
-    // seastar::promise<k2::Status>* prom;
-    std::promise<k2::Status> *prom;
-    // std::promise<k2::Status>* prom = new std::promise<k2::Status>();
-    // K2_DEF_FMT(MyCollectionCreateRequest, req);
-};
-inline std::queue<MyCollectionCreateRequest> collectionCreateQ;
-
-struct MySchemaCreateRequest
-{
-
-    k2::dto::CreateSchemaRequest req;
-    std::promise<k2::CreateSchemaResult> *prom; //返回的future 不同
-};
-inline std::queue<MySchemaCreateRequest> SchemaCreateQ;
 
 
-struct MySchemaGetRequest
-{
-    k2::String collectionName;
-    k2::String schemaName;
-    uint64_t schemaVersion;
-    std::promise<k2::GetSchemaResult> *prom; //返回的future 不同
-};
-inline std::queue<MySchemaGetRequest> SchemaGetQ;
-
-struct MyWriteRequest {
-    k2::dto::K23SI_MTR mtr;
-    // k2::K2TxnHandle txn;
-    bool erase = false;
-    //前提条件默认为None，暂时不做处理
-    k2::dto::ExistencePrecondition precondition = k2::dto::ExistencePrecondition::None;
-    k2::SKVRecord record;
-    std::promise<k2::WriteResult> *prom;
-};
-inline std::queue<MyWriteRequest> WriteRequestQ;
-
-struct MyBeginTxnRequest {
-    k2::K2TxnOptions opts;
-    std::promise<k2::dto::K23SI_MTR> *prom;
-    k2::TimePoint startTime;
-};
-inline std::queue<MyBeginTxnRequest> BeginTxnQ;
-
-struct MyEndTxnRequest {
-    k2::dto::K23SI_MTR mtr;
-    bool shouldCommit;
-    std::promise<k2::EndResult> *prom;
-};
-inline std::queue<MyEndTxnRequest> EndTxnQ;
-
-class Client
-{
-public:
-    Client()
-    {
-        K2LOG_I(log::k23si, "Ctor");
-        _client = new K23SIClient(K23SIClientConfig());
-        _txns = new std::unordered_map<k2::dto::K23SI_MTR, k2::K2TxnHandle>();
-    }
-
-    ~Client()
-    {
-        delete _client;
-        delete _txns;
-    }
-
-    // required for seastar::distributed interface
-    seastar::future<> gracefulStop()
-    {
-        K2LOG_I(log::k23si, "Stop");
-        finish = true;
-
-        _stop = true;
-
-        return std::move(_poller)
-            .then([this]
-                  { return _client->gracefulStop(); })
-            .then([this]
-                  {
-                      // drain all queue items and fail them due to shutdown
-                      return _pollForWork();
-                  });
-    }
-
-    seastar::future<> start()
-    {
-        K2LOG_I(log::k23si, "Start");
-        // start polling the request queues only on core 0
-
-        std::cout << "\n\n\n  seastar app start \n\n";
-        if (seastar::this_shard_id() == 0)
-        {
-            K2LOG_I(log::k23si, "Poller starting");
-            _poller = _poller.then([this]
-                                   {
-                                       return seastar::do_until(
-                                           [this]
-                                           {
-                                               return _stop;
-                                           },
-                                           [this]
-                                           {
-                                               // std::cout << "\n\n\n\nabc\n\n\n\n";
-                                               return _pollForWork();
-                                           });
-                                   });
-        }
-        return _client->start();
-    }
-
-    template <typename Q, typename Func>
-    seastar::future<> pollQ(Q &q, Func &&visitor)
-    {
-        // lock the mutex before manipulating the queue
-        // std::unique_lock lock(requestQMutex);
-
-        std::vector<seastar::future<>> futs;
-        futs.reserve(q.size());
-
-        while (!q.empty())
-        {
-            K2LOG_I(log::k23si, "Found Req");
-            futs.push_back(
-                seastar::do_with(std::move(q.front()), std::forward<Func>(visitor),
-                                 // seastar::do_with(MyCollectionCreateRequest(), Func,
-                                 [](auto &req, auto &visitor)
-                                 {
-                                     try
-                                     {
-                                         // std::cout << "\n\n\n\nline104\n\n\n\n";
-                                         return visitor(req)
-                                             .handle_exception([&req](auto exc)
-                                                               {
-                                                                   K2LOG_W_EXC(log::k23si, exc, "caught exception");
-                                                                   req.prom->set_exception(exc);
-                                                                   //返回异常
-                                                               });
-                                     }
-                                     catch (const std::exception &exc)
-                                     {
-                                         req.prom->set_exception(std::current_exception());
-                                         //返回异常
-                                         return seastar::make_ready_future();
-                                     }
-                                     catch (...)
-                                     {
-                                         req.prom->set_exception(std::current_exception());
-                                         //返回异常
-                                         return seastar::make_ready_future();
-                                     }
-                                 }));
-            q.pop();
-        }
-        return seastar::when_all_succeed(futs.begin(), futs.end());
-    }
-
-private:
-    K23SIClient *_client;
-    // std::unordered_map<k2::dto::K23SI_MTR, k2::K2TxnHandle>* _txns;
-
-    seastar::future<> _poller = seastar::make_ready_future();
-    seastar::future<> _pollForWork()
-    {
-        return seastar::when_all_succeed(
-                   _pollCreateCollectionQ(), _pollSchemaCreateQ(), _pollSchemaGetQ(), _pollBeginQ(), _pollEndQ(), _pollWriteQ())
-            .discard_result();
-    }
-
-    seastar::future<> _pollBeginQ(){
-        return pollQ(BeginTxnQ, [this](auto& req){
-            if (_stop) {
-                return seastar::make_exception_future(std::runtime_error("seastar app has been shutdown"));
-            }
-            return _client->beginTxn(req.opts)
-                .then([this, &req](auto&& txn) {
-                    auto mtr = txn.mtr();
-                    (*_txns)[txn.mtr()] = std::move(txn);
-                    req.prom->set_value(mtr);  // send a copy to the promise
-                });
-        });
-    }
-    seastar::future<> _pollEndQ(){
-        return pollQ(EndTxnQ, [this](auto& req) {
-            if (_stop) {
-                return seastar::make_exception_future(std::runtime_error("seastar app has been shutdown"));
-            }
-            auto fiter = _txns->find(req.mtr);
-            if (fiter == _txns->end()) {
-                // PG sends Abort after a failed Commit call (in this case we don't fail the abort)
-                req.prom->set_value(req.shouldCommit ?
-                k2::EndResult(k2::dto::K23SIStatus::OperationNotAllowed("invalid txn id")) :
-                k2::EndResult(k2::dto::K23SIStatus::OK("")));
-                return seastar::make_ready_future();
-            }
-            return fiter->second.end(req.shouldCommit)
-                .then([this, &req](auto&& endResult) {
-                    _txns->erase(req.mtr);
-                    req.prom->set_value(std::move(endResult));
-                });
-        });
-    }
-
-    seastar::future<> _pollSchemaGetQ() {
-        return pollQ(SchemaGetQ, [this](auto &req) {
-            if (_stop) {
-                return seastar::make_exception_future(std::runtime_error("seastar app has been shutdown"));
-            }
-            return _client->getSchema(req.collectionName, req.schemaName, req.schemaVersion)
-                .then([this, &req](auto&& result){
-                    req.prom -> set_value(std::move(result));
-                });
-        });
-    }
-
-    seastar::future<> _pollSchemaCreateQ()
-    {
-        return pollQ(SchemaCreateQ, [this](auto &req)
-                     {
-                         std::cout<<"\n\n\n _pollSchemaCreateQ";
-                         // std::cout << "\n\n\n\n"<<req.req.clusterEndpoints[0]<<"\n\n\n\n"<< req.req.rangeEnds<<"abc\n\n\n";
-                         if (_stop)
-                         {
-                             return seastar::make_exception_future(std::runtime_error("seastar app has been shutdown"));
-                         }
-                         std::cout<<"\n\n_client->createSchema \n";
-                         std::cout<<req.req.collectionName<<std::endl;
-
-                         return _client->createSchema(std::move(req.req.collectionName), std::move(req.req.schema))
-                             .then([this, &req](auto &&result)
-                                   {
-                                       std::cout<<"\n\nafter _clientcreateSchema";
-                                       K2LOG_D(log::k23si, "Schema create received {}", result);
-                                       req.prom->set_value(std::move(result));
-                                   });
-                     });
-    }
-    // seastar::future<> _pollReadQ();
-    // seastar::future<> _pollCreateScanReadQ();
-    // seastar::future<> _pollScanReadQ();
-    seastar::future<> _pollWriteQ(){
-        return pollQ(WriteRequestQ, [this](auto& req) mutable {
-            if (_stop) {
-                return seastar::make_exception_future(std::runtime_error("seastar app has been shutdown"));
-            }
-            auto fiter = _txns->find(req.mtr);
-            if (fiter == _txns->end()) {
-                req.prom->set_value(k2::WriteResult(k2::dto::K23SIStatus::OperationNotAllowed("invalid txn id"), k2::dto::K23SIWriteResponse{}));
-                return seastar::make_ready_future();
-            }
-            k2::dto::SKVRecord copy = req.record.deepCopy();
-            return fiter->second.write(copy, req.erase, req.precondition)
-                .then([this, &req](auto&& writeResult) {
-                    req.prom->set_value(std::move(writeResult));
-                });
-        });
-    }
-    // seastar::future<> _pollUpdateQ();
-    seastar::future<> _pollCreateCollectionQ()
-    {
-        return pollQ(collectionCreateQ, [this](auto &req)
-                     {
-                         // std::cout << "\n\n\n\n"<<req.req.clusterEndpoints[0]<<"\n\n\n\n"<< req.req.rangeEnds<<"abc\n\n\n";
-                         if (_stop)
-                         {
-                             return seastar::make_exception_future(std::runtime_error("seastar app has been shutdown"));
-                         }
-                         return _client->makeCollection(std::move(req.req.metadata), {req.req.clusterEndpoints[0]},
-                                                        std::move(req.req.rangeEnds))
-                             .then([this, &req](auto &&result)
-                                   {
-                                       K2LOG_D(log::k23si, "Collection create received {}", result);
-                                       // std::cout << "\n\n\n\nline164\n\n\n\n";
-                                       std::cout << "\n\n cliet_makecollection \n\n"
-                                                 << std::endl;
-                                       req.prom->set_value(std::move(result));
-                                   });
-                     });
-    }
-    // seastar::future<> _pollDropCollectionQ();
-
-    bool _stop = false;
-    std::unordered_map<k2::dto::K23SI_MTR, k2::K2TxnHandle>* _txns;
-};
-
-void start(int argc, char **argv)
-{
+void start(int argc, char **argv) {
     App app("main");
     app.addOptions()("tcp_remotes", bpo::value<std::vector<String>>()->multitoken()->default_value(std::vector<String>()), "A list(space-delimited) of endpoints to assign in the test collection")("tso_endpoint", bpo::value<String>(), "URL of Timestamp Oracle (TSO), e.g. 'tcp+k2rpc://192.168.1.2:12345'")("cpo", bpo::value<String>(), "URL of Control Plane Oracle (CPO), e.g. 'tcp+k2rpc://192.168.1.2:12345'");
     app.addApplet<TSO_ClientLib>();
-    app.addApplet<Client>(); //和k2服务器交互的客户端
+    app.addApplet<k2pg::gate::PGK2Client>(); //和k2服务器交互的客户端
     app.start(argc, argv);
-}
-
-template <typename Q, typename Request>
-void pushQ(Q &queue, Request &&r)
-{
-    // std::lock_guard lock{requestQMutex};
-    if (finish)
-    {
-        r.prom->set_exception(std::make_exception_ptr(std::runtime_error("queue processing has been shutdown")));
-        //返回错误信息
-    }
-    else
-    {
-        queue.push(std::forward<Request>(r));
-    }
-    // queue.push(std::forward<Request>(r));
-    // queue.push(r);
 }
 
 class MetaServiceHandler : virtual public MetaServiceIf
@@ -658,9 +353,13 @@ public:
         printf("add\n");
     }
     void beginTx(ExecResponse& _return, const int32_t TxnOptions){
+        if(TxnOptions)
+            _return.code = ErrorCode::E_UNKNOWN;
         return;
     }
     void endTx(ExecResponse& _return, const int32_t shouldCommit){
+        if(shouldCommit)
+            _return.code = ErrorCode::E_UNKNOWN;
         return;
     }
     //tag
