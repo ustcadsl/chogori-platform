@@ -1114,7 +1114,7 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
         nodePtr = _indexer.insert(request.key);
         IndexerIterator findIt = _indexer.find(request.key);
         K2ASSERT(log::skvsvr, findIt != _indexer.end() && _indexer.extractFromIter(findIt)==nodePtr, "Can not find inserted key");
-        K2LOG_I(log::skvsvr, "New KVNode @{} and findIt return {}", (void*)nodePtr, (void*)(_indexer.extractFromIter(findIt)));
+        K2LOG_D(log::skvsvr, "New KVNode @{} and findIt return {}", (void*)nodePtr, (void*)(_indexer.extractFromIter(findIt)));
         K2ASSERT(log::skvsvr, nodePtr!=nullptr, "Insert failed and return nullptr");
     }
     else {
@@ -1160,6 +1160,8 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
 
     // check to see if we should push or is this a write from same txn
     KeyValueNode& KVNode = *nodePtr;
+    K2LOG_D(log::skvsvr, "KeyValueNode @{}", (void*)(&KVNode));
+    KVNode.printKeyValueNode();
     // KeyValueNode& KVNodeMap = *nodePtrMap;
     // rec is used both in hot and map version
     dto::DataRecord* rec = nodePtr->begin();
@@ -1225,6 +1227,8 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
 
     // all checks passed - we're ready to place this WI as the latest version
     auto status = _createWI(std::move(request), KVNode);
+    K2LOG_D(log::skvsvr, "KVNode @{} after create WI", (void*)(&KVNode));
+    KVNode.printKeyValueNode();
     // auto status = _createWI(std::move(request), KVNodeMap);
     return RPCResponse(std::move(status), dto::K23SIWriteResponse{});
 }
@@ -1237,7 +1241,7 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, KeyValueNode& 
                         .prevVersion=nullptr, .status=dto::DataRecord::WriteIntent, .request_id=request.request_id};
 
     KVNode.insert_datarecord(rec);
-
+    
     auto status = _twimMgr.addWrite(std::move(request.mtr), std::move(request.key), std::move(request.trh), std::move(request.trhCollection));
 
     if (!status.is2xxOK()) {

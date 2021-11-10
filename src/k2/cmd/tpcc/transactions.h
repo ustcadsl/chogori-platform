@@ -55,7 +55,7 @@ template<typename Func>
                 return func().
                     then_wrapped([this] (auto&& fut) {
                         _success = !fut.failed() && fut.get0();
-                        K2LOG_I(log::tpcc, "round {} ended with success={}", _try, _success);
+                        K2LOG_D(log::tpcc, "round {} ended with success={}", _try, _success);
                         return make_ready_future<>();
                     });
             }).then_wrapped([this] (auto&& fut) {

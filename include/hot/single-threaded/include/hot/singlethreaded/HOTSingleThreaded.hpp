@@ -240,11 +240,11 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline b
 	memset(byteArray, 0, sizeof(byteArray));
 	uint16_t byteLength = idx::contenthelpers::interpretAsByteArray(fixedSizeKey, byteArray);
 	
-	std::cout << "HOTSingleThreaded.hpp @Insert Insert Key: ";
-	for(int i = 0; i < byteLength; ++i) {
-		std::cout << byteArray[i];
-	}
-	std::cout << std::endl;
+	// std::cout << "HOTSingleThreaded.hpp @Insert Insert Key: ";
+	// for(int i = 0; i < byteLength; ++i) {
+	// 	std::cout << (char)byteArray[i];
+	// }
+	// std::cout << std::endl;
 
 	if(isRootANode()) {
 		std::array<HOTSingleThreadedInsertStackEntry, 64> insertStack;

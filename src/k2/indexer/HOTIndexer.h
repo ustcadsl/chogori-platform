@@ -44,7 +44,7 @@ namespace k2
     class HOTindexer{
     private:
         HotIndexer idx;
-        std::vector<k2::KeyValueNode*> mKeyValueNodePtr;
+        // std::vector<k2::KeyValueNode*> mKeyValueNodePtr;
 
     public:
         ~HOTindexer();
@@ -65,8 +65,8 @@ namespace k2
         size_t size();        
     };
     inline HOTindexer::~HOTindexer() {
-        for(auto i = mKeyValueNodePtr.begin(); i!= mKeyValueNodePtr.end(); ++i) {
-            delete *i;
+        for(auto it = begin(); it!=end(); ++it) {
+            delete *it;
         }
     }
 
@@ -77,7 +77,7 @@ namespace k2
         K2LOG_D(log::indexer, "Insert key {} and new KVNode @{}", key, (void*)(newKVNode));
         ret = idx.insert(newKVNode);
         if (ret) {
-            mKeyValueNodePtr.emplace_back(newKVNode);
+            // mKeyValueNodePtr.emplace_back(newKVNode);
             return newKVNode;
         }
         else {

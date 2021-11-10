@@ -418,6 +418,7 @@ HOTSingleThreadedChildPointer HOTSingleThreadedNode<DiscriminativeBitsRepresenta
 ) const
 {
 	uint16_t newNumberEntries = getNumberEntries() + 1;
+	K2LOG_D(k2::log::hot, "New Number Entries={}", newNumberEntries);
 	HOTSingleThreadedNode<DiscriminativeBitsRepresentation, PartialKeyType> const & self = *this;
 
 	return mDiscriminativeBitsRepresentation.insert(insertInformation.mKeyInformation, [&](auto const & newDiscriminativeBitsRepresentation)  {

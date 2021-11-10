@@ -80,6 +80,10 @@ namespace k2 {
         }
 
         ~KeyValueNode() {
+            // Datarecord is owned by pbrb and plog, Do not delete after integration
+            for(int i = 0; i<3; ++i) {
+                delete valuedata[i].valuepointer;
+            }
         }
 
         dto::Key get_key() {
@@ -198,6 +202,7 @@ namespace k2 {
             set_exist(0, true);
             //TODO: inmem = false?
             set_inmem(0, false);
+            K2LOG_D(log::indexer, "Insert new datarecord at first place with rec={}", *datarecord);
             return 0;
         }
 
@@ -327,6 +332,14 @@ namespace k2 {
 
         dto::DataRecord *begin() {
             return this->_getpointer(0);
+        }
+
+        void printKeyValueNode() {
+            K2LOG_D(log::indexer, "flags={} keyPointer={}", flags, (void*)key.get());
+            for(int i = 0; i<3; ++i) {
+                K2LOG_D(log::indexer, "valuedata {}, timestamp={} valuepointer={}", i, valuedata[i].timestamp, (void*)valuedata[i].valuepointer);
+            }
+            return;
         }
     };
 

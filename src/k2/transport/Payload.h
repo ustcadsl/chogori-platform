@@ -230,6 +230,8 @@ public:  // Read API
 
     template<typename T>
     bool read(SerializeAsPayload<T>& value) {
+        K2LOG_D(log::tx, "In serailizableAsPayload type read");
+
         // if the embedded type is a Payload, then just use the payload write to write it directly
         if constexpr(std::is_same<T, Payload>::value) {
             return read(value.val);
@@ -268,18 +270,22 @@ public:  // Read API
     // read an unordered_map
     template <typename KeyT, typename ValueT>
     bool read(std::unordered_map<KeyT, ValueT>& m) {
+        K2LOG_D(log::tx, "Read unordered map");
         _Size size;
+        K2LOG_D(log::tx, "Read size={}", size);
         if (!read(size))
             return false;
-        m.reserve(size);
-
+        K2LOG_D(log::tx, "After Read size={}", size);
+        K2LOG_D(log::tx, "Size of unordered map={}", m.size());
+        // m.reserve(size);
+        K2LOG_D(log::tx, "After reserve");
         for (_Size i = 0; i < size; i++) {
             KeyT key;
             ValueT value;
-
+            // K2LOG_D(log::tx, "Read key {} and value {}", key, value);
             if (!read(key) || !read(value))
                 return false;
-
+            // K2LOG_D(log::tx, "After Read key {} and value {}", key, value);
             m[std::move(key)] = std::move(value);
         }
 
@@ -327,10 +333,14 @@ public:  // Read API
     // read an unordered set
     template <typename T>
     bool read(std::unordered_set<T>& s) {
+        K2LOG_D(log::tx, "Read unordered set");
+
         _Size size;
         if (!read(size))
             return false;
-        s.reserve(size);
+        K2LOG_D(log::tx, "Read unordered set size {}", size);
+        // s.reserve(size);
+        K2LOG_D(log::tx, "After Reserve for unordered set");
 
         for (_Size i = 0; i < size; i++) {
             T key;
@@ -347,12 +357,16 @@ public:  // Read API
     // primitive type read
     template <typename T>
     std::enable_if_t<isPayloadCopyableType<T>() || isNumericType<T>(), bool> read(T& value) {
+        K2LOG_D(log::tx, "In primitive type read");
+
         return read((void*)&value, sizeof(value));
     }
 
     // serializable type read
     template <typename T>
     std::enable_if_t<isPayloadSerializableType<T>(), bool> read(T& value) {
+        K2LOG_D(log::tx, "In serailizable type read");
+
         return value.__readFields(*this);
     }
 
