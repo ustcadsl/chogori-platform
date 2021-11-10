@@ -239,10 +239,10 @@ public:
                     必要属性如上所示，只需依次序列化即可
                     */
                     try{
-                        skvRecord.serializeNext<int16_t>(tag_iter -> props[0].iVal);
-                        skvRecord.serializeNext<int16_t>(tag_iter -> props[1].iVal);
+                        skvRecord.serializeNext<int16_t>(tag_iter -> props[0].hwVal);
+                        skvRecord.serializeNext<int16_t>(tag_iter -> props[1].hwVal);
                         skvRecord.serializeNext<int64_t>(tag_iter -> props[2].iVal);
-                        skvRecord.serializeNext<int32_t>(tag_iter -> props[3].iVal);
+                        skvRecord.serializeNext<int32_t>(tag_iter -> props[3].wVal);
                     }
                     catch (...){
                         _return.code = ErrorCode::E_UNKNOWN;

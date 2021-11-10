@@ -238,6 +238,8 @@ union Value {
     3: i64                                      iVal;
     4: double                                   fVal;
     5: binary                                   sVal;
+    6: i32                                      wVal;
+    7: i16                                      hwVal;
  /* 6: Date                                     dVal;
     7: Time                                     tVal;
     8: DateTime                                 dtVal;
