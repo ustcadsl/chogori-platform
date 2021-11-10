@@ -172,21 +172,6 @@ public:
         }
         return;
     }
-    // void addVertices(ExecResponse& _return, const AddVerticesRequest& req){
-    //     //检查传入的数据是否合法，并构造相应的skvrecord
-    //     //因为需要获得对应schema的信息
-    //     std::vector<k2::GetSchemaResult> results;
-    //     for(auto iter = req.prop_names.begin(); iter != req.prop_names.end(); iter++){
-    //         MySchemaGetRequest request{
-    //             .collectionName = std::to_string(req.space_id),
-    //             .schemaName = std::to_string(iter -> first),
-    //         };
-    //     }
-        
-    //     pushQ(SchemaGetQ, request);
-    //     int index = 0;  //记录处理到Schema中SchemaField的下标
-        
-    // }
 
     void addVertices(ExecResponse& _return, const AddVerticesRequest& req){
         //因为只支持结点的必要属性，可忽略请求中 prop_names字段
