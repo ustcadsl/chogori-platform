@@ -25,7 +25,7 @@ Copyright(c) 2020 Futurewei Cloud
 
 namespace k2 {
 
-Status PmemLog::open(const PmemEngineConfig &plog_meta, PmemEngine ** engine_ptr){
+Status PmemEngine::open(PmemEngineConfig &plog_meta, PmemEngine ** engine_ptr){
     if ( plog_meta.chunk_size > plog_meta.engine_capacity
         || plog_meta.is_sealed == true ){
         return PmemStatuses::S403_Forbidden_Invalid_Config;
@@ -41,22 +41,21 @@ Status PmemLog::open(const PmemEngineConfig &plog_meta, PmemEngine ** engine_ptr
     return s;
 }
 
-Status PmemLog::init(const PmemEngineConfig &plog_meta){
+Status PmemLog::init(PmemEngineConfig &plog_meta){
     // create the directory if not exist
-    std::filesystem::path dirPath(plog_meta.engine_path);
-    if(!std::filesystem::exists(dirPath)){
-        bool res = std::filesystem::create_directories(dirPath);
+    if(!std::filesystem::exists(plog_meta.engine_path)){
+        bool res = std::filesystem::create_directories(plog_meta.engine_path);
         if (res == false){
             return PmemStatuses::S500_Internal_Server_Error_Create_Fail;
         }
     }
-    const std::filesystem::space_info si = std::filesystem::space(_plog_meta.engine_path);
+    const std::filesystem::space_info si = std::filesystem::space(plog_meta.engine_path);
     if ( si.available < plog_meta.engine_capacity){
-        return PmemStatuses::S507_Insufficient_Storage; 
-    } 
+        return PmemStatuses::S507_Insufficient_Storage;
+    }
     //get engine_path and plog_id from the input parm
     _plog_meta = plog_meta;
-    String meta_file_name = _genMetaFile(); 
+    String meta_file_name = _genMetaFile();
     // check whether the metafile exists
     std::filesystem::path meteaFilePath(meta_file_name);
     bool isMetaFileExisted = std::filesystem::exists(meteaFilePath);
@@ -69,8 +68,8 @@ Status PmemLog::init(const PmemEngineConfig &plog_meta){
     else{
         metaFileMapRes = _createThenMapFile(meta_file_name, sizeof(plog_meta));
     }
-    
-    // check out the status 
+
+    // check out the status
     if( !std::get<0>(metaFileMapRes).is2xxOK()){
         return std::get<0>(metaFileMapRes);
     }
@@ -81,15 +80,17 @@ Status PmemLog::init(const PmemEngineConfig &plog_meta){
     if (isMetaFileExisted){
         // assign the plog metadata info from pmem space
         _plog_meta = *(PmemEngineConfig *)_plog_meta_file.pmem_addr;
+        plog_meta = _plog_meta;
         for(uint64_t i = 0; i < _plog_meta.chunk_count; i++){
             String chunkName = _genNewChunk();
             auto chunkStatus = _MapExistingFile(chunkName);
             if(!std::get<0>(chunkStatus).is2xxOK()){
                 return std::get<0>(chunkStatus);
             }
-            _chunk_list.push_back({.file_name = std::move(chunkName), 
+            _chunk_list.push_back({.file_name = std::move(chunkName),
                                     .pmem_addr = std::get<1>(chunkStatus)});
         }
+        _active_chunk_id = _plog_meta.tail_offset / _plog_meta.chunk_size;
     }else{
         _plog_meta = plog_meta;
         // write metadata to metaFile
@@ -101,16 +102,17 @@ Status PmemLog::init(const PmemEngineConfig &plog_meta){
         //create first chunk
         String firstChunk = _genNewChunk();
         auto chunkStatus = _createThenMapFile(firstChunk, _plog_meta.chunk_size);
+        _plog_meta.chunk_count++;
         if(!std::get<0>(chunkStatus).is2xxOK()){
             return std::get<0>(chunkStatus);
         }
-        _chunk_list.push_back({.file_name = std::move(firstChunk), 
+        _chunk_list.push_back({.file_name = std::move(firstChunk),
                                     .pmem_addr = std::get<1>(chunkStatus)});
     }
     return PmemStatuses::S201_Created_Engine;
 }
 
-std::tuple<Status, PmemAddress> PmemLog::append(const Payload &payload){
+std::tuple<Status, PmemAddress> PmemLog::append(Payload &payload){
     PmemAddress pmemAddr;
     strcpy(pmemAddr.plog_id ,_plog_meta.plog_id);
     pmemAddr.start_offset = _plog_meta.tail_offset;
@@ -126,17 +128,19 @@ std::tuple<Status, PmemAddress> PmemLog::append(const Payload &payload){
         return std::tuple<Status, PmemAddress>(std::move(status), std::move(pmemAddr));
     }
     size_t payload_data_size = payload.getSize();
-    char * buffer_data = (char*)malloc(payload_data_size * sizeof(char));
+    char * buffer_data = (char*)malloc(payload_data_size );
     //promise not change the payload content
-    const_cast<Payload*>(&payload)->read(buffer_data, payload_data_size);
+    payload.read(buffer_data, payload_data_size);
+    payload.seek(0);
     Status status = _append(buffer_data,payload_data_size);
     free(buffer_data);
     return std::tuple<Status, PmemAddress>(std::move(status), std::move(pmemAddr));
 }
 
-inline Status PmemLog::_append(char *srcdata, size_t len){
+Status PmemLog::_append(char *srcdata, size_t len){
     K2LOG_D(log::pmem_storage,"Append data: offset=>{},size=>{} ", _plog_meta.tail_offset, len);
-    size_t remaining_space = _plog_meta.chunk_size - _plog_meta.tail_offset%_plog_meta.chunk_size;
+    // calculate data need to write in the activate chunk
+    size_t remaining_space = _plog_meta.chunk_count * _plog_meta.chunk_size - _plog_meta.tail_offset;
     size_t write_size = remaining_space <= len? remaining_space : len;
     char * addr = _chunk_list[_active_chunk_id].pmem_addr + _plog_meta.tail_offset%_plog_meta.chunk_size;
 
@@ -145,12 +149,13 @@ inline Status PmemLog::_append(char *srcdata, size_t len){
     }else{
         _copyToNonPmem(addr, srcdata, write_size);
     }
-
+    // there is still data need to write to the next chunks
     if (len > remaining_space){
-        size_t need_new_chunk= ceil((len-remaining_space)/_plog_meta.chunk_size);
+        size_t need_new_chunk= ceil((len-remaining_space)/_plog_meta.chunk_size) + 1;
         for( size_t i = 0; i < need_new_chunk; i++){
             String chunkFileName = _genNewChunk();
             auto chunkStatus = _createThenMapFile(chunkFileName, _plog_meta.chunk_size);
+            _plog_meta.chunk_count++;
             if(!std::get<0>(chunkStatus).is2xxOK()){
                 return std::get<0>(chunkStatus);
             }
@@ -178,7 +183,7 @@ inline Status PmemLog::_append(char *srcdata, size_t len){
 
 
 std::tuple<Status, Payload> PmemLog::read(const PmemAddress &readAddr){
-    Payload payload;
+    Payload payload(Payload::DefaultAllocator);
     // checkout the effectiveness of start_offset
     if( readAddr.start_offset > _plog_meta.tail_offset){
         Status status = PmemStatuses::S403_Forbidden_Invalid_Offset;
@@ -190,18 +195,24 @@ std::tuple<Status, Payload> PmemLog::read(const PmemAddress &readAddr){
         return std::tuple<Status,Payload>(std::move(status), std::move(payload));
     }
     char * read_data = _read(readAddr.start_offset, readAddr.size);
+    payload.reserve(readAddr.size);
+    payload.seek(0);
     payload.write(read_data, readAddr.size);
+    payload.seek(0);
+    free(read_data);
     Status status = PmemStatuses::S200_OK_Found;
     return std::tuple<Status, Payload>(std::move(status), std::move(payload));
 }
 
-inline char* PmemLog::_read(uint64_t offset, uint64_t size){
+ char* PmemLog::_read(uint64_t offset, uint64_t size){
     K2LOG_D(log::pmem_storage, "Read data: offset =>{},size=>{}",offset,size);
-    char * buffer_data = (char *)malloc(size * sizeof (char));
+    char * buffer_data = (char *)malloc(size);
+    // calculate the size need read in the first chunk
     size_t remaining_chunk_space = _plog_meta.chunk_size - offset % _plog_meta.chunk_size;
-    size_t read_size = remaining_chunk_space >= size ? remaining_chunk_space: size;
+    size_t read_size = remaining_chunk_space <= size ? remaining_chunk_space: size;
     char * addr = _chunk_list[offset/_plog_meta.chunk_size].pmem_addr + offset % _plog_meta.chunk_size;
     memcpy(buffer_data, addr, read_size);
+    // there is still data in next chunks
     if(read_size < size){
         size_t need_read_chunk = ceil((size-read_size)/_plog_meta.chunk_size);
         int chunk_id = offset/_plog_meta.chunk_size + 1;
@@ -211,7 +222,7 @@ inline char* PmemLog::_read(uint64_t offset, uint64_t size){
             size_t tmp_read_size =  need_read_size >= _plog_meta.chunk_size? _plog_meta.chunk_size:need_read_size;
             memcpy(buffer_data + size - need_read_size ,chunk_addr,tmp_read_size);
             need_read_size -= tmp_read_size;
-        } 
+        }
     }
     return buffer_data;
 }

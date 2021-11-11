@@ -2,7 +2,7 @@ file(GLOB HEADERS "*.h")
 file(GLOB SOURCES "*.cpp")
 
 add_library(pmem_storage STATIC ${HEADERS} ${SOURCES})
-target_link_libraries (pmem_storage PRIVATE  Seastar::seastar pmem)
+target_link_libraries (pmem_storage PRIVATE k23si Seastar::seastar pmem)
 
 
 # export the library in the common k2Targets

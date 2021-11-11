@@ -138,11 +138,11 @@ struct PmemStatuses {
 // pmem storage engine config
 struct PmemEngineConfig{
 
-    // upper limit of pmem engine
-    uint64_t engine_capacity = 2UL << (3*10);
+    // upper limit of pmem engine, default 2GB
+    uint64_t engine_capacity = 2ULL << 30;
 
     // engine_path define the path of stored files 
-    char engine_path[128] = "/mnt/pmem-chogori/";
+    char engine_path[128] = "/mnt/pmem0/pmem-chogori/";
 
     // is_sealed: true means sealed, false means activated 
     bool is_sealed = false;
@@ -151,8 +151,8 @@ struct PmemEngineConfig{
     // when the plog is sealed or close
     uint64_t tail_offset = 0;
 
-    // control chunk size
-    uint64_t chunk_size = 8 * 1024 * 1024;
+    // control chunk size, default 8MB
+    uint64_t chunk_size = 8ULL << 20;
 
     // number of current chunks
     uint64_t chunk_count = 0;
@@ -171,22 +171,22 @@ struct PmemEngineConfig{
 class PmemEngine{
     public:
 
-    PmemEngine();
-
-    PmemEngine(const PmemEngine &) = delete;
-
-    PmemEngine & operator=(const PmemEngine &) = delete;
-
-    virtual ~PmemEngine() = 0;        
-    
     // open function is used to open an existing plog or create a plog
     // the parameter path only refers to the directory of plogs
     // the parameter plogId refers to the name of the plog 
-    virtual Status open(const PmemEngineConfig& ,PmemEngine **) = 0;
+    static Status open(PmemEngineConfig& ,PmemEngine **);
 
-    virtual Status init(const PmemEngineConfig &plog_meta) = 0;
+    PmemEngine(){}
 
-    virtual std::tuple<Status, PmemAddress> append(const Payload & ) = 0;
+    PmemEngine(const PmemEngine &) = delete;
+
+    PmemEngine &operator=(const PmemEngine &) = delete;
+
+    virtual ~PmemEngine(){}    
+
+    virtual Status init(PmemEngineConfig &plog_meta) = 0;
+
+    virtual std::tuple<Status, PmemAddress> append(Payload & ) = 0;
 
     virtual std::tuple<Status, Payload> read(const PmemAddress &) = 0;
 
@@ -195,8 +195,6 @@ class PmemEngine{
     virtual uint64_t getFreeSpace() = 0;
 
     virtual uint64_t getUsedSpace() = 0;
-
-    
 
 };
 

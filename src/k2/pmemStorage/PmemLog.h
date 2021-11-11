@@ -31,7 +31,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include <cmath>
 #include <k2/transport/Payload.h>
 #include <filesystem>
-#include "PmemEngineInterface.h"
+#include "PmemEngine.h"
 
 namespace k2{
 namespace log {
@@ -40,45 +40,46 @@ inline thread_local k2::logging::Logger pmem_storage("k2::pmem_storage");
 
 
 
-
-
 class PmemLog : public PmemEngine
 {
 public:
     PmemLog(){}
 
-    ~PmemLog(){
+    ~PmemLog() override{
         if (_is_pmem){
             _copyToPmem(_plog_meta_file.pmem_addr, (char*)&_plog_meta,sizeof(_plog_meta));
         }else{
             _copyToNonPmem(_plog_meta_file.pmem_addr, (char*)&_plog_meta,sizeof(_plog_meta));
         }
 
-    }        
+        pmem_unmap(_plog_meta_file.pmem_addr,sizeof(PmemEngineConfig));
+        for (auto & i : _chunk_list){
+            pmem_unmap(i.pmem_addr, _plog_meta.chunk_size);
+        }
+    }
 
-    Status open(const PmemEngineConfig &plog_meta, PmemEngine ** engine_ptr);
-    
-    Status init(const PmemEngineConfig &plog_meta);
 
-    std::tuple<Status, PmemAddress>  append(const Payload &payload);
+    Status init(PmemEngineConfig &plog_meta) override;
 
-    std::tuple<Status, Payload> read(const PmemAddress &readAddr);
+    std::tuple<Status, PmemAddress>  append(Payload &payload) override;
 
-    Status seal();
+    std::tuple<Status, Payload> read(const PmemAddress &readAddr) override;
 
-    uint64_t getFreeSpace();
+    Status seal() override;
 
-    uint64_t getUsedSpace();
+    uint64_t getFreeSpace() override;
 
-    
+    uint64_t getUsedSpace() override;
+
+
 
 private:
 
     // private _append function to write srcdata to plog
-    inline Status _append(char *srcdata, size_t len);
+    Status _append(char *srcdata, size_t len);
 
     // private _read function to read data from given offset and size
-    inline char* _read(uint64_t offset, uint64_t size);
+    char* _read(uint64_t offset, uint64_t size);
 
     // Map an existing file
     //   case 1 : file already exists
@@ -91,7 +92,7 @@ private:
         if ((pmem_addr = static_cast<char *>(pmem_map_file(
                         chunkFile.c_str(),
                         0,
-                        PMEM_FILE_CREATE,
+                        0,
                         0666, &mapped_len, &_is_pmem))) == NULL) {
             K2LOG_E(log::pmem_storage,"pmem map existing file fail!");
             Status status = PmemStatuses::S500_Internal_Server_Error_Map_Fail;
@@ -114,7 +115,7 @@ private:
         if ( si.available < fileSize){
             Status status = PmemStatuses::S507_Insufficient_Storage;
             return std::tuple<Status, char*>(std::move(status), NULL);
-        } 
+        }
 
         // create the target file
         char * pmem_addr;
@@ -135,8 +136,8 @@ private:
 
     // generate the new chunk name
     inline String _genNewChunk(){
-        return fmt::format("{}/{}_{}.plog",_plog_meta.engine_path,_plog_meta.plog_id,_active_chunk_id);
         _active_chunk_id++;
+        return fmt::format("{}/{}_{}.plog",_plog_meta.engine_path,_plog_meta.plog_id,_active_chunk_id);
     }
 
     // generate the metadata file name
@@ -147,7 +148,7 @@ private:
     // write data to file in nonpmem by memcpying method
     inline void _copyToNonPmem(char *dstaddr, char *srcaddr, size_t len){
         memcpy(dstaddr, srcaddr, len);
-        // Flush it 
+        // Flush it
         pmem_msync(dstaddr, len);
     }
 
@@ -155,7 +156,7 @@ private:
     inline void _copyToPmem(char *pmem_addr, char *srcaddr, size_t len){
         pmem_memcpy_persist(pmem_addr, srcaddr, len);
     }
-    
+
     struct FileInfo{
         String file_name;
         char * pmem_addr;
@@ -165,7 +166,7 @@ private:
     int _is_pmem;
 
     // the current activate chunk id
-    uint64_t _active_chunk_id = 0;
+    int _active_chunk_id = -1;
 
     // record all the information of chunks
     std::vector<FileInfo> _chunk_list;
