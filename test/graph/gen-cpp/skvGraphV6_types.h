@@ -902,12 +902,14 @@ void swap(ExecResponse &a, ExecResponse &b);
 std::ostream& operator<<(std::ostream& out, const ExecResponse& obj);
 
 typedef struct _Value__isset {
-  _Value__isset() : nVal(false), bVal(false), iVal(false), fVal(false), sVal(false) {}
+  _Value__isset() : nVal(false), bVal(false), iVal(false), fVal(false), sVal(false), wVal(false), hwVal(false) {}
   bool nVal :1;
   bool bVal :1;
   bool iVal :1;
   bool fVal :1;
   bool sVal :1;
+  bool wVal :1;
+  bool hwVal :1;
 } _Value__isset;
 
 class Value : public virtual ::apache::thrift::TBase {
@@ -920,7 +922,9 @@ class Value : public virtual ::apache::thrift::TBase {
           bVal(0),
           iVal(0),
           fVal(0),
-          sVal() {
+          sVal(),
+          wVal(0),
+          hwVal(0) {
   }
 
   virtual ~Value() noexcept;
@@ -933,6 +937,8 @@ class Value : public virtual ::apache::thrift::TBase {
   int64_t iVal;
   double fVal;
   std::string sVal;
+  int32_t wVal;
+  int16_t hwVal;
 
   _Value__isset __isset;
 
@@ -945,6 +951,10 @@ class Value : public virtual ::apache::thrift::TBase {
   void __set_fVal(const double val);
 
   void __set_sVal(const std::string& val);
+
+  void __set_wVal(const int32_t val);
+
+  void __set_hwVal(const int16_t val);
 
   bool operator == (const Value & rhs) const
   {
@@ -967,6 +977,14 @@ class Value : public virtual ::apache::thrift::TBase {
     if (__isset.sVal != rhs.__isset.sVal)
       return false;
     else if (__isset.sVal && !(sVal == rhs.sVal))
+      return false;
+    if (__isset.wVal != rhs.__isset.wVal)
+      return false;
+    else if (__isset.wVal && !(wVal == rhs.wVal))
+      return false;
+    if (__isset.hwVal != rhs.__isset.hwVal)
+      return false;
+    else if (__isset.hwVal && !(hwVal == rhs.hwVal))
       return false;
     return true;
   }

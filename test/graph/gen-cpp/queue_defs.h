@@ -33,7 +33,7 @@ struct MyWriteRequest {
     bool erase = false;
     //前提条件默认为None，暂时不做处理
     k2::dto::ExistencePrecondition precondition = k2::dto::ExistencePrecondition::None;
-    k2::SKVRecord record;
+    k2::dto::SKVRecord record;
     std::promise<k2::WriteResult> *prom;
 };
 

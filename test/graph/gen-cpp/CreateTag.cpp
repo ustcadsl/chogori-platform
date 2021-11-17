@@ -259,7 +259,8 @@ public:
             }
         }
         //已经构建了所有结点的增加请求
-        for(auto iter = request_list.begin(); iter != request_list.end(); iter++){
+        for(auto iter = request_list.begin(); iter != request_list.end(); iter++) {
+            std::cout << iter->record;
             pushQ(WriteRequestQ, std::move(*(iter))); 
         }
         bool isSucceed = true;
@@ -279,7 +280,7 @@ public:
             }
         }
         if(isSucceed){
-            _return.code = ErrorCode::SUCCEEDED;
+            
             //正常结束事务
             // struct MyEndTxnRequest {
             //     k2::dto::K23SI_MTR mtr;
@@ -298,6 +299,9 @@ public:
                 auto status = EndResult.status;
                 if (!status.is2xxOK()){
                     _return.code = ErrorCode::E_UNKNOWN;
+                }
+                else{
+                    _return.code = ErrorCode::SUCCEEDED;
                 }
                 return;
             }

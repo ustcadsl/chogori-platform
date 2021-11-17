@@ -1988,6 +1988,16 @@ void Value::__set_sVal(const std::string& val) {
   this->sVal = val;
 __isset.sVal = true;
 }
+
+void Value::__set_wVal(const int32_t val) {
+  this->wVal = val;
+__isset.wVal = true;
+}
+
+void Value::__set_hwVal(const int16_t val) {
+  this->hwVal = val;
+__isset.hwVal = true;
+}
 std::ostream& operator<<(std::ostream& out, const Value& obj)
 {
   obj.printTo(out);
@@ -2058,6 +2068,22 @@ uint32_t Value::read(::apache::thrift::protocol::TProtocol* iprot) {
           xfer += iprot->skip(ftype);
         }
         break;
+      case 6:
+        if (ftype == ::apache::thrift::protocol::T_I32) {
+          xfer += iprot->readI32(this->wVal);
+          this->__isset.wVal = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 7:
+        if (ftype == ::apache::thrift::protocol::T_I16) {
+          xfer += iprot->readI16(this->hwVal);
+          this->__isset.hwVal = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
       default:
         xfer += iprot->skip(ftype);
         break;
@@ -2100,6 +2126,16 @@ uint32_t Value::write(::apache::thrift::protocol::TProtocol* oprot) const {
     xfer += oprot->writeBinary(this->sVal);
     xfer += oprot->writeFieldEnd();
   }
+  if (this->__isset.wVal) {
+    xfer += oprot->writeFieldBegin("wVal", ::apache::thrift::protocol::T_I32, 6);
+    xfer += oprot->writeI32(this->wVal);
+    xfer += oprot->writeFieldEnd();
+  }
+  if (this->__isset.hwVal) {
+    xfer += oprot->writeFieldBegin("hwVal", ::apache::thrift::protocol::T_I16, 7);
+    xfer += oprot->writeI16(this->hwVal);
+    xfer += oprot->writeFieldEnd();
+  }
   xfer += oprot->writeFieldStop();
   xfer += oprot->writeStructEnd();
   return xfer;
@@ -2112,6 +2148,8 @@ void swap(Value &a, Value &b) {
   swap(a.iVal, b.iVal);
   swap(a.fVal, b.fVal);
   swap(a.sVal, b.sVal);
+  swap(a.wVal, b.wVal);
+  swap(a.hwVal, b.hwVal);
   swap(a.__isset, b.__isset);
 }
 
@@ -2121,6 +2159,8 @@ Value::Value(const Value& other45) {
   iVal = other45.iVal;
   fVal = other45.fVal;
   sVal = other45.sVal;
+  wVal = other45.wVal;
+  hwVal = other45.hwVal;
   __isset = other45.__isset;
 }
 Value& Value::operator=(const Value& other46) {
@@ -2129,6 +2169,8 @@ Value& Value::operator=(const Value& other46) {
   iVal = other46.iVal;
   fVal = other46.fVal;
   sVal = other46.sVal;
+  wVal = other46.wVal;
+  hwVal = other46.hwVal;
   __isset = other46.__isset;
   return *this;
 }
@@ -2140,6 +2182,8 @@ void Value::printTo(std::ostream& out) const {
   out << ", " << "iVal="; (__isset.iVal ? (out << to_string(iVal)) : (out << "<null>"));
   out << ", " << "fVal="; (__isset.fVal ? (out << to_string(fVal)) : (out << "<null>"));
   out << ", " << "sVal="; (__isset.sVal ? (out << to_string(sVal)) : (out << "<null>"));
+  out << ", " << "wVal="; (__isset.wVal ? (out << to_string(wVal)) : (out << "<null>"));
+  out << ", " << "hwVal="; (__isset.hwVal ? (out << to_string(hwVal)) : (out << "<null>"));
   out << ")";
 }
 
