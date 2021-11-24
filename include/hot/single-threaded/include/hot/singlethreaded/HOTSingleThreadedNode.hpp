@@ -2,7 +2,7 @@
 #define __HOT__SINGLE_THREADED__HOT_SINGLE_THREADED_NODE__
 
 #include <cstdint>
-#include <log.h>
+
 #include <idx/contenthelpers/OptionalValue.hpp>
 
 #include <hot/commons/BiNode.hpp>

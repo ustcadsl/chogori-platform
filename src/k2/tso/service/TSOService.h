@@ -39,6 +39,8 @@ Copyright(c) 2020 Futurewei Cloud
 namespace k2
 {
 
+using namespace dto;
+
 // TSOService is responsible to provide batches of K2 TimeStamps to TSO client upon request.
 class TSOService
 {
@@ -304,9 +306,9 @@ class TSOService::TSOWorker
 
     // the main API for TSO client to get timestamp in batch
     // batchSizeRequested may be partically fulfilled based on server side timestamp availability
-    dto::TimestampBatch GetTimestampFromTSO(uint16_t batchSizeRequested);
+    TimestampBatch GetTimestampFromTSO(uint16_t batchSizeRequested);
     // helper function to issue timestamp (or check error situation)
-    dto::TimestampBatch GetTimeStampFromTSOLessFrequentHelper(uint16_t batchSizeRequested, uint64_t nowMicroSecRounded);
+    TimestampBatch GetTimeStampFromTSOLessFrequentHelper(uint16_t batchSizeRequested, uint64_t nowMicroSecRounded);
 
     // private helper
     // helpers for updateWorkerControlInfo

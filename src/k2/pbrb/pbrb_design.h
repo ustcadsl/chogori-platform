@@ -19,11 +19,9 @@
 #include <k2/dto/Timestamp.h>
 #include <k2/dto/SKVRecord.h>
 #include <k2/dto/ControlPlaneOracle.h>
-#include <k2/dto/Collection.h>
-#include <k2/dto/K23SI.h>
-//#include <k2/indexer/IndexerInterface.h>
+#include <k2/indexer/IndexerInterface.h>
 
-//#include <k2/indexer/MapIndexer.h>
+#include <k2/indexer/MapIndexer.h>
 //#include <k2/indexer/HOTIndexer.h>
 #include "plog.h"
 #include "schema.h"
@@ -85,7 +83,7 @@ struct SchemaUMap {
 
 static uint32_t FTSize[256] = {
     0,                // NULL_T = 0,
-    128,    // STRING, 128 // NULL characters in string is OK
+    128,    // STRING, // NULL characters in string is OK
     sizeof(int16_t),  // INT16T,
     sizeof(int32_t),  // INT32T,
     sizeof(int64_t),  // INT64T,
@@ -230,9 +228,6 @@ private:
     Index *_indexer;
 
     uint32_t splitCnt = 0, evictCnt = 0;
-
-    //std::vector<void*> largeFieldValueVec;
-
 public:
     //SchemaMetaData tempSmeta;
     //int *watermark;
@@ -507,19 +502,11 @@ public:
             setNextPage(tail, newPage);
 
             _freePageList.pop_front();
-            K2LOG_D(log::pbrb, "Remaining _freePageList size:{}", _freePageList.size());
+            K2LOG_I(log::pbrb, "Remaining _freePageList size:{}", _freePageList.size());
 
             return newPage;
         }
     };
-
-    std::list<BufferPage *> getFreePageList() {
-        return _freePageList;
-    }
-
-    uint32_t getMaxPageNumber() {
-        return _maxPageNumber;
-    }
 
     float totalPageUsage() {
         return 1- ((float)_freePageList.size()/(float)_maxPageNumber);
@@ -587,12 +574,6 @@ public:
     //mark the row as unoccupied when evicting a hot row
     void removeHotRow(BufferPage *pagePtr, RowOffset offset);
 
-    //release the heap space owned by this hot row when using fixed field row
-    void releaseHeapSpace(BufferPage *pagePtr, void *rowAddr);
-
-    //release the heap space owned by this hot row when using payload row
-    void releasePayloadHeapSpace(BufferPage *pagePtr, void *rowAddr);
-
     //split a full page into two pages
     bool splitPage(BufferPage *pagePtr);
 
@@ -615,9 +596,9 @@ public:
 //    rowPosition pickRowToEviction(SchemaId schemaID, evictPolicy policy);
 
     //evict rows from PBRB cache in the background
-    //void doBackgroundPBRBGC(mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod);
+    void doBackgroundPBRBGC(mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod);
 
-    //void doBackgroundPageListGC(String schemaName, uint32_t schemaID, mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod);
+    void doBackgroundPageListGC(String schemaName, uint32_t schemaID, mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod);
 
     float getAveragePageListUsage(float& maxPageListUsage);
 
@@ -641,8 +622,8 @@ public:
             }
             else {
                 valuePtr = static_cast<void *>(buf);
-                //using FieldType = dto::FieldType;
-                //using TypeMismatchException = dto::TypeMismatchException;
+                using FieldType = dto::FieldType;
+                using TypeMismatchException = dto::TypeMismatchException;
                 K2_DTO_CAST_APPLY_FIELD_VALUE(printField, smd.schema->fields[idx], valuePtr, idx, smd.schema->fields[idx].name);
             }
         }
@@ -722,7 +703,7 @@ public:
     // Transport Functions:
     
     // PBRB Row -> SKVRecord
-    dto::SKVRecord *generateSKVRecordByRow(uint32_t schemaId, RowAddr rAddr, const String &collName, std::shared_ptr<dto::Schema> schema, bool isPayloadRow, double &totalReadCopyFeildms);
+    dto::SKVRecord *generateSKVRecordByRow(uint32_t schemaId, RowAddr rAddr, const String &collName, std::shared_ptr<dto::Schema> schema, bool isPayloadRow);
     dto::DataRecord *generateDataRecord(dto::SKVRecord *skvRecord, void *hotAddr);
     // getSchemaVer by hotAddr in SimpleSchema
     uint32_t getSchemaVer(void *hotAddr) {

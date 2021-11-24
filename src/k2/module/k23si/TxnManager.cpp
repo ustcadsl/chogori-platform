@@ -61,21 +61,6 @@ TxnManager::~TxnManager() {
     }
 }
 
-void TxnManager::_registerMetrics() {
-    _metric_groups.clear();
-    std::vector<sm::label_instance> labels;
-    labels.push_back(sm::label_instance("total_cores", seastar::smp::count));
-
-    _metric_groups.add_group("Nodepool", {
-        sm::make_gauge("active_txns", [this]{ return _transactions.size();}, sm::description("Number of active transactions"), labels),
-        sm::make_counter("committed_txns", _committedTxns, sm::description("Number of commited transactions"), labels),
-        sm::make_counter("aborted_txns", _abortedTxns, sm::description("Number of aborted transactions"), labels),
-        sm::make_counter("conflict_aborts", _conflictAborts, sm::description("Number of conflict aborts (incumbent abort due to push)"), labels),
-        sm::make_histogram("finalization_latency", [this]{ return _finalizationLatency.getHistogram();},
-                sm::description("Latency of Finalizations"), labels)
-    });
-}
-
 seastar::future<> TxnManager::start(const String& collectionName, dto::Timestamp rts, Duration hbDeadline, std::shared_ptr<Persistence> persistence) {
     K2LOG_D(log::skvsvr, "start");
     _cpo.init(_config.cpoEndpoint());
@@ -138,7 +123,6 @@ seastar::future<> TxnManager::start(const String& collectionName, dto::Timestamp
             });
     });
     _hbTimer.armPeriodic(_hbDeadline);
-    _registerMetrics();
 
     return seastar::make_ready_future();
 }
@@ -284,7 +268,6 @@ TxnManager::push(dto::K23SI_MTR&& incumbentMTR, dto::K23SI_MTR&& challengerMTR, 
                         K2LOG_W(log::skvsvr, "Unable to process force abort for non-existent txn due to {}", status);
                         return RPCResponse(std::move(status), dto::K23SITxnPushResponse{});
                     }
-                    _conflictAborts++; // incumbent force-abort due to push is a conflict abort
                     K2LOG_D(log::skvsvr, "txn push challenger won against non-existent txn");
                     return RPCResponse(dto::K23SIStatus::OK("challenger won in push"),
                                        dto::K23SITxnPushResponse{.incumbentFinalization = dto::EndAction::Abort,
@@ -298,7 +281,6 @@ TxnManager::push(dto::K23SI_MTR&& incumbentMTR, dto::K23SI_MTR&& challengerMTR, 
                             K2LOG_W(log::skvsvr, "Unable to process force abort for in-progress txn due to {}", status);
                             return RPCResponse(std::move(status), dto::K23SITxnPushResponse{});
                         }
-                        _conflictAborts++; // incumbent force-abort due to push is a conflict abort
                         return RPCResponse(dto::K23SIStatus::OK("challenger won in push"),
                                             dto::K23SITxnPushResponse{.incumbentFinalization = dto::EndAction::Abort,
                                                                       .allowChallengerRetry = true});
@@ -644,14 +626,12 @@ seastar::future<Status> TxnManager::_endPIPHelper(TxnRecord& rec) {
 seastar::future<Status> TxnManager::_commit(TxnRecord& rec) {
     K2LOG_D(log::skvsvr, "Setting status to Commit for {}", rec);
     rec.state = dto::TxnRecordState::Committed;
-    _committedTxns++;
     return _endHelper(rec);
 }
 
 seastar::future<Status> TxnManager::_abort(TxnRecord& rec) {
     K2LOG_D(log::skvsvr, "Setting status to Abort for {}", rec);
     rec.state = dto::TxnRecordState::Aborted;
-    _abortedTxns++;
     return _endHelper(rec);
 }
 
@@ -765,15 +745,11 @@ seastar::future<Status> TxnManager::_finalizeTransaction(TxnRecord& rec, FastDea
                 [this, &rec, deadline, &requests] (auto idx) {
                     auto& [request, krv] = requests[idx];
                     K2LOG_D(log::skvsvr, "Finalizing req={}", request);
-
-                    k2::OperationLatencyReporter reporter(_finalizationLatency); // for reporting metrics
-
                     return _cpo.partitionRequestByPVID<dto::K23SITxnFinalizeRequest,
                                                 dto::K23SITxnFinalizeResponse,
                                                 dto::Verbs::K23SI_TXN_FINALIZE>
                     (deadline, request, _config.finalizeRetries())
-                    .then([this, idx, &requests, reporter=std::move(reporter)](auto&& responsePair) mutable {
-
+                    .then([this, idx, &requests](auto&& responsePair) {
                         auto& [status, response] = responsePair;
                         auto& [request, krv] = requests[idx];
 
@@ -797,7 +773,6 @@ seastar::future<Status> TxnManager::_finalizeTransaction(TxnRecord& rec, FastDea
                                 return seastar::make_ready_future<>();
                             }
                         }
-                        reporter.report();
 
                         K2LOG_D(log::skvsvr, "Finalize request succeeded for {}", request);
                         return seastar::make_ready_future<>();

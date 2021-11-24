@@ -3,11 +3,11 @@
 #include<algorithm>
 #include<map>
 #include <k2/dto/Timestamp.h>
-#include "pbrb_design.h"
+
 namespace k2
 {
 
-//class PBRB;
+class PBRB;
 
 struct KVN {
     bool isCached[3] = {false};

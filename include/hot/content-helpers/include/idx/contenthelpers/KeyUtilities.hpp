@@ -41,7 +41,7 @@ template<typename KeyType> constexpr inline __attribute__((always_inline)) size_
 	return sizeof(KeyType);
 }
 
-constexpr size_t MAX_STRING_KEY_LENGTH = 64;
+constexpr size_t MAX_STRING_KEY_LENGTH = 255;
 template<> constexpr inline size_t getMaxKeyLength<char const *>() {
 	return MAX_STRING_KEY_LENGTH;
 }
@@ -105,37 +105,34 @@ template<> inline auto toFixSizedKey(char const * const & key) {
  * @return the byte wise representation of the key
  */
 
-template<typename KeyType> __attribute__((always_inline)) inline uint16_t interpretAsByteArray(KeyType const& key, uint8_t* byteArray) {
-	size_t bufferSize = sizeof(key);
-	memcpy(byteArray, &key, bufferSize);
-	return (uint16_t)bufferSize;
+template<typename KeyType> __attribute__((always_inline)) inline std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> interpretAsByteArray(KeyType const& key) {
+	auto bufferSize = sizeof(key);
+	std::unique_ptr<uint8_t[]> byteArray = std::make_unique<uint8_t[]>(bufferSize);
+	memcpy(byteArray.get(), &key, bufferSize);
+	return std::make_pair((uint16_t)bufferSize, std::move(byteArray));
 }
 
-template<> inline uint16_t interpretAsByteArray<k2::dto::Key>(k2::dto::Key const& Key, uint8_t* byteArray) {
+template<> inline std::pair<uint16_t, std::unique_ptr<uint8_t const []>> interpretAsByteArray<k2::dto::Key>(k2::dto::Key const& Key) {
 	//For testKey we return length of char array in first byte which means max number of characters in key is 254
 	// and byte array start from second position
-	size_t bufferSize = Key.schemaName.size() + Key.partitionKey.size() + Key.rangeKey.size() + 1; //Allocate actual size+1 for byte array to make sure the accuracy of keybyte comparing  
+	size_t bufferSize = Key.schemaName.size() + Key.partitionKey.size() + Key.rangeKey.size() + 1; //Allocate actual size+1 for byte array to make sure the accuracy of keybyte comparing 
+	std::unique_ptr<uint8_t[]> byteArray = std::make_unique<uint8_t[]>(bufferSize);
 	int index = 0;
-	if(!Key.schemaName.empty()) {
-		for (const char& c: Key.schemaName) {
+	for (const char& c: Key.schemaName) {
 		byteArray[index] = const_cast<uint8_t&>(reinterpret_cast<uint8_t const&>(c));
 		++index;
-		}
 	}
-	if(!Key.partitionKey.empty()) {
-		for (const char& c: Key.partitionKey) {
+	for (const char& c: Key.partitionKey) {
 		byteArray[index] = const_cast<uint8_t&>(reinterpret_cast<uint8_t const&>(c));
 		++index;
-		}
 	}
-	if(!Key.rangeKey.empty()) {
-		for (const char& c: Key.rangeKey) {
+	for (const char& c: Key.rangeKey) {
 		byteArray[index] = const_cast<uint8_t&>(reinterpret_cast<uint8_t const&>(c));
 		++index;
-		}
 	}
-	return (uint16_t)bufferSize;
+	return std::make_pair((uint16_t)bufferSize, std::move(byteArray));
 }
+
 }}
 
 #endif

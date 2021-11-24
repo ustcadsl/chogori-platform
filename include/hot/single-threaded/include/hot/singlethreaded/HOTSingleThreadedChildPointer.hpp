@@ -1,8 +1,6 @@
 #ifndef __HOT__SINGLE_THREADED__HOT_SINGLE_THREADED_CHILD_POINTER__
 #define __HOT__SINGLE_THREADED__HOT_SINGLE_THREADED_CHILD_POINTER__
 
-#include <log.h>
-
 #include <hot/commons/NodeParametersMapping.hpp>
 #include <hot/commons/NodeType.hpp>
 
@@ -101,7 +99,6 @@ inline HOTSingleThreadedChildPointer::HOTSingleThreadedChildPointer(hot::commons
 
 inline HOTSingleThreadedChildPointer::HOTSingleThreadedChildPointer(intptr_t leafValue)
 	: mPointer((leafValue << 1) | 1) {
-	K2LOG_D(k2::log::hot, "Create from leafValue {} mPointer={}", (void*)leafValue, (void*)mPointer);
 }
 
 inline HOTSingleThreadedChildPointer & HOTSingleThreadedChildPointer::operator=(const HOTSingleThreadedChildPointer &other) {

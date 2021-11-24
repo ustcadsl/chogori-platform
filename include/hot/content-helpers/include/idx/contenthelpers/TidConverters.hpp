@@ -4,7 +4,7 @@
 /** @author robert.binna@uibk.ac.at */
 
 #include <cstdint>
-#include <log.h>
+
 namespace idx { namespace contenthelpers {
 
 /**
@@ -19,9 +19,7 @@ template<typename ValueType>
 class TidToValueConverter {
 public:
 	__attribute__((always_inline)) inline ValueType operator()(intptr_t tid) {
-		K2LOG_D(k2::log::hot, "TID {} ValueType {}", tid, typeid(ValueType).name());
 		tid &= INTPTR_MAX;
-		K2LOG_D(k2::log::hot, "TID {} VALUE {}", tid, *reinterpret_cast<ValueType *>(&tid));
 		return *reinterpret_cast<ValueType *>(&tid);
 	}
 };
@@ -38,7 +36,6 @@ template<typename ValueType>
 class TidToValueConverter<ValueType *> {
 public:
 	__attribute__((always_inline)) inline ValueType *operator()(intptr_t tid) {
-		K2LOG_D(k2::log::hot, "Convert TID {} to valueType* {} value {}", (void*)tid, typeid(ValueType).name(), (void*)reinterpret_cast<ValueType *>(tid));
 		return reinterpret_cast<ValueType *>(tid);
 	}
 };
@@ -47,7 +44,6 @@ template<typename ValueType>
 class ValueToTidConverter {
 public:
 	__attribute__((always_inline)) inline intptr_t operator()(ValueType value) {
-		K2LOG_D(k2::log::hot, "Convert ValueType {} to tid {}", value, *reinterpret_cast<intptr_t *>(&value));
 		return *reinterpret_cast<intptr_t *>(&value);
 	}
 };
@@ -56,7 +52,6 @@ template<typename ValueType>
 class ValueToTidConverter<ValueType *> {
 public:
 	__attribute__((always_inline)) inline intptr_t operator()(ValueType *value) {
-		K2LOG_D(k2::log::hot, "Convert ValueType* {} to tid {}", (void*)value, (void*)reinterpret_cast<intptr_t>(value));
 		return reinterpret_cast<intptr_t>(value);
 	}
 };

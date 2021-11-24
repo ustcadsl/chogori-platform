@@ -69,7 +69,7 @@ bool K23SIPartitionModule::_validateRequestPartition(const RequestT& req) const 
 }
 
 template <typename RequestT>
-Status K23SIPartitionModule::_validateStaleWrite(const RequestT& request, const KeyValueNode& KVNode) {
+Status K23SIPartitionModule::_validateStaleWrite(const RequestT& request, KeyValueNode KVNode) {
     if (!_validateRetentionWindow(request.mtr.timestamp)) {
         // the request is outside the retention window
         return dto::K23SIStatus::AbortRequestTooOld("write request is outside retention window");
@@ -94,13 +94,14 @@ Status K23SIPartitionModule::_validateStaleWrite(const RequestT& request, const 
     // if a txn committed a value at time T5, then we must also assume they did a read at time T5
     // NB(3) This code does not care if there is a WI. If there is a WI, then this check can help avoid
     // an unnecessary PUSH.
-    dto::DataRecord* latestRec = const_cast<k2::KeyValueNode&>(KVNode).begin();
+
+    dto::DataRecord* latestRec = KVNode.begin();
     //NodeVerMetadata verMD = KVNode.getNodeVerMetaData(0, pbrb);
-    if (const_cast<k2::KeyValueNode&>(KVNode).is_inmem(0)){
+    if (KVNode.is_inmem(0)){
         latestRec = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(latestRec));
     }
-
-    //while(latestRec!=nullptr && latestRec->status == dto::DataRecord::WriteIntent) latestRec=latestRec->prevVersion;
+        
+    //while(latestRec != nullptr && latestRec->status == dto::DataRecord::WriteIntent) latestRec=latestRec->prevVersion;
     if (latestRec != nullptr && latestRec->status == dto::DataRecord::Committed &&
         request.mtr.timestamp.compareCertain(latestRec->timestamp) <= 0) {
         // newest version is the latest committed and its newer than the request
@@ -148,7 +149,7 @@ Status K23SIPartitionModule::_validateReadRequest(const RequestT& request) const
         // server does not have schema
         return dto::K23SIStatus::OperationNotAllowed("schema does not exist in read-type request");
     }
-    K2LOG_D(log::skvsvr, "Validate Read Request SUCCESS");
+
     return dto::K23SIStatus::OK;
 }
 
@@ -172,15 +173,6 @@ Status K23SIPartitionModule::_validateWriteRequest(const dto::K23SIWriteRequest&
         return dto::K23SIStatus::OperationNotAllowed("schema version does not exist");
     }
 
-    if (auto* twim = _twimMgr.getTxnWIMeta(request.mtr.timestamp); twim != nullptr) {
-        if (twim->isAborted()) {
-            return dto::K23SIStatus::AbortConflict("The transaction has been aborted");
-        }
-        else if (twim->isCommitted()) {
-            return dto::K23SIStatus::BadParameter("The transaction has been committed");
-        }
-    }
-
     return _validateStaleWrite(request, KVNode);
 }
 // ********************** Validators
@@ -189,10 +181,8 @@ K23SIPartitionModule::K23SIPartitionModule(dto::CollectionMetadata cmeta, dto::P
     _cmeta(std::move(cmeta)),
     _partition(std::move(partition), _cmeta.hashScheme) {
     K2LOG_I(log::skvsvr, "---------Partition: {}", _partition);//////
-    pbrb = new PBRB(3000, &_retentionTimestamp, &indexer);//////8192 //32768
-#ifdef OUTPUT_ACCESS_PATTERN  
-    ofile.open("RWresults.txt");
-#endif
+    pbrb = new PBRB(500, &_retentionTimestamp, &indexer);//////8192
+
     K2LOG_I(log::skvsvr, "ctor for cname={}, part={}", _cmeta.name, _partition);
 }
 
@@ -203,50 +193,27 @@ seastar::future<> K23SIPartitionModule::_registerVerbs() {
 
     RPC().registerRPCObserver<dto::K23SIReadRequest, dto::K23SIReadResponse>
     (dto::Verbs::K23SI_READ, [this](dto::K23SIReadRequest&& request) {
-        k2::OperationLatencyReporter reporter(_readLatency); // for reporting metrics
-        return handleRead(std::move(request), FastDeadline(_config.readTimeout()))
-               .then([this, reporter=std::move(reporter)](auto&& response) mutable {
-                    reporter.report();
-                    return std::move(response);
-               });
+        return handleRead(std::move(request), FastDeadline(_config.readTimeout()));
     });
 
     RPC().registerRPCObserver<dto::K23SIQueryRequest, dto::K23SIQueryResponse>
     (dto::Verbs::K23SI_QUERY, [this](dto::K23SIQueryRequest&& request) {
-        k2::OperationLatencyReporter reporter(_queryPageLatency); // for reporting metrics
-        return handleQuery(std::move(request), dto::K23SIQueryResponse{}, FastDeadline(_config.readTimeout()))
-                .then([this, reporter=std::move(reporter)] (auto&& response) mutable {
-                    reporter.report();
-                    return std::move(response);
-               });
+        return handleQuery(std::move(request), dto::K23SIQueryResponse{}, FastDeadline(_config.readTimeout()));
     });
 
     RPC().registerRPCObserver<dto::K23SIWriteRequest, dto::K23SIWriteResponse>
     (dto::Verbs::K23SI_WRITE, [this](dto::K23SIWriteRequest&& request) {
-        k2::OperationLatencyReporter reporter(_writeLatency); // for reporting metrics
         return handleWrite(std::move(request), FastDeadline(_config.writeTimeout()))
-            .then([this, reporter=std::move(reporter)] (auto&& resp) mutable {
-                return _respondAfterFlush(std::move(resp))
-                        .then([this, reporter=std::move(reporter)] (auto&& response) mutable {
-                            reporter.report();
-                            return std::move(response);
-                        });
-            });
+            .then([this] (auto&& resp) { return _respondAfterFlush(std::move(resp));});
     });
 
     RPC().registerRPCObserver<dto::K23SITxnPushRequest, dto::K23SITxnPushResponse>
     (dto::Verbs::K23SI_TXN_PUSH, [this](dto::K23SITxnPushRequest&& request) {
-        k2::OperationLatencyReporter reporter(_pushLatency); // for reporting metrics
-        return handleTxnPush(std::move(request))
-                .then([this, reporter=std::move(reporter)] (auto&& response) mutable {
-                    reporter.report();
-                    return std::move(response);
-               });
+        return handleTxnPush(std::move(request));
     });
 
     RPC().registerRPCObserver<dto::K23SITxnEndRequest, dto::K23SITxnEndResponse>
     (dto::Verbs::K23SI_TXN_END, [this](dto::K23SITxnEndRequest&& request) {
-        K2LOG_D(log::skvsvr, "Enter End Observer");
         return handleTxnEnd(std::move(request))
             .then([this] (auto&& resp) { return _respondAfterFlush(std::move(resp));});
     });
@@ -259,9 +226,7 @@ seastar::future<> K23SIPartitionModule::_registerVerbs() {
     RPC().registerRPCObserver<dto::K23SITxnFinalizeRequest, dto::K23SITxnFinalizeResponse>
     (dto::Verbs::K23SI_TXN_FINALIZE, [this](dto::K23SITxnFinalizeRequest&& request) {
         return handleTxnFinalize(std::move(request))
-                .then([this] (auto&& resp) {
-                    return _respondAfterFlush(std::move(resp));
-                });
+            .then([this] (auto&& resp) { return _respondAfterFlush(std::move(resp));});
     });
 
     RPC().registerRPCObserver<dto::K23SIPushSchemaRequest, dto::K23SIPushSchemaResponse>
@@ -321,37 +286,7 @@ void K23SIPartitionModule::_unregisterVerbs() {
     api_server.deregisterAPIObserver("InspectAllKeys");
 }
 
-void K23SIPartitionModule::_registerMetrics() {
-    _metric_groups.clear();
-    std::vector<sm::label_instance> labels;
-    labels.push_back(sm::label_instance("total_cores", seastar::smp::count));
-
-    _metric_groups.add_group("Nodepool", {
-        sm::make_gauge("indexer_keys",[this]{ return _indexer.size();},
-                        sm::description("Number of keys in indexer"), labels),
-        sm::make_counter("total_WI", _totalWI, sm::description("Number of WIs created"), labels),
-        sm::make_counter("finalized_WI", _finalizedWI, sm::description("Number of WIs finalized"), labels),
-        sm::make_gauge("record_versions", _recordVersions, sm::description("Number of record versions over all records"), labels),
-        sm::make_counter("total_committed_payload", _totalCommittedPayload, sm::description("Total size of committed payloads"), labels),
-        sm::make_histogram("read_latency", [this]{ return _readLatency.getHistogram();},
-                sm::description("Latency of Read Operations"), labels),
-        sm::make_histogram("write_latency", [this]{ return _writeLatency.getHistogram();},
-                sm::description("Latency of Write Operations"), labels),
-        sm::make_histogram("query_page_latency", [this]{ return _queryPageLatency.getHistogram();},
-                sm::description("Latency of Query Page Operations"), labels),
-        sm::make_histogram("push_latency", [this]{ return _pushLatency.getHistogram();},
-                sm::description("Latency of Pushes"), labels),
-        sm::make_histogram("query_page_scans", [this]{ return _queryPageScans.getHistogram();},
-                sm::description("Number of records scanned by query page operations"), labels),
-        sm::make_histogram("query_page_returns", [this]{ return _queryPageReturns.getHistogram();},
-                sm::description("Number of records returned by query page operations"), labels)
-    });
-}
-
 seastar::future<> K23SIPartitionModule::start() {
-
-    _registerMetrics();
-
     _cpo.init(_config.cpoEndpoint());
     if (_cmeta.retentionPeriod < _config.minimumRetentionPeriod()) {
         K2LOG_W(log::skvsvr,
@@ -377,7 +312,8 @@ seastar::future<> K23SIPartitionModule::start() {
                         _retentionTimestamp = ts - _cmeta.retentionPeriod;
                         _txnMgr.updateRetentionTimestamp(_retentionTimestamp);
                         _twimMgr.updateRetentionTimestamp(_retentionTimestamp);
-                        doBackgroundPBRBGC(pbrb, _indexer, _retentionTimestamp,  _cmeta.retentionPeriod); //////
+                        // Trigger background PBRB GC according to the new _retentionTimestamp
+                        pbrb->doBackgroundPBRBGC(_indexer, _retentionTimestamp,  _cmeta.retentionPeriod); 
                     });
             });
             _retentionUpdateTimer.armPeriodic(_config.retentionTimestampUpdateInterval());
@@ -458,7 +394,6 @@ void K23SIPartitionModule::_scanAdvance(IndexerIterator& it, bool reverseDirecti
 // Helper for handleQuery. Returns an iterator to start the scan at, accounting for
 // desired schema and (eventually) reverse direction scan
 IndexerIterator K23SIPartitionModule::_initializeScan(const dto::Key& start, bool reverse, bool exclusiveKey) {
-    K2LOG_D(log::skvsvr, "Initialize {} scanner with start key {}, exclusive key = {}", reverse, start, exclusiveKey);
     auto key_it = _indexer.lower_bound(start);
     // For reverse direction scan, key_it may not be in range because of how lower_bound works, so fix that here.
     // IF start key is empty, it means this reverse scan start from end of table OR
@@ -467,9 +402,7 @@ IndexerIterator K23SIPartitionModule::_initializeScan(const dto::Key& start, boo
     // ELSE IF lower_bound returns a key bigger than start, find the first key not bigger than start;
     if (reverse) {
         if (start.partitionKey == "" || key_it == _indexer.end()) {
-            K2LOG_D(log::skvsvr, "Empty partition key or end iterator");
             key_it = _indexer.last();
-            K2LOG_D(log::skvsvr, "Empty partition key or end iterator end");
         } else if ((_indexer.extractFromIter(key_it))->get_key() == start && exclusiveKey) {
             _scanAdvance(key_it, reverse, start.schemaName);
         } else if ((_indexer.extractFromIter(key_it))->get_key() > start) {
@@ -587,7 +520,6 @@ seastar::future<std::tuple<Status, dto::K23SIQueryResponse>>
 K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQueryResponse&& response, FastDeadline deadline) {
     K2LOG_D(log::skvsvr, "Partition: {}, received query {}", _partition, request);
 
-    uint64_t numScans = 0;
     Status validateStatus = _validateReadRequest(request);
     if (!validateStatus.is2xxOK()) {
         return RPCResponse(std::move(validateStatus), dto::K23SIQueryResponse{});
@@ -599,16 +531,13 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
     IndexerIterator key_it = _initializeScan(request.key, request.reverseDirection, request.exclusiveKey);
     for (; !_isScanDone(key_it, request, response.results.size());
                         _scanAdvance(key_it, request.reverseDirection, request.key.schemaName)) {
-        ++numScans;
         auto& KVNode = *_indexer.extractFromIter(key_it);
-        //dto::DataRecord* record = KVNode.get_datarecord(request.mtr.timestamp);
         int order;
         dto::DataRecord* record = KVNode.get_datarecord(request.mtr.timestamp, order, pbrb);
         // TODO: Use hot record.
         NodeVerMetadata verMD = KVNode.getNodeVerMetaData(order, pbrb);
         if (verMD.isHot)
-            record = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(record));
-
+            record = static_cast<DataRecord *>(pbrb->getPlogAddrRow(record));
         K2LOG_D(log::skvsvr, "Scan at key {}", KVNode.get_key());
         bool needPush = record != nullptr && record->status == dto::DataRecord::WriteIntent && record->timestamp.compareCertain(request.mtr.timestamp) < 0;
         K2LOG_D(log::skvsvr, "Need push={}", needPush);
@@ -667,9 +596,6 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
 
         K2LOG_D(log::skvsvr, "About to PUSH in query request");
         request.key = (_indexer.extractFromIter(key_it))->get_key(); // if we retry, do so with the key we're currently iterating on
-        // add metrics
-        _queryPageScans.add(numScans);
-        _queryPageReturns.add(response.results.size());
         return _doPush(request.key, record->timestamp, request.mtr, deadline)
         .then([this, request=std::move(request),
                         resp=std::move(response), deadline](auto&& retryChallenger) mutable {
@@ -702,30 +628,40 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
 
     response.nextToScan = _getContinuationToken(key_it, request, response, response.results.size());
     K2LOG_D(log::skvsvr, "nextToScan: {}, exclusiveToken: {}", response.nextToScan, response.exclusiveToken);
-
-    _queryPageScans.add(numScans);
-    _queryPageReturns.add(response.results.size());
     return RPCResponse(dto::K23SIStatus::OK("Query success"), std::move(response));
 }
 
+
 seastar::future<std::tuple<Status, dto::K23SIReadResponse>>
 K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline deadline) {
-    K2LOG_D(log::skvsvr, "Partition: {}, received read {}", _partition, request);
+    K2LOG_D(log::skvsvr, "------Partition: {}, received read {}", _partition, request);
+
     Status validateStatus = _validateReadRequest(request);
     if (!validateStatus.is2xxOK()) {
         return RPCResponse(std::move(validateStatus), dto::K23SIReadResponse{});
     }
 
 #ifdef READ_BREAKDOWN
-    clock_t _readStart = clock();//////
+    clock_t _readStart = clock();
+    K2LOG_D(log::skvsvr, "read from txn {}, updates read cache for key {}",
+                request.mtr, request.key);
+    // update the read cache to lock out any future writers which may attempt to modify the key range
+    // before this read's timestamp
+    clock_t  _updateCacheStart = clock();
+    _readCache->insertInterval(request.key, request.key, request.mtr.timestamp);
+    clock_t  _updateCacheEnd = clock();
+    double UpdateCachems = (double)(_updateCacheEnd-_updateCacheStart)/CLOCKS_PER_SEC*1000; //////
+
+    clock_t _indexStart = clock(); //////
     // find the record we should return
     IndexerIterator it = _indexer.find(request.key);
     if(it == _indexer.end()) {
         return _makeReadOK(nullptr);
     }
     KeyValueNode* nodePtr = _indexer.extractFromIter(it);
-    clock_t  _indexEnd = clock(); ////// 
-    
+
+    clock_t  _indexEnd = clock(); //////
+    double Indexms = (double)(_indexEnd-_indexStart)/CLOCKS_PER_SEC*1000; //////
     int indexFlag = 0;
     String SName = request.key.schemaName;
     if(SName == "item"){
@@ -755,41 +691,30 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     }else if(SName == "order"){
         readCount[8]++;
         indexFlag=8;
-    }else if(SName == "idx_customer_name"){
-        writeCount[9]++;
-        indexFlag=9;
-    }else if(SName == "idx_order_customer"){
-        writeCount[10]++;
-        indexFlag=10;
     }else{
-        readCount[11]++;
-        indexFlag=11;
+        readCount[9]++;
+        indexFlag=9;
     }
-
-    K2LOG_D(log::skvsvr, "read from txn {}, updates read cache for key {}",
-                request.mtr, request.key);
-    // update the read cache to lock out any future writers which may attempt to modify the key range
-    // before this read's timestamp
-    clock_t  _updateCacheStart = clock();
-    _readCache->insertInterval(request.key, request.key, request.mtr.timestamp, totalSerachTreems[indexFlag], totalUpdateTreems[indexFlag]);
-    clock_t  _updateCacheEnd = clock();
-
-    totalIndexms[indexFlag] += (double)(_indexEnd-_readStart)/CLOCKS_PER_SEC*1000; //////
-    totalUpdateCachems[indexFlag] += (double)(_updateCacheEnd-_updateCacheStart)/CLOCKS_PER_SEC*1000; //////
+    totalIndexms[indexFlag] += Indexms; //////
+    totalUpdateCachems[indexFlag] += UpdateCachems;
     // If there is WI, if same TX return WI or set needPush true
     // else return right version or null&&needPush = false
+    // DataRecord* rec = _getDataRecordForRead(versions, request.mtr.timestamp);
+    // bool needPush = !rec ? _checkPushForRead(versions, request.mtr.timestamp) : false;
+
     clock_t _recordStart = clock(); //////
     int order;
     K2LOG_D(log::skvsvr, "Ready to read datarecord");
-    dto::DataRecord* rec = nodePtr->get_datarecord(request.mtr.timestamp, order, pbrb);
-    clock_t  _recordEnd = clock(); ////// 
-    totalGetAddrms[indexFlag] += (double)(_recordEnd-_recordStart)/CLOCKS_PER_SEC*1000; //////
-    //nodePtr->printAll();
+    DataRecord* rec = nodePtr->get_datarecord(request.mtr.timestamp, order, pbrb);
+    clock_t  _recordEnd = clock(); //////
+    double Recordms = (double)(_recordEnd-_recordStart)/CLOCKS_PER_SEC*1000; //////
+    totalGetAddrms[indexFlag] += Recordms; //////
+    nodePtr->printAll();
 
     if (rec != nullptr)
         K2LOG_D(log::skvsvr, "Node info ====== Timestamp: {}; Order: {}, SchemaVersion: {}", request.mtr.timestamp, order, rec->value.schemaVersion);
-    //DataRecord* result = rec;
-    dto::DataRecord* result = nullptr;
+    
+    DataRecord* result = nullptr;
     if (rec != nullptr) {
         
         if (order == -1) {
@@ -807,6 +732,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             auto schemaIt = _schemas.find(request.key.schemaName);
             K2ASSERT(log::skvsvr, schemaIt != _schemas.end(), "Found Schema: {}", schemaIt->first);
             uint32_t sVer;
+
             // datarecord
             if (!nodePtr->is_inmem(order))
                 sVer = rec->value.schemaVersion;
@@ -817,26 +743,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             auto schemaVer = schemaIt->second.find(sVer);
             K2ASSERT(log::skvsvr, schemaVer != schemaIt->second.end(), "sVer: {}", sVer);
             dto::Schema& schema = *(schemaVer->second);
-
-        #ifdef OUTPUT_ACCESS_PATTERN
-            isRunBenchMark = 1;
-            if(request.key.schemaName=="customer" && isRunBenchMark){
-                map<dto::Key, int>::iterator result = writeRecordMap.find(request.key);
-                if(result != writeRecordMap.end()){
-                    ofile<<count++<<' '<<'R'<<' '<<result->second<<endl;
-                }else{
-                    map<dto::Key, int>::iterator resultR = readRecordMap.find(request.key);
-                    if(resultR != readRecordMap.end()){
-                        ofile<<count++<<' '<<'R'<<' '<<resultR->second<<endl;
-                    }else{
-                        readRecordMap.insert(pair<dto::Key, int>(request.key, keySequence));
-                        ofile<<count++<<' '<<'R'<<' '<<keySequence<<endl;
-                        keySequence++;
-                    }
-                }
-                //K2LOG_I(log::skvsvr, "-request.key: {}, order:{}, schemaName: {}, schemaVer:{}", request.key, order, request.key.schemaName, schemaVer->first);
-            }
-        #endif
+            K2LOG_I(log::skvsvr, "------request.key: {}, schemaName: {}, schemaVer:{}", request.key, request.key.schemaName, schemaVer->first);
 
             uint32_t SMapIndex = pbrb->mapCachedSchema(request.key.schemaName, schemaVer->first);
             if(SMapIndex == 0){ //add a new schema to PBRB schema metadata
@@ -854,6 +761,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             // insert the SKV record to the PBRB cache, return the RAM address of the cached slot
             SMapIndex--;
             K2LOG_D(log::skvsvr, "SMAPIDX: {}", SMapIndex);
+            // pbrb->printRowsBySchema(SMapIndex);
             if (!nodePtr->is_inmem(order)) {
                 // case 2: cold version (in kvnode)
                 K2LOG_D(log::skvsvr, "Case 2: Cold Version in KVNode");
@@ -861,101 +769,98 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex); 
                 BufferPage *pagePtr = retVal.first;
                 RowOffset rowOffset = retVal.second;
+                /*if (pagePtr==nullptr) {
+                    pbrb->doBackgroundPageListGC(request.key.schemaName, SMapIndex, _indexer, _retentionTimestamp,  _cmeta.retentionPeriod); 
+                    retVal = pbrb->findCacheRowPosition(SMapIndex);
+                    pagePtr = retVal.first;
+                    rowOffset = retVal.second;
+                }*/
+        if (pagePtr!=nullptr) { //find empty slot
                 clock_t  _findPositionEnd = clock(); //////
                 double Positionms = (double)(_findPositionEnd - _findPositionStart)/CLOCKS_PER_SEC*1000; //////
                 totalFindPositionms[indexFlag] += Positionms; //////
-                //if (pagePtr==nullptr) {
-                //    pbrb->doBackgroundPageListGC(request.key.schemaName, SMapIndex, _indexer, _retentionTimestamp,  _cmeta.retentionPeriod); 
-                //    retVal = pbrb->findCacheRowPosition(SMapIndex);
-                //    pagePtr = retVal.first;
-                //    rowOffset = retVal.second;
-                //}
-        if (pagePtr!=nullptr) { //find empty slot
-                
+
                 clock_t  _Headerstart = clock(); //////
                 auto rowAddr = pbrb->cacheRowHeaderFrom(SMapIndex, pagePtr, rowOffset, rec);
                 K2LOG_D(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
-                clock_t  _HeaderEnd = clock(); ////// 
-                totalHeaderms[indexFlag] += (double)(_HeaderEnd - _Headerstart)/CLOCKS_PER_SEC*1000; //////
-
+                clock_t  _HeaderEnd = clock(); //////
+                double Headerms = (double)(_HeaderEnd - _Headerstart)/CLOCKS_PER_SEC*1000; //////
+                totalHeaderms[indexFlag] += Headerms; //////
+                /////////update waterMark/////////
+                //pbrb->doBackgroundPBRBGC(_indexer, _retentionTimestamp,  _cmeta.retentionPeriod);
+                ////////////////////////
                 #ifdef FIXEDFIELD_ROW
                 // copy fields
                 for(uint32_t j=0; j < schema.fields.size(); j++){
                     clock_t _copyFieldStart = clock();
                     if (rec->value.excludedFields.size() && rec->value.excludedFields[j]) {
                         // A value of NULL in the record is treated the same as if the field doesn't exist in the record
-                        K2LOG_I(log::pbrb, "######A value of NULL in the record");
                         continue;
                     }
                     bool success = false;
                     _cacheFieldValueToPBRB(SMapIndex, schema.fields[j], rec->value.fieldData, success, pagePtr, rowOffset, j);
                     clock_t  _copyFieldEnd = clock(); //////
-                    totalCopyFeildms[indexFlag] += (double)(_copyFieldEnd-_copyFieldStart)/CLOCKS_PER_SEC*1000; //////
+                    double Copyms = (double)(_copyFieldEnd-_copyFieldStart)/CLOCKS_PER_SEC*1000; //////
+                    totalCopyFeildms[indexFlag] += Copyms; //////
                 }
                 #endif
 
                 #ifdef PAYLOAD_ROW
                     clock_t _copyFieldStart = clock();
                     pbrb->cacheRowPayloadFromDataRecord(SMapIndex, pagePtr, rowOffset, rec->value.fieldData);//////
-                    clock_t  _copyFieldEnd = clock(); ////// 
-                    totalCopyFeildms[indexFlag] += (double)(_copyFieldEnd-_copyFieldStart)/CLOCKS_PER_SEC*1000; //////; //////
+                    clock_t  _copyFieldEnd = clock(); //////
+                    double Copyms = (double)(_copyFieldEnd-_copyFieldStart)/CLOCKS_PER_SEC*1000; //////
+                    totalCopyFeildms[indexFlag] += Copyms; //////
                 #endif
 
                 pbrb->setRowBitMapPage(pagePtr, rowOffset);
-                // update KVNode of indexer.
+                // update indexer.
                 clock_t _updateKBNStart = clock();
                 void *hotAddr = pbrb->getAddrByPageAndOffset(SMapIndex, pagePtr, rowOffset);
                 int returnValue= nodePtr->insert_hot_datarecord(rec->timestamp, static_cast<dto::DataRecord *>(hotAddr));
                 K2LOG_D(log::skvsvr, "Cache request.key: {} in KVNode and PBRB, schemaID:{}, returnValue:{}, order:{}", request.key, SMapIndex, returnValue, order);
                 K2LOG_D(log::skvsvr, "Stored hot address: {} in node", hotAddr);
-                clock_t  _updateKVNEnd = clock(); ////// 
-                totalUpdateKVNodems[indexFlag] += (double)(_updateKVNEnd-_updateKBNStart)/CLOCKS_PER_SEC*1000; //////
+                clock_t  _updateKVNEnd = clock(); //////
+                double UpdateKVNms = (double)(_updateKVNEnd-_updateKBNStart)/CLOCKS_PER_SEC*1000; //////
+                totalUpdateKVNodems[indexFlag] += UpdateKVNms; //////
                 //nodePtr->printAll();
-                //pbrb->printRowsBySchema(SMapIndex);
-                //#ifdef FIXEDFIELD_ROW
-                //    pbrb->printFieldsRow(pagePtr, rowOffset);
-                //#endif
+                // pbrb->printRowsBySchema(SMapIndex);
+                /*#ifdef FIXEDFIELD_ROW
+                    pbrb->printFieldsRow(pagePtr, rowOffset);
+                #endif*/
                 rec->value.fieldData.seek(0);
         }
                 result = rec;
+                //(void) seastar::sleep(500ns); // To simulate reading from NVM
                 NvmReadNum[indexFlag]++;
                 clock_t _readNVMtart = clock();
                 
                 clock_t  _readNVMEnd = clock(); //////
-                totalReadNVMrus[indexFlag] += (double)(_readNVMEnd-_readNVMtart)/CLOCKS_PER_SEC*1000; //////
+                double readNVMms = (double)(_readNVMEnd-_readNVMtart)/CLOCKS_PER_SEC*1000; //////
+                totalReadNVMrus[indexFlag] += readNVMms; //////
                 //K2LOG_I(log::skvsvr, "Case 2: Read from NVM, sleep:{} us, NvmReadNum:{}", (double)(_End-_Start), NvmReadNum);
-                //(void) seastar::sleep(500ns); // To simulate reading from NVM
                 //std::this_thread::sleep_for( std::chrono::nanoseconds(5000) );
             }
             else {
                 // case 3: hot version
                 pbrbHitNum[indexFlag]++;
-                //K2LOG_I(log::skvsvr, "Case 3: Hot Version in KVNode, pbrbHitNum:{}", pbrbHitNum[indexFlag]);
+                //K2LOG_I(log::skvsvr, "Case 3: Hot Version in KVNode, pbrbHitNum:{}", pbrbHitNum);
                 //struct timespec _readPBRBtartNS;
                 //clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&_readPBRBtartNS);
                 clock_t _readPBRBtart = clock();
                 void *hotAddr = static_cast<void *>(rec);
                 #ifdef PAYLOAD_ROW
-                    dto::SKVRecord *sRec = pbrb->generateSKVRecordByRow(SMapIndex, hotAddr, request.collectionName, schemaVer->second, true, totalReadCopyFeildms[indexFlag]);
-                    clock_t _genRecordStart = clock();
+                    dto::SKVRecord *sRec = pbrb->generateSKVRecordByRow(SMapIndex, hotAddr, request.collectionName, schemaVer->second, true);
                     result = pbrb->generateDataRecord(sRec, hotAddr);
                     result->value.fieldData.seek(0);
-                    clock_t  _genRecordEnd = clock(); //////
-                    totalGenRecordms[indexFlag] += (double)(_genRecordEnd-_genRecordStart)/CLOCKS_PER_SEC*1000; //////
                 #endif
                 
                 #ifdef FIXEDFIELD_ROW
-                    dto::SKVRecord *sRec = pbrb->generateSKVRecordByRow(SMapIndex, hotAddr, request.collectionName, schemaVer->second, false, totalReadCopyFeildms[indexFlag]);
-                    clock_t _genRecordStart = clock();
+                    dto::SKVRecord *sRec = pbrb->generateSKVRecordByRow(SMapIndex, hotAddr, request.collectionName, schemaVer->second, false);
                     result = pbrb->generateDataRecord(sRec, hotAddr);
-                    clock_t  _genRecordEnd = clock(); //////
-                    totalGenRecordms[indexFlag] += (double)(_genRecordEnd-_genRecordStart)/CLOCKS_PER_SEC*1000; //////
                 #endif
-
-                ////////////////////TODO: solve the bug "Deserialization of payload in SKVRecord failed"
                 //result = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(rec));
-                //nodePtr->printAll();
-
+                nodePtr->printAll();
                 // TODO: Evict expired versions.
                 clock_t  _readPBRBEnd = clock(); //////
                 double readPBRBms = (double)(_readPBRBEnd-_readPBRBtart)/CLOCKS_PER_SEC*1000; //////
@@ -969,14 +874,15 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
         totalReadSize[indexFlag] += result->value.fieldData.getSize();     
     }
     ////////////////////////////////////
-
-    K2LOG_D(log::skvsvr, "Result of Getrecord with status{} key{}", result ? result->status : -1, nodePtr->get_key());
     // case need push: WI && WI.ts < tx.timestamp
+    K2LOG_D(log::skvsvr, "Result of Getrecord with status{} key{}", rec ? rec->status : -1, nodePtr->get_key());
     bool needPush = result != nullptr && result->status == dto::DataRecord::WriteIntent && result->timestamp.compareCertain(request.mtr.timestamp) < 0;
     
     clock_t  _readEnd = clock();
-    totalReadms[indexFlag] += (double)(_readEnd-_readStart)/CLOCKS_PER_SEC*1000; //////
-    /*for(int i=0; i<5; i++){
+    double Readms = (double)(_readEnd-_readStart)/CLOCKS_PER_SEC*1000; //////
+    totalReadms[indexFlag] += Readms;
+
+    for(int i=0; i<5; i++){
         K2LOG_I(log::skvsvr, "-----i:{}, totalUpdateCachems:{}, totalIndexms:{}, totalGetRecordAddrms:{}, totalHeaderms:{}, totalCopyFeildms:{}, totalFindPositionms:{}, totalUpdateKVNodems:{}, totalReadPBRBms:{}, totalReadNVMrus:{}, totalReadms:{}, pbrbHitNum:{}, NvmReadNum:{}", i, totalUpdateCachems[i], totalIndexms[i], totalGetAddrms[i], totalHeaderms[i], totalCopyFeildms[i], totalFindPositionms[i], totalUpdateKVNodems[i], totalReadPBRBms[i], totalReadNVMrus[i], totalReadms[i], pbrbHitNum[i], NvmReadNum[i]);
     }
     //K2LOG_I(log::skvsvr, "pbrbHitNum:{}, NvmReadNum:{}", pbrbHitNum, NvmReadNum);
@@ -985,18 +891,19 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     if(readCount[0]>0 && readCount[1]>0 && readCount[2]>0 && readCount[3]>0 && readCount[4]>0){
         K2LOG_I(log::skvsvr, "-----average read size, item:{}, Warehouse: {}, Stock:{}, District:{}, Customer:{}", 
     (int)totalReadSize[0]/readCount[0], (int)totalReadSize[1]/readCount[1], (int)totalReadSize[2]/readCount[2], (int)totalReadSize[3]/readCount[3], (int)totalReadSize[4]/readCount[4]);
-    }*/
+    }
 
+    // happy case: either committed, or txn is reading its own write, or there is no matching version
     if (!needPush) {
         return _makeReadOK(result);
     }
     K2LOG_D(log::skvsvr, "need push with state{}, record ts={}, mtr={}",
-                result->status, result->timestamp, request.mtr.timestamp);
+                rec->status, rec->timestamp, request.mtr.timestamp);
     K2LOG_D(log::skvsvr, "need push node states:size={} begin is empty {} second is empty {} third is empty {}",
                 nodePtr->size(), nodePtr->_getpointer(0)==nullptr,nodePtr->_getpointer(1)==nullptr,nodePtr->_getpointer(2)==nullptr);
 
     // record is still pending and isn't from same transaction.
-    return _doPush(request.key,rec->timestamp, request.mtr, deadline)
+    return _doPush(request.key,result->timestamp, request.mtr, deadline)
         .then([this, request=std::move(request), deadline](auto&& retryChallenger) mutable {
             if (!retryChallenger.is2xxOK()) {
                 return RPCResponse(dto::K23SIStatus::AbortConflict("incumbent txn won in read push"), dto::K23SIReadResponse{});
@@ -1022,13 +929,14 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     // else return right version or null&&needPush = false
     // DataRecord* rec = _getDataRecordForRead(versions, request.mtr.timestamp);
     // bool needPush = !rec ? _checkPushForRead(versions, request.mtr.timestamp) : false;
+
     int order;
     K2LOG_D(log::skvsvr, "Ready to read datarecord");
-    dto::DataRecord* rec = nodePtr->get_datarecord(request.mtr.timestamp, order, pbrb);
+    DataRecord* rec = nodePtr->get_datarecord(request.mtr.timestamp, order, pbrb);
 
     if (rec != nullptr)
         K2LOG_D(log::skvsvr, "Node info ====== Timestamp: {}; Order: {}, SchemaVersion: {}", request.mtr.timestamp, order, rec->value.schemaVersion);
-    //DataRecord* result = rec;
+    
     DataRecord* result = nullptr;
     if (rec != nullptr) {
         
@@ -1055,7 +963,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             auto schemaVer = schemaIt->second.find(sVer);
             K2ASSERT(log::skvsvr, schemaVer != schemaIt->second.end(), "sVer: {}", sVer);
             dto::Schema& schema = *(schemaVer->second);
-            K2LOG_D(log::skvsvr, "----request.key: {}, schemaName: {}, schemaVer:{}", request.key, request.key.schemaName, schemaVer->first);
+            K2LOG_D(log::skvsvr, "------request.key: {}, schemaName: {}, schemaVer:{}", request.key, request.key.schemaName, schemaVer->first);
 
             uint32_t SMapIndex = pbrb->mapCachedSchema(request.key.schemaName, schemaVer->first);
             if(SMapIndex == 0){ //add a new schema to PBRB schema metadata
@@ -1080,9 +988,15 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex); 
                 BufferPage *pagePtr = retVal.first;
                 RowOffset rowOffset = retVal.second;
+                /*if (pagePtr==nullptr) {
+                    pbrb->doBackgroundPageListGC(request.key.schemaName, SMapIndex, _indexer, _retentionTimestamp,  _cmeta.retentionPeriod); 
+                    retVal = pbrb->findCacheRowPosition(SMapIndex);
+                    pagePtr = retVal.first;
+                    rowOffset = retVal.second;
+                }*/
         if (pagePtr!=nullptr) { //find empty slot    
                 auto rowAddr = pbrb->cacheRowHeaderFrom(SMapIndex, pagePtr, rowOffset, rec);
-                K2LOG_D(log::skvsvr, "----SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
+                K2LOG_D(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
                 ////////////////////////
                 #ifdef FIXEDFIELD_ROW
                 // copy fields
@@ -1105,12 +1019,15 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 void *hotAddr = pbrb->getAddrByPageAndOffset(SMapIndex, pagePtr, rowOffset);
                 nodePtr->insert_hot_datarecord(rec->timestamp, static_cast<dto::DataRecord *>(hotAddr));
                 K2LOG_D(log::skvsvr, "Stored hot address: {} in node", hotAddr);
-                //#ifdef FIXEDFIELD_ROW
-                //    pbrb->printFieldsRow(pagePtr, rowOffset);
-                //#endif
+                // nodePtr->printAll();
+                // pbrb->printRowsBySchema(SMapIndex);
+                /*#ifdef FIXEDFIELD_ROW
+                    pbrb->printFieldsRow(pagePtr, rowOffset);
+                #endif*/
                 rec->value.fieldData.seek(0);
         }
                 result = rec;
+                //K2LOG_I(log::skvsvr, "Case 2: Read from NVM, sleep:{} us, NvmReadNum:{}", (double)(_End-_Start), NvmReadNum);
             }
             else {
                 // case 3: hot version
@@ -1134,7 +1051,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     ////////////////////////////////////
     // case need push: WI && WI.ts < tx.timestamp
     // auto result = rec;
-    K2LOG_D(log::skvsvr, "Result of Getrecord with status{} key{}", result ? result->status : -1, nodePtr->get_key());
+    K2LOG_D(log::skvsvr, "Result of Getrecord with status{} key{}", rec ? rec->status : -1, nodePtr->get_key());
     bool needPush = result != nullptr && result->status == dto::DataRecord::WriteIntent && result->timestamp.compareCertain(request.mtr.timestamp) < 0;
 
     // happy case: either committed, or txn is reading its own write, or there is no matching version
@@ -1169,16 +1086,32 @@ std::size_t K23SIPartitionModule::_findField(const dto::Schema schema, k2::Strin
 }
 
 template <typename T>
+T _getFieldData(const dto::SchemaField& field, Payload& payload, bool& success, uint32_t fieldID) {
+    (void) field;
+    T value{};
+    success = payload.read(value);
+    K2LOG_D(log::skvsvr, "fieldId: {}, field.type: {}, field.name: {}, value: {}", fieldID, field.type, field.name, value);
+    return value;
+    //pbrb->cacheRowFieldFromDataRecord(pagePtr, rowOffset, &value, fieldID);
+}
+
+template <typename T>
 void _advancePayloadPosition(const dto::SchemaField& field, Payload& payload, bool& success) {
     (void) field;
-    payload.skip<T>();
-    success = true;
+    T value{};
+    success = payload.read(value);
 }
 
 template <typename T>
 void _copyPayloadBaseToUpdate(const dto::SchemaField& field, Payload& base, Payload& update, bool& success) {
     (void) field;
-    success = base.copyToPayload<T>(update);
+    T value{};
+    success = base.read(value);
+    if (!success) {
+        return;
+    }
+
+    update.write(value);
 }
 
 template <typename T>
@@ -1207,63 +1140,63 @@ void K23SIPartitionModule::_cacheFieldValueToPBRB(uint32_t schemaId, const dto::
     // K2_DTO_CAST_APPLY_FIELD_VALUE(_getFieldData, field, payload, success, fieldID);
     // K2LOG_I(log::skvsvr, "Ready to cache field: [field.type: {}, field.name: {}, value: {}, strSize: {}]", field.type, field.name, value, strSize);
     switch (field.type) {
-        case dto::FieldType::STRING: {
+        case k2::dto::FieldType::STRING: {
             k2::String value{};
             success = payload.read(value);
             size_t strSize = value.size();
             K2LOG_D(log::skvsvr, "field.type: {}, field.name: {}, value:{}, strSize:{}", field.type, field.name, value, strSize);
             pbrb->cacheRowFieldFromDataRecord(schemaId, pagePtr, rowOffset, &value, strSize, fieldID, true);
         } break;
-        case dto::FieldType::INT16T: {
+        case FieldType::INT16T: {
             int16_t value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
             pbrb->cacheRowFieldFromDataRecord(schemaId, pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
-        case dto::FieldType::INT32T: {
+        case FieldType::INT32T: {
             int32_t value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
             pbrb->cacheRowFieldFromDataRecord(schemaId, pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
-        case dto::FieldType::INT64T: {
+        case FieldType::INT64T: {
             int64_t value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
             pbrb->cacheRowFieldFromDataRecord(schemaId, pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
-        case dto::FieldType::FLOAT: {
+        case FieldType::FLOAT: {
             float value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
             pbrb->cacheRowFieldFromDataRecord(schemaId, pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
-        case dto::FieldType::DOUBLE: {
+        case FieldType::DOUBLE: {
             double value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
             pbrb->cacheRowFieldFromDataRecord(schemaId, pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
-        case dto::FieldType::BOOL: {
+        case FieldType::BOOL: {
             bool value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
             pbrb->cacheRowFieldFromDataRecord(schemaId, pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
-        case dto::FieldType::DECIMAL64: {
+        case FieldType::DECIMAL64: {
             std::decimal::decimal64 value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
             pbrb->cacheRowFieldFromDataRecord(schemaId, pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
-        case dto::FieldType::DECIMAL128: {
+        case FieldType::DECIMAL128: {
             std::decimal::decimal128 value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
             pbrb->cacheRowFieldFromDataRecord(schemaId, pagePtr, rowOffset, &value, 0, fieldID, false);
         } break;
-        case dto::FieldType::FIELD_TYPE: {
-            dto::FieldType value{};
+        case FieldType::FIELD_TYPE: {
+            FieldType value{};
             success = payload.read(value);
             //K2LOG_I(log::skvsvr, "field.type: {}, field.name: {}, value:{}", field.type, field.name, value);
             pbrb->cacheRowFieldFromDataRecord(schemaId, pagePtr, rowOffset, &value, 0, fieldID, false);
@@ -1271,7 +1204,7 @@ void K23SIPartitionModule::_cacheFieldValueToPBRB(uint32_t schemaId, const dto::
         default:
             auto msg = fmt::format(
                 "cannot apply field of type {}", field.type);
-            throw dto::TypeMismatchException(msg);
+            throw TypeMismatchException(msg);
     }
     K2LOG_D(log::skvsvr, "Stored Field Data.");
 }
@@ -1284,9 +1217,8 @@ bool K23SIPartitionModule::_isUpdatedField(uint32_t fieldIdx, std::vector<uint32
 }
 
 bool K23SIPartitionModule::_makeFieldsForSameVersion(dto::Schema& schema, dto::K23SIWriteRequest& request, dto::DataRecord& version) {
-    K2LOG_D(log::skvsvr, "Make Fields For Same Version");
     Payload basePayload = version.value.fieldData.shareAll();   // base payload
-    Payload payload(Payload::DefaultAllocator());                     // payload for new record
+    Payload payload(Payload::DefaultAllocator);                     // payload for new record
 
     for (std::size_t i = 0; i < schema.fields.size(); ++i) {
         if (_isUpdatedField(i, request.fieldsForPartialUpdate)) {
@@ -1372,7 +1304,7 @@ bool K23SIPartitionModule::_makeFieldsForDiffVersion(dto::Schema& schema, dto::S
     std::size_t baseCursor = 0; // indicate fieldsOffset cursor
 
     Payload basePayload = version.value.fieldData.shareAll();   // base payload
-    Payload payload(Payload::DefaultAllocator());                     // payload for new record
+    Payload payload(Payload::DefaultAllocator);                     // payload for new record
 
     // make every fields in schema for new full-record-WI
     for (std::size_t i = 0; i < schema.fields.size(); ++i) {
@@ -1441,7 +1373,7 @@ bool K23SIPartitionModule::_makeFieldsForDiffVersion(dto::Schema& schema, dto::S
             // this field is to be updated.
             if (request.value.excludedFields[i] == false) {
                 // request's payload has a value.
-                // 1. write() value from req's SKVRecorqd to payload
+                // 1. write() value from req's SKVRecord to payload
                 bool success = false;
                 K2_DTO_CAST_APPLY_FIELD_VALUE(_copyPayloadBaseToUpdate, schema.fields[i], request.value.fieldData, payload, success);
                 if (!success) return false;
@@ -1497,7 +1429,7 @@ bool K23SIPartitionModule::_makeProjection(dto::SKVRecord::Storage& fullRec, dto
     auto schemaVer = schemaIt->second.find(fullRec.schemaVersion);
     dto::Schema& schema = *(schemaVer->second);
     std::vector<bool> excludedFields(schema.fields.size(), true);   // excludedFields for projection
-    Payload projectedPayload(Payload::DefaultAllocator());            // payload for projection
+    Payload projectedPayload(Payload::DefaultAllocator);            // payload for projection
 
     for (uint32_t i = 0; i < schema.fields.size(); ++i) {
         if (fullRec.excludedFields.size() && fullRec.excludedFields[i]) {
@@ -1594,88 +1526,21 @@ K23SIPartitionModule::handleWrite(dto::K23SIWriteRequest&& request, FastDeadline
 
 seastar::future<std::tuple<Status, dto::K23SIWriteResponse>>
 K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadline deadline) {
-    K2LOG_D(log::skvsvr, "key {} ,processing write: {}", request.key, request);
-
-#ifdef OUTPUT_ACCESS_PATTERN
-    if(request.key.schemaName=="customer" && isRunBenchMark){
-        map<dto::Key, int>::iterator result = writeRecordMap.find(request.key);
-        if(result != writeRecordMap.end()){
-            ofile<<count++<<' '<<'W'<<' '<<result->second<<endl;
-        }else{
-            map<dto::Key, int>::iterator resultR = readRecordMap.find(request.key);
-            if(resultR != readRecordMap.end()){
-                ofile<<count++<<' '<<'W'<<' '<<resultR->second<<endl;
-            }else{
-                writeRecordMap.insert(pair<dto::Key, int>(request.key, keySequence));
-                ofile<<count++<<' '<<'W'<<' '<<keySequence<<endl;
-                keySequence++;
-            }
-        }
-        //K2LOG_I(log::skvsvr, "######write key: {}", request.key);
-    }
-#endif
-    /*int indexFlag = 0;
-    String SName = request.key.schemaName;
-    if(SName == "item"){
-        writeCount[0]++;
-        indexFlag=0;
-    }else if(SName == "warehouse"){
-        writeCount[1]++;
-        indexFlag=1;
-    }else if(SName == "stock"){
-        writeCount[2]++;
-        indexFlag=2;
-    }else if(SName == "district"){
-        writeCount[3]++;
-        indexFlag=3;
-    }else if(SName == "customer"){
-        writeCount[4]++;
-        indexFlag=4;
-    }else if(SName == "history"){
-        writeCount[5]++;
-        indexFlag=5;
-    }else if(SName == "orderline"){
-        writeCount[6]++;
-        indexFlag=6;
-    }else if(SName == "neworder"){
-        writeCount[7]++;
-        indexFlag=7;
-    }else if(SName == "order"){
-        writeCount[8]++;
-        indexFlag=8;
-    }else if(SName == "idx_customer_name"){
-        writeCount[9]++;
-        indexFlag=9;
-    }else if(SName == "idx_order_customer"){
-        writeCount[10]++;
-        indexFlag=10;
-    }else{
-        writeCount[11]++;
-        indexFlag=11;
-    }
-    request.value.fieldData.seek(0);
-    totalReadSize[indexFlag] += request.value.fieldData.getSize(); 
-    */
-
+    //K2LOG_D(log::skvsvr, "processing write: {}", request);
+    K2LOG_I(log::skvsvr, "processing write, key: {}", request.key);
     IndexerIterator it = _indexer.find(request.key);
-    KeyValueNode* nodePtr = nullptr;
-
+    KeyValueNode* nodePtr;
     if(it == _indexer.end()) {
         //new KeyValueNode if there is no
         K2LOG_D(log::skvsvr, "Insert new KeyValueNode for key{}", request.key);
         nodePtr = _indexer.insert(request.key);
-        //K2LOG_I(log::skvsvr, "New KVNode @{} and findIt return {}", (void*)nodePtr, (void*)(_indexer.extractFromIter(findIt)));
-        //K2ASSERT(log::skvsvr, nodePtr!=nullptr, "Insert failed and return nullptr");
     }
     else {
-        //K2LOG_D(log::skvsvr, "PartialUpdate and get node from indexer");
         nodePtr = _indexer.extractFromIter(it);
-        K2ASSERT(log::skvsvr, nodePtr!=nullptr, "Result of extractFrom iter is nullptr");
     }
-
     //TODO check nodePtr is not null
     Status validateStatus = _validateWriteRequest(request, *nodePtr);
-    K2LOG_D(log::skvsvr, "write for {} validated with status {}", request, validateStatus);
+    //K2LOG_D(log::skvsvr, "write for {} validated with status {}", request, validateStatus);
     if (!validateStatus.is2xxOK()) {
         if (nodePtr->begin() == nullptr) {
             // remove the key from indexer if there are no versions in node
@@ -1688,8 +1553,6 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
 
     // check to see if we should push or is this a write from same txn
     KeyValueNode& KVNode = *nodePtr;
-    // KeyValueNode& KVNodeMap = *nodePtrMap;
-    // rec is used both in hot and map version
     dto::DataRecord* rec = nodePtr->begin();
 
     // nodePtr->printAll();
@@ -1698,17 +1561,14 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
         rec = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(rec));
         isHot = false;
     }*/
-    //NodeVerMetadata verMD = nodePtr->getNodeVerMetaData(0, pbrb);
-    if (isHot){
-        rec = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(rec));
-    }
 
-    K2LOG_D(log::skvsvr, "status of begin is {}", rec!=nullptr &&rec->status==dto::DataRecord::Committed);
-    if (rec != nullptr && rec->status  == dto::DataRecord::WriteIntent && rec->timestamp != request.mtr.timestamp) {
+    NodeVerMetadata verMD = nodePtr->getNodeVerMetaData(0, pbrb);
+
+    if (rec != nullptr && verMD.status == dto::DataRecord::WriteIntent && verMD.timestamp != request.mtr.timestamp) {
         // this is a write request finding a WI from a different transaction. Do a push with the remaining
         // deadline time.
         K2LOG_D(log::skvsvr, "different WI found for key {}, ol", request.key);
-        return _doPush(request.key, rec->timestamp, request.mtr, deadline)
+        return _doPush(request.key, verMD.timestamp, request.mtr, deadline)
             .then([this, request = std::move(request), deadline](auto&& retryChallenger) mutable {
                 if (!retryChallenger.is2xxOK()) {
                     // challenger must fail. Flush in case a TR was created during this call to handle write
@@ -1723,23 +1583,24 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
 
     // Handle idempotency here. If request ids match, then this was a retry message from the client
     // and we should return OK
-    if (rec != nullptr && rec->status == dto::DataRecord::WriteIntent &&
-        request.mtr.timestamp == rec->timestamp &&
-        request.request_id == rec->request_id) {
+    if (rec != nullptr && verMD.status == dto::DataRecord::WriteIntent &&
+        request.mtr.timestamp == verMD.timestamp &&
+        request.request_id == verMD.request_id) {
         K2LOG_D(log::skvsvr, "duplicate write encountered in request {}", request);
         return RPCResponse(dto::K23SIStatus::Created("wi was already created"), dto::K23SIWriteResponse{});
     }
 
     // Note that if we are here and a WI exists, it must be from the txn of the current request
-    // Exists precondition can be set by the user (e.g. with a delete to know if a record was actually
-    // delete) and it is set for partial updates
-    if (request.precondition == dto::ExistencePrecondition::Exists && (!rec || rec->isTombstone)) {
-        K2LOG_D(log::skvsvr, "Request {} not accepted since Exists precondition failed", request);
-        _readCache->insertInterval(request.key, request.key, request.mtr.timestamp);
-        return RPCResponse(dto::K23SIStatus::ConditionFailed("Exists precondition failed"), dto::K23SIWriteResponse{});
+    dto::DataRecord* head = rec;
+    bool isTombstone;
+    if (head != nullptr) {
+        if (isHot)
+            isTombstone = pbrb->getIsTombstoneRow(head);
+        else
+            isTombstone = rec->isTombstone;
     }
 
-    if (request.precondition == dto::ExistencePrecondition::NotExists && rec && !rec->isTombstone) {
+    if (request.rejectIfExists && head && !isTombstone) {
         // Need to add to read cache to prevent an erase coming in before this requests timestamp
         // If the condition passes (ie, there was no previous version and the insert succeeds) then
         // we do not need to insert into the read cache because the write intent will handle conflicts
@@ -1754,18 +1615,30 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
 
     if (request.fieldsForPartialUpdate.size() > 0) {
         // parse the partial record to full record
-        if (!_parsePartialRecord(request, *rec)) {
-            K2LOG_I(log::skvsvr, "can not parse partial record for key {}", request.key);
-            rec->value.fieldData.seek(0);
-            _readCache->insertInterval(request.key, request.key, request.mtr.timestamp);
-            return RPCResponse(dto::K23SIStatus::ConditionFailed("missing fields or can not interpret partialUpdate"), dto::K23SIWriteResponse{});
+        
+        if (!head || isTombstone) {
+            K2LOG_D(log::skvsvr, "partial update request {} not accepted since there is no previous version to update", request);
+            // cannot parse partial record without a version
+            return RPCResponse(dto::K23SIStatus::KeyNotFound("can not partial update with no/deleted version"), dto::K23SIWriteResponse{});
+        }
+        dto::DataRecord *recPtr;
+        if (head != nullptr) {
+            if (isHot)
+                recPtr = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(head));
+            else
+                recPtr = head;
+        }
+        if (!_parsePartialRecord(request, *recPtr)) {
+            K2LOG_D(log::skvsvr, "can not parse partial record for key {}", request.key);
+            head->value.fieldData.seek(0);
+            return RPCResponse(dto::K23SIStatus::BadParameter("missing fields or can not interpret partialUpdate"), dto::K23SIWriteResponse{});
         }
     }
 
 
     // all checks passed - we're ready to place this WI as the latest version
     auto status = _createWI(std::move(request), KVNode);
-    // auto status = _createWI(std::move(request), KVNodeMap);
+    K2LOG_D(log::skvsvr, "WI creation with status {}", status);
     return RPCResponse(std::move(status), dto::K23SIWriteResponse{});
 }
 
@@ -1776,23 +1649,18 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, KeyValueNode& 
     dto::DataRecord *rec = new dto::DataRecord{.value=request.value.copy(), .isTombstone=request.isDelete, .timestamp=request.mtr.timestamp,
                         .prevVersion=nullptr, .status=dto::DataRecord::WriteIntent, .request_id=request.request_id};
 
-    //KVNode.insert_datarecord(rec);
-    //KVNode.printAll();
+    // KVNode.printAll();
     KVNode.insert_datarecord(rec, pbrb);
     // TODO: evict old hot version in pbrb!
     KVNode.set_writeintent();
     K2LOG_D(log::skvsvr, "After _createWI:");
     // KVNode.printAll();
-
     auto status = _twimMgr.addWrite(std::move(request.mtr), std::move(request.key), std::move(request.trh), std::move(request.trhCollection));
 
     if (!status.is2xxOK()) {
         return status;
     }
-
-    // the TWIM accepted the write. Add it as a WI now  
     _persistence->append(*rec);
-    _totalWI++;
     return Statuses::S201_Created("WI created");
 }
 
@@ -1891,17 +1759,13 @@ K23SIPartitionModule::_doPush(dto::Key key, dto::Timestamp incumbentId, dto::K23
             }
 
             KeyValueNode& node = *_indexer.extractFromIter(IndexerIt);
-            //dto::DataRecord* rec = node.get_datarecord(request.incumbentMTR.timestamp);
+
             // updated with pbrb.
             int order;
             dto::DataRecord* rec = node.get_datarecord(request.incumbentMTR.timestamp, order, pbrb);
-            //NodeVerMetadata verMD = node.getNodeVerMetaData(order, pbrb);
-            if(node.is_inmem(0)){
-                rec = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(rec));
-            }
-
-            if (rec != nullptr && rec->status == dto::DataRecord::WriteIntent &&
-                rec->timestamp == request.incumbentMTR.timestamp) {
+            NodeVerMetadata verMD = node.getNodeVerMetaData(order, pbrb);
+            if (rec != nullptr && verMD.status == dto::DataRecord::WriteIntent &&
+                verMD.timestamp == request.incumbentMTR.timestamp) {
                 switch (response.incumbentFinalization) {
                     case dto::EndAction::None: {
                         break;
@@ -1913,18 +1777,21 @@ K23SIPartitionModule::_doPush(dto::Key key, dto::Timestamp incumbentId, dto::K23
                         }
                         _removeWI(node);
                         node.set_zero_writeintent();
-                        _finalizedWI++;
                         break;
                     }
                     case dto::EndAction::Commit: {
                         if (auto status = _twimMgr.commitWrite(request.incumbentMTR.timestamp, key); !status.is2xxOK()) {
                             K2LOG_W(log::skvsvr, "Unable to commit write in {} with local txn metadata due to {}", request.incumbentMTR, status);
                             return seastar::make_ready_future<Status>(std::move(status));
-                        }                        
-                        _totalCommittedPayload += rec->value.fieldData.getSize();
-                        rec->status = dto::DataRecord::Committed;
-                        _recordVersions++;
-                        _finalizedWI++;
+                        }
+                        if (verMD.isHot) {
+                            // Update status of hot and cold record.
+                            pbrb->setStatusRow(rec, dto::DataRecord::Committed);
+                            dto::DataRecord* coldRec = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(rec));
+                            coldRec->status = dto::DataRecord::Committed;
+                        }
+                        else
+                            rec->status = dto::DataRecord::Committed;
                         node.set_zero_writeintent();
                         break;
                     }
@@ -1980,52 +1847,37 @@ Status K23SIPartitionModule::_finalizeTxnWIs(dto::Timestamp txnts, dto::EndActio
     }
     K2ASSERT(log::skvsvr, twim->isCommitted() || twim->isAborted(), "Twim {} has not ended yet", *twim);
     for (auto& key: twim->writeKeys) {
-        IndexerIterator idxIt = _indexer.find(const_cast<dto::Key &>(key));
+        IndexerIterator idxIt = _indexer.find(const_cast<Key &>(key));
         K2ASSERT(log::skvsvr, idxIt != _indexer.end(),
                  "TWIM {} has registered WI for key {} but key is not in indexer", *twim, key);
 
         KeyValueNode& KVNode = *_indexer.extractFromIter(idxIt);
-        //dto::DataRecord* WIRec = KVNode.begin();
-        //NodeVerMetadata verMD = KVNode.getNodeVerMetaData(0, pbrb);
+        NodeVerMetadata verMD = KVNode.getNodeVerMetaData(0, pbrb);
         dto::DataRecord* WIRec = KVNode.begin();
-        if(KVNode.is_inmem(0)){
-            WIRec = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(WIRec));
-        }
         // KVNode.printAll();
-
-        K2ASSERT(log::skvsvr, WIRec!=nullptr&&WIRec->status==dto::DataRecord::WriteIntent,
+        K2ASSERT(log::skvsvr, WIRec!=nullptr&&verMD.status==dto::DataRecord::WriteIntent,
                  "TWIM {} has registered WI for key{}, but key does not have a WI", *twim, key);
-        K2ASSERT(log::skvsvr, WIRec->timestamp == txnts,
+        K2ASSERT(log::skvsvr, verMD.timestamp == txnts,
                  "TWIM {} has registered WI for key{}, but WI is from different transaction {}",
-                 *twim, key, WIRec->timestamp);
-        // Map version
-        // MapIterator idxItMap = _mapIndexer.find(const_cast<dto::Key &>(key));
-        // K2ASSERT(log::skvsvr, idxItMap != _mapIndexer.end(),
-        //          "TWIM {} has registered WI for key {} but key is not in indexer", *twim, key);
-        // KeyValueNode& KVNodeMap = *_mapIndexer.extractFromIter(idxItMap);
-        // dto::DataRecord* WIRecMap = KVNodeMap.begin();        
-        // K2ASSERT(log::skvsvr, WIRecMap!=nullptr&&WIRecMap->status==dto::DataRecord::WriteIntent,
-        //          "TWIM {} has registered Map WI for key{}, but key does not have a WI", *twim, key);
-        // K2ASSERT(log::skvsvr, WIRecMap->timestamp == txnts,
-        //          "TWIM {} has registered Map WI for key{}, but WI is from different transaction {}",
-        //          *twim, key, WIRecMap->timestamp);
+                 *twim, key, verMD.timestamp);
 
         switch (action) {
             case dto::EndAction::Abort: {
                 K2LOG_D(log::skvsvr, "aborting {}, in txn {}", key, *twim);
                 _removeWI(KVNode);
-                // _removeWI(KVNodeMap);
                 KVNode.set_zero_writeintent();
                 break;
             }
             case dto::EndAction::Commit: {
                 K2LOG_D(log::skvsvr, "committing {}, in txn {}", key, *twim);
-                
-                _totalCommittedPayload += WIRec->value.fieldData.getSize();
-                WIRec->status = dto::DataRecord::Committed;
-                // _totalCommittedPayload += WIRecMap->value.fieldData.getSize();
-                // WIRecMap->status = dto::DataRecord::Committed;
-                _recordVersions++;
+                if (verMD.isHot) {
+                    pbrb->setStatusRow(WIRec, dto::DataRecord::Committed);
+                    dto::DataRecord* coldRec = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(WIRec));
+                    coldRec->status = dto::DataRecord::Committed;
+                }
+                else {
+                    WIRec->status = dto::DataRecord::Committed;
+                }
                 KVNode.set_zero_writeintent();
                 break;
             }
@@ -2037,7 +1889,6 @@ Status K23SIPartitionModule::_finalizeTxnWIs(dto::Timestamp txnts, dto::EndActio
         }
     }
 
-    _finalizedWI++;
     return dto::K23SIStatus::OK;
 }
 
@@ -2068,19 +1919,17 @@ K23SIPartitionModule::handleInspectRecords(dto::K23SIInspectRecordsRequest&& req
 
     std::vector<dto::DataRecord> records;
     records.reserve(size + 1);
-
+    
     dto::DataRecord * rec = nullptr;
     for(int i = 0; i<size; ++i) {
         // use cold record. (TODO: change to hot row later)
         if (KVNode.is_inmem(i))
-            rec = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(rec));
-
+            rec = static_cast<DataRecord *>(pbrb->getPlogAddrRow(rec));
         if(i < 3) {
             rec = KVNode._getpointer(i);
             K2LOG_D(log::skvsvr, "inspect record {}", rec == nullptr);
         }
         else {
-            //rec = rec->prevVersion;
             rec = KVNode._getpointer(2)->prevVersion;
         }
         dto::DataRecord copy {
@@ -2121,11 +1970,10 @@ K23SIPartitionModule::handleInspectWIs(dto::K23SIInspectWIsRequest&&) {
             continue;
         }
 
-        //dto::DataRecord* rec = _indexer.extractFromIter(it)->begin();
         KeyValueNode &KVNode = *_indexer.extractFromIter(it);
         dto::DataRecord* rec = KVNode.begin();
         if (KVNode.is_inmem(0))
-            rec = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(rec));
+            rec = static_cast<DataRecord *>(pbrb->getPlogAddrRow(rec));
         // Check whether statuses are same.
         K2ASSERT(log::skvsvr, 
                     (rec->status == dto::DataRecord::WriteIntent) == KVNode.is_writeintent(), 
@@ -2135,7 +1983,6 @@ K23SIPartitionModule::handleInspectWIs(dto::K23SIInspectWIsRequest&&) {
         // Not WI. Skip
         if (!KVNode.is_writeintent())
             continue;
-
         dto::DataRecord copy {
                 .value=rec->value.share(),
                 .isTombstone=rec->isTombstone,
@@ -2216,7 +2063,7 @@ K23SIPartitionModule::_getDataRecordForRead(VersionSet& versions, dto::Timestamp
 
 // Helper to remove a WI and delete the key from the indexer of there are no committed records
 void K23SIPartitionModule::_removeWI(KeyValueNode& node) {
-    node.remove_datarecord(0);
+    node.remove_datarecord(0, pbrb);
     //TODO check available
     if (node.begin() == nullptr) {
         _indexer.erase(node.get_key());
@@ -2228,87 +2075,6 @@ seastar::future<> K23SIPartitionModule::_recovery() {
     //TODO perform recovery
     K2LOG_D(log::skvsvr, "Partition: {}, recovery", _partition);
     return seastar::make_ready_future();
-}
-
-void K23SIPartitionModule::doBackgroundPBRBGC(PBRB *pbrb, mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod) {
-    K2LOG_I(log::pbrb, "####in doBackgroundPBRBGC, _freePageList.size:{}", pbrb->getFreePageList().size());
-
-#ifdef OUTPUT_READ_INFO
-    for(int i=0; i<5; i++){
-        K2LOG_I(log::skvsvr, "-----i:{}, totalUpdateCachems:{}, totalSerachTreems:{}, totalUpdateTreems:{}, totalIndexms:{}, totalGetRecordAddrms:{}, totalReadCopyFeildms:{}, totalGenRecordms:{}, totalFindPositionms:{} totalHeaderms:{}, totalCopyFeildms:{}, totalUpdateKVNodems:{}, totalReadPBRBms:{}, totalReadNVMrus:{}, totalReadms:{}, pbrbHitNum:{}, NvmReadNum:{}", i, totalUpdateCachems[i], totalSerachTreems[i], totalUpdateTreems[i],  totalIndexms[i], totalGetAddrms[i], totalReadCopyFeildms[i], totalGenRecordms[i], totalFindPositionms[i], totalHeaderms[i], totalCopyFeildms[i], totalUpdateKVNodems[i], totalReadPBRBms[i], totalReadNVMrus[i], totalReadms[i], pbrbHitNum[i], NvmReadNum[i]);
-    }
-    //K2LOG_I(log::skvsvr, "pbrbHitNum:{}, NvmReadNum:{}", pbrbHitNum, NvmReadNum);
-    K2LOG_I(log::skvsvr, "-----read count, item:{}, Warehouse: {}, Stock:{}, District:{}, Customer:{}, History:{}, OrderLine:{}, NewOrder:{}, Order:{}, Other:{}", 
-    readCount[0], readCount[1], readCount[2], readCount[3], readCount[4], readCount[5], readCount[6], readCount[7], readCount[8], readCount[9]);
-    if(readCount[0]>0 && readCount[1]>0 && readCount[2]>0 && readCount[3]>0 && readCount[4]>0){
-        K2LOG_I(log::skvsvr, "-----average read size, item:{}, Warehouse: {}, Stock:{}, District:{}, Customer:{}", 
-    (int)totalReadSize[0]/readCount[0], (int)totalReadSize[1]/readCount[1], (int)totalReadSize[2]/readCount[2], (int)totalReadSize[3]/readCount[3], (int)totalReadSize[4]/readCount[4]);
-    }
-
-    /*
-    K2LOG_I(log::skvsvr, "-----write count, item:{}, Warehouse: {}, Stock:{}, District:{}, Customer:{}, History:{}, OrderLine:{}, NewOrder:{}, Order:{}, idx_customer_name:{}, idx_order_customer:{}, Other:{}", 
-    writeCount[0], writeCount[1], writeCount[2], writeCount[3], writeCount[4], writeCount[5], writeCount[6], writeCount[7], writeCount[8], writeCount[9], writeCount[10], writeCount[11]);
-    
-    K2LOG_I(log::skvsvr, "-----total write size, item:{}, Warehouse: {}, Stock:{}, District:{}, Customer:{}, History:{}, OrderLine:{}, NewOrder:{}, Order:{}, idx_customer_name:{}, idx_order_customer:{}, Other:{}", 
-    totalReadSize[0], totalReadSize[1], totalReadSize[2], totalReadSize[3], totalReadSize[4], totalReadSize[5], totalReadSize[6], totalReadSize[7], totalReadSize[8], totalReadSize[9], totalReadSize[10], totalReadSize[11]);
-    */
-#endif
-
-    if ((float)pbrb->getFreePageList().size()/(float)pbrb->getMaxPageNumber() >= 0.5) { //0.4
-        return;
-    }
-    if(newWaterMark.compareCertain(pbrb->watermark) > 0) pbrb->watermark = newWaterMark;
-    float maxPageListUsage = 0.0;
-    float avgPageListUsage = pbrb->getAveragePageListUsage(maxPageListUsage);
-
-    //if (avgPageListUsage <= 0.1 && maxPageListUsage < 0.2) { //0.9, 0.95
-    if (avgPageListUsage <= 0.6) {
-        return;
-    } else {  //if (avgPageListUsage > 0.6 && avgPageListUsage <= 0.8) {
-        //float ratio = (float)((avgPageListUsage-0.6)/(1-0.6));
-        retentionPeriod/(100);
-        //int ratio = (avgPageListUsage-0.9)*100;
-        //watermark = watermark + retentionPeriod*ratio/(100-90); //Change the watermark dynamiclly according to retentionTime and avgPageListUsage
-        //watermark = watermark + retentionPeriod*ratio/(100); //Change the watermark dynamiclly according to retentionTime and avgPageListUsage
-        K2LOG_I(log::pbrb, "set a newer waterMark:{}, original waterMark:{}, avgPageListUsage:{}, _freePageList size:{}", pbrb->watermark, newWaterMark, avgPageListUsage, pbrb->getFreePageList().size());
-    } 
-
-    MapIterator indexIterator = _indexer.begin();
-    for (; indexIterator!=_indexer.end(); indexIterator++) {
-        KeyValueNode* nodePtr = indexIterator->second;
-        //K2LOG_I(log::pbrb, "######in doBackgroundPBRBGC, schemaName:{}, key:{}", nodePtr->get_key().schemaName, nodePtr->get_key());
-        for (int i = 0; i < 3; i++) {
-            if (!nodePtr->is_inmem(i)) continue;
-            //K2LOG_I(log::pbrb, "######watermark:{}", watermark);
-            if (nodePtr->compareTimestamp(i, pbrb->watermark) < 0) {
-                //K2LOG_I(log::pbrb, "evict row:{}, order:{}", nodePtr->get_key(), i);
-                void* HotRowAddr = static_cast<void *> (nodePtr->_getpointer(i));
-                auto pair = pbrb->findRowByAddr(HotRowAddr);
-                BufferPage *pagePtr = pair.first;
-                RowOffset rowOff = pair.second;
-                dto::DataRecord *coldAddr = static_cast<dto::DataRecord *> (pbrb->getPlogAddrRow(HotRowAddr));
-                nodePtr->setColdAddr(i, coldAddr);
-                nodePtr->set_inmem(i, 0);
-                //nodePtr->printAll();
-                //outputHeader(pagePtr);
-                //K2LOG_I(log::pbrb, "before removeHotRow, schemaName:{}, getHotRowsNumPage(pagePtr):{}", nodePtr->get_key().schemaName, getHotRowsNumPage(pagePtr));
-                pbrb->removeHotRow(pagePtr, rowOff);
-                //K2LOG_I(log::pbrb, "after removeHotRow getHotRowsNumPage(pagePtr):{}", getHotRowsNumPage(pagePtr));
-                //TODO: release heap space
-            #ifdef FIXEDFIELD_ROW
-                pbrb->releaseHeapSpace(pagePtr, HotRowAddr);
-            #endif
-
-            #ifdef PAYLOAD_ROW
-                pbrb->releasePayloadHeapSpace(pagePtr, HotRowAddr);
-            #endif
-            }
-        }
-    }
-    float avgPageListUsage1 = pbrb->getAveragePageListUsage(maxPageListUsage);
-    K2LOG_I(log::pbrb, "####before GC avgPageListUsage:{}, after GC avgPageListUsage:{}, _freePageList:{}", avgPageListUsage, avgPageListUsage1, pbrb->getFreePageList().size());
-    
-    //TODO: merge pages that with low usage
 }
 
 }  // ns k2

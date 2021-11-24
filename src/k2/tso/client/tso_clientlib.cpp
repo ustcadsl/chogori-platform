@@ -32,28 +32,14 @@ Copyright(c) 2020 Futurewei Cloud
 
 #include "tso_clientlib.h"
 
-namespace k2 {
-using namespace dto;
-
-void TSO_ClientLib::_registerMetrics() {
-    _metricGroups.clear();
-    std::vector<sm::label_instance> labels;
-
-    _metricGroups.add_group("TSOClient", {
-        sm::make_histogram("total_latency", [this]{ return _totalLatency.getHistogram();},
-                sm::description("Observed latency for all calls"), labels),
-        sm::make_histogram("remote_latency", [this]{ return _remoteLatency.getHistogram();},
-                sm::description("Observed latency for remote TSO calls"), labels)
-    });
-}
+namespace k2
+{
 
 seastar::future<> TSO_ClientLib::start()
 {
     // TODO: instead of using config value TSOServerURL, we need to change later to CPO URL and get URLs of TSO servers from there instead.
     K2LOG_I(log::tsoclient, "start with server url: {}", TSOServerURL());
     _stopped = false;
-
-    _registerMetrics();
 
     _tSOServerURLs.emplace_back(TSOServerURL());
     // for now we use the first server URL only, in the future, allow to check other server in case first one is not available
@@ -70,11 +56,15 @@ seastar::future<> TSO_ClientLib::gracefulStop() {
 
     for (auto&& clientRequest : _pendingClientRequests)
     {
-        clientRequest._promise.set_exception(TSOClientLibShutdownException());
+        clientRequest._promise->set_exception(TSOClientLibShutdownException());
     }
     _pendingClientRequests.clear();
 
-    return std::move(_batchCall);
+    //TODO: consider gracefully record outgoing batch request to TSO server and set exception to them as well.
+    //currently, only in its continuation do nothing if stop is called. Should be ok except if this object is quickly deleted.
+
+
+    return seastar::make_ready_future<>();
 }
 
 seastar::future<> TSO_ClientLib::_discoverServiceNodes(const k2::String& serverURL)
@@ -166,14 +156,13 @@ seastar::future<> TSO_ClientLib::_discoverServiceNodes(const k2::String& serverU
     });
 }
 
-seastar::future<Timestamp> TSO_ClientLib::getTimestampFromTSO(TimePoint requestLocalTime)
+seastar::future<Timestamp> TSO_ClientLib::getTimestampFromTSO(const TimePoint& requestLocalTime)
 {
     if (_stopped)
     {
         K2LOG_I(log::tsoclient, "Stopping issuing timestamp since we were stopped");
         return seastar::make_exception_future<Timestamp>(TSOClientLibShutdownException());
     }
-    k2::OperationLatencyReporter reporter(_totalLatency);  // for reporting metrics
 
     // TSO client may not yet ready (discover the tso server endpoint), let the request wait in this case.
     if (!_readyToServe)
@@ -182,10 +171,7 @@ seastar::future<Timestamp> TSO_ClientLib::getTimestampFromTSO(TimePoint requestL
         K2LOG_W(log::tsoclient, "TSO Timestamp requested when not ready to serve, request pending...");
         _promiseReadyToServe.emplace_back();
         return _promiseReadyToServe.back().get_future()
-            .then([this, requestLocalTime, reporter] () mutable {
-                reporter.report();
-                return getTimestampFromTSO(requestLocalTime);
-            });
+            .then([this, triggeredTime = requestLocalTime] { return getTimestampFromTSO(triggeredTime); });
     }
 
 
@@ -234,7 +220,7 @@ seastar::future<Timestamp> TSO_ClientLib::getTimestampFromTSO(TimePoint requestL
             {
                 _timestampBatchQue.pop_front();
             }
-            reporter.report();
+
             return seastar::make_ready_future<Timestamp>(result);
         }
         else
@@ -247,6 +233,7 @@ seastar::future<Timestamp> TSO_ClientLib::getTimestampFromTSO(TimePoint requestL
     // if we couldn't return a ready timestamp, we need to create the request promise and return the future of it in all following difference cases.
     ClientRequest curRequest;
     curRequest._requestTime = requestLocalTime;
+    curRequest._promise = seastar::make_lw_shared<seastar::promise<Timestamp>>();
     // TODO: get config from appBase and use min batch size, default 4
     uint16_t batchSizeToRequest = 4;
 
@@ -297,11 +284,7 @@ seastar::future<Timestamp> TSO_ClientLib::getTimestampFromTSO(TimePoint requestL
             curRequest._triggeredBatchRequest = false; // no op, just for readability
             _pendingClientRequests.push_back(std::move(curRequest));
             K2LOG_D(log::tsoclient, "Piggy Back on outgoing batch.");
-            return _pendingClientRequests.back()._promise.get_future()
-            .then_wrapped([reporter](auto&& fut) mutable{
-                reporter.report();
-                return std::move(fut);
-            });
+            return _pendingClientRequests.back()._promise->get_future();
         }
     }
 
@@ -313,33 +296,25 @@ seastar::future<Timestamp> TSO_ClientLib::getTimestampFromTSO(TimePoint requestL
     newBatchRequest._expectedTTL = 8000;    // in nanosecond, TODO: use config value instead.
     _timestampBatchQue.emplace_back(std::move(newBatchRequest));
 
-    curRequest._triggeredBatchRequest = true;
-    _pendingClientRequests.push_back(std::move(curRequest));
+    (void) _getTimestampBatch(batchSizeToRequest)
+        .then([this, triggeredTime = requestLocalTime](TimestampBatch&& newBatch) {
+            _processReturnedBatch(std::move(newBatch), triggeredTime);
+        }).handle_exception([this] (auto exc) {
+            // Set exception for all pending client requests
+            for (auto&& clientRequest : _pendingClientRequests)
+            {
+                clientRequest._promise->set_exception(exc);
+            }
+            _pendingClientRequests.clear();
+
+            K2LOG_W_EXC(log::tsoclient, exc, "GetTimestampBatch failed");
+        });
+
     K2LOG_D(log::tsoclient, "Request new Batch for this TS.");
 
-    _batchCall = _batchCall
-    .then([this, batchSizeToRequest] {
-        return _getTimestampBatch(batchSizeToRequest);
-    })
-    .then([this, triggeredTime = requestLocalTime](TimestampBatch&& newBatch) {
-        _processReturnedBatch(std::move(newBatch), triggeredTime);
-        return seastar::make_ready_future<>();
-    }).handle_exception([this] (auto exc) {
-        // Set exception for all pending client requests
-        for (auto&& clientRequest : _pendingClientRequests)
-        {
-            clientRequest._promise.set_exception(exc);
-        }
-        _pendingClientRequests.clear();
-
-        K2LOG_W_EXC(log::tsoclient, exc, "GetTimestampBatch failed");
-    });
-
-    return _pendingClientRequests.back()._promise.get_future()
-    .then_wrapped([reporter](auto&& fut) mutable{
-        reporter.report();
-        return std::move(fut);
-    });
+    curRequest._triggeredBatchRequest = true;
+    _pendingClientRequests.push_back(std::move(curRequest));
+    return _pendingClientRequests.back()._promise->get_future();
 }
 
 void TSO_ClientLib::_processReturnedBatch(TimestampBatch batch, TimePoint batchTriggeredTime)
@@ -442,7 +417,7 @@ void TSO_ClientLib::_processReturnedBatch(TimestampBatch batch, TimePoint batchT
                 break;
             }
 
-            _pendingClientRequests.front()._promise.set_value(TimestampBatch::generateTimeStampFromBatch(batchInfo._batch, batchInfo._usedCount));
+            _pendingClientRequests.front()._promise->set_value(TimestampBatch::generateTimeStampFromBatch(batchInfo._batch, batchInfo._usedCount));
             _pendingClientRequests.pop_front();
             batchInfo._usedCount++;
         }
@@ -488,7 +463,7 @@ void TSO_ClientLib::_processReturnedBatch(TimestampBatch batch, TimePoint batchT
                 // Set exception for all pending client requests
                 for (auto&& clientRequest : _pendingClientRequests)
                 {
-                    clientRequest._promise.set_exception(exc);
+                    clientRequest._promise->set_exception(exc);
                 }
                 _pendingClientRequests.clear();
 

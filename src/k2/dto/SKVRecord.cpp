@@ -101,14 +101,14 @@ const SKVRecord::Storage& SKVRecord::getStorage() {
 void SKVRecord::setStorage(void* srcAddr, size_t payloadRowSize){
     //storage.fieldData.seek(0);
     storage.fieldData.write(srcAddr, payloadRowSize);
-    //storage.fieldData.seek(0);
+    storage.fieldData.seek(0);
 }
 
 // The constructor for an SKVRecord that a user of the SKV client would use to create a request
 SKVRecord::SKVRecord(const String& collection, std::shared_ptr<Schema> s) :
             schema(s), collectionName(collection), keyValuesAvailable(true), keyStringsConstructed(true) {
     storage.schemaVersion = schema->version;
-    storage.fieldData = Payload(Payload::DefaultAllocator());
+    storage.fieldData = Payload(Payload::DefaultAllocator);
     partitionKeys.resize(schema->partitionKeyFields.size());
     rangeKeys.resize(schema->rangeKeyFields.size());
 }

@@ -1,7 +1,7 @@
 '''
 MIT License
 
-Copyright (c) 2021 Futurewei Cloud
+Copyright (c) 2020 Futurewei Cloud
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -24,32 +24,20 @@ SOFTWARE.
 
 import configparser
 
-
 class Runnable:
     def __init__(self):
-        # Following values are computed by clusterstate.py dynamically based on the rest of the system state
-        self.host = ""
-        self.program_args = ""
-        self.cpus = []
-        # Following values are computed by parse.py and the static config files
         self.name = ""
+        self.host = ""
         self.image = ""
         self.docker_args = ""
-        self.component = ""
-        self.num_cpus = 0
-        self.program_args_list = []
-        self.target_config = ""
+        self.program_args = ""
 
     def __str__(self):
         return "Name: " + self.name + \
-               "\nHost: " + self.host + \
-               "\nImage: " + self.image + \
-               "\nDocker args: " + self.docker_args + \
-               "\nProgram args: " + self.program_args
-
-    def MakeProgramArgsString(self):
-        for arg in self.program_args_list:
-            self.program_args += f"--{arg[0]} {arg[1]} "
+            "\nHost: " + self.host + \
+            "\nImage: " + self.image + \
+            "\nDocker args: " + self.docker_args + \
+            "\nProgram args: " + self.program_args
 
     def getDockerPull(self):
         return "sudo docker pull " + self.image
@@ -65,15 +53,15 @@ class Runnable:
 
     def getDockerLogs(self):
         return "sudo docker logs --tail 5000 " + self.name
+       
 
-
-def parseRunnableConfig(runnable, config_files, cpus):
+def parseRunnableConfig(locals_filename, runnable, config_files, cpus, cpus_base):
     binary = ""
 
     parsed_args = []
     for filename in config_files.split(' '):
         config = configparser.ConfigParser(interpolation=configparser.ExtendedInterpolation())
-        config.read([filename])
+        config.read([locals_filename]+[filename])
 
         if "binary" in config["deployment"]:
             binary = config["deployment"]["binary"]
@@ -90,28 +78,29 @@ def parseRunnableConfig(runnable, config_files, cpus):
             value = config["program_args"][arg]
             if value == "$cpus":
                 value = str(cpus)
-            runnable.program_args_list.append([arg, value])
+            if value == "$cpus_expand":
+                value = str(cpus_base) + "-" + str(cpus_base+cpus-1)
+            runnable.program_args += "--" + arg + " " + value + " "
 
     runnable.docker_args += "--name " + runnable.name + " " + runnable.image + " " + binary
-    runnable.num_cpus = cpus
+        
 
-
-def parseConfig(config_filename):
+def parseConfig(locals_filename, config_filename):
     config = configparser.ConfigParser(interpolation=configparser.ExtendedInterpolation())
-    config.read([config_filename])
+    config.read([locals_filename, config_filename])
     all_to_run = []
+    cpuset_base = int(config["LocalConfig"]["cpuset_base"])
 
     for section in config.sections():
-        if section == "LocalConfig":
+        if (section == "LocalConfig"):
             continue
 
-        for i in range(0, int(config[section]["hosts"])):
+        hosts = config[section]["hosts"].split(' ')
+        for host in hosts:
             runnable = Runnable()
-            runnable.component = section
-            runnable.name = f"{section}{i}"
-            runnable.target_config = config[section]["host_config"]
-            cpus = int(config[section]["cpus"])
-            parseRunnableConfig(runnable, config[section]["configs"], cpus)
+            runnable.name = section
+            runnable.host = host
+            parseRunnableConfig(locals_filename, runnable, config[section]["configs"], int(config[section]["cpus"]), cpuset_base)
             all_to_run.append(runnable)
 
     return all_to_run
