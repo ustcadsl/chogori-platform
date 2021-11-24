@@ -1,6 +1,7 @@
 #ifndef __HOT__COMMONS__DISCRIMINATIVE_BIT__
 #define __HOT__COMMONS__DISCRIMINATIVE_BIT__
 
+#include <log.h>
 #include "hot/commons/Algorithms.hpp"
 #include "idx/contenthelpers/OptionalValue.hpp"
 
@@ -55,10 +56,12 @@ inline uint16_t DiscriminativeBit::getByteRelativeSignificantBitIndex(uint8_t co
 }
 
 template<typename Operation> inline bool executeForDiffingKeys(uint8_t const* existingKey, uint8_t const* newKey, uint16_t keyLengthInBytes, Operation const & operation) {
-		for(size_t index = 0; index < keyLengthInBytes; ++index) {
+	K2LOG_D(k2::log::hot, "keyLengthByte={}", keyLengthInBytes);
+	for(size_t index = 0; index < keyLengthInBytes; ++index) {
 		uint8_t newByte = newKey[index];
 		uint8_t existingByte = existingKey[index];
 		if(existingByte != newByte) {
+			K2LOG_D(k2::log::hot, "Different Bit Index={}", index);
 			operation(DiscriminativeBit {static_cast<uint16_t>(index), existingByte, newByte });
 			return true;
 		}

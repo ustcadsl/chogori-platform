@@ -3,7 +3,7 @@ file(GLOB SOURCES "*.cpp")
 
 add_library(indexer STATIC ${HEADERS} ${SOURCES})
 set_target_properties(indexer PROPERTIES LINKER_LANGUAGE CXX)
-target_link_libraries(indexer INTERFACE hot-single-threaded-lib content-helpers-lib)
+target_link_libraries(indexer INTERFACE pbrb hot-single-threaded-lib content-helpers-lib)
 
 # export the library in the common k2Targets
 install(TARGETS indexer EXPORT k2Targets DESTINATION lib/k2)

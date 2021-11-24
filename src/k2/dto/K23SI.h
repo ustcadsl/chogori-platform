@@ -149,6 +149,7 @@ K2_DEF_ENUM(TxnRecordState,
 K2_DEF_ENUM(TxnWIMetaState,
         Created,         // The state in which all new TxnWIMeta records are put when first created in memory
         InProgressPIP,   // The txn is InProgress and we're persisting the record
+        InProgressPIPAborted, // The txn is awaiting result of persistence of InProgressPIP, but has been aborted
         InProgress,      // The txn InProgress has been persisted
         Aborted,         // The txn has been aborted
         Committed,       // The txn has been committed
@@ -196,6 +197,12 @@ struct K23SIStatus {
     static const inline Status ServiceUnavailable=k2::Statuses::S503_Service_Unavailable;
 };
 
+K2_DEF_ENUM(ExistencePrecondition,
+    None,
+    Exists,
+    NotExists
+);
+
 struct K23SIWriteRequest {
     PVID pvid; // the partition version ID. Should be coming from an up-to-date partition map
     String collectionName; // the name of the collection
@@ -208,10 +215,11 @@ struct K23SIWriteRequest {
     String trhCollection; // the collection for the TRH
     bool isDelete = false; // is this a delete write?
     bool designateTRH = false; // if this is set, the server which receives the request will be designated the TRH
-    // Whether the server should reject the write if a previous version exists, like a SQL insert.
-    // In the future we want more expressive preconditions, but those will be on the fields of a record
-    // whereas this is the only record-level precondition that makes sense so it is its own flag
-    bool rejectIfExists = false;
+    // Whether the server should reject the write if a previous version exists (like a SQL insert),
+    // or reject a write if a previous version does not exists (e.g. to know if a delete actually deleted
+    // a record). In the future we want more expressive preconditions, but those will be on the fields of
+    // a record whereas this is the only record-level precondition that makes sense so it is its own flag
+    ExistencePrecondition precondition = ExistencePrecondition::None;
     // Generated on the client and stored on by the server so that
     uint64_t request_id;
     // use the name "key" so that we can use common routing from CPO client
@@ -221,14 +229,14 @@ struct K23SIWriteRequest {
 
     K23SIWriteRequest() = default;
     K23SIWriteRequest(PVID _pvid, String cname, K23SI_MTR _mtr, Key _trh, String _trhCollection, bool _isDelete,
-                      bool _designateTRH, bool _rejectIfExists, uint64_t id, Key _key, SKVRecord::Storage _value,
+                      bool _designateTRH, ExistencePrecondition _precondition, uint64_t id, Key _key, SKVRecord::Storage _value,
                       std::vector<uint32_t> _fields) :
         pvid(std::move(_pvid)), collectionName(std::move(cname)), mtr(std::move(_mtr)), trh(std::move(_trh)), trhCollection(std::move(_trhCollection)),
-        isDelete(_isDelete), designateTRH(_designateTRH), rejectIfExists(_rejectIfExists), request_id(id),
+        isDelete(_isDelete), designateTRH(_designateTRH), precondition(_precondition), request_id(id),
         key(std::move(_key)), value(std::move(_value)), fieldsForPartialUpdate(std::move(_fields)) {}
 
-    K2_PAYLOAD_FIELDS(pvid, collectionName, mtr, trh, trhCollection, isDelete, designateTRH, rejectIfExists, request_id, key, value, fieldsForPartialUpdate);
-    K2_DEF_FMT(K23SIWriteRequest, pvid, collectionName, mtr, trh, trhCollection, isDelete, designateTRH, rejectIfExists, request_id, key, value, fieldsForPartialUpdate);
+    K2_PAYLOAD_FIELDS(pvid, collectionName, mtr, trh, trhCollection, isDelete, designateTRH, precondition, request_id, key, value, fieldsForPartialUpdate);
+    K2_DEF_FMT(K23SIWriteRequest, pvid, collectionName, mtr, trh, trhCollection, isDelete, designateTRH, precondition, request_id, key, value, fieldsForPartialUpdate);
 };
 
 struct K23SIWriteResponse {
