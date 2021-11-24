@@ -37,6 +37,8 @@ Copyright(c) 2020 Futurewei Cloud
 #include "Log.h"
 
 namespace k2{
+using namespace dto;
+
 const String badCname = "bad_collection_name";
 const String collname = "3si_txn_collection";
 const String s02nd_cname = "Second_" + collname;
@@ -176,7 +178,7 @@ private:
             .trhCollection = cname,
             .isDelete = isDelete,
             .designateTRH = isTRH,
-            .rejectIfExists = false,
+            .precondition = dto::ExistencePrecondition::None,
             .request_id = id++,
             .key = key,
             .value = std::move(record.storage),
@@ -480,7 +482,7 @@ seastar::future<> testScenario00() {
                         .trhCollection = collname,
                         .isDelete = false,
                         .designateTRH = true,
-                        .rejectIfExists=false,
+                        .precondition = dto::ExistencePrecondition::None,
                         .request_id=0,
                         .key = key,
                         .value{},
