@@ -34,9 +34,6 @@ Copyright(c) 2020 Futurewei Cloud
 #include "PmemEngine.h"
 
 namespace k2{
-namespace log {
-inline thread_local k2::logging::Logger pmem_storage("k2::pmem_storage");
-}
 
 
 

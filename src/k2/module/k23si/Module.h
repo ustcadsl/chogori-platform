@@ -34,6 +34,8 @@ Copyright(c) 2020 Futurewei Cloud
 #include <k2/common/Chrono.h>
 #include <k2/cpo/client/CPOClient.h>
 #include <k2/tso/client/tso_clientlib.h>
+#include <k2/pmemStorage/PmemEngine.h>
+#include <k2/pmemStorage/PmemLog.h>
 
 #include "ReadCache.h"
 #include "TxnManager.h"
@@ -41,6 +43,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include "Config.h"
 #include "Persistence.h"
 #include "Log.h"
+
 
 namespace k2 {
 
@@ -213,6 +216,8 @@ private: // methods
     // returns a record that is valid to return for to a read request for the given timestamp.
     dto::DataRecord* _getDataRecordForRead(VersionSet& versions, dto::Timestamp& timestamp);
 
+    seastar::future<std::tuple<Status, dto::K23SIReadResponse>> _makeReadOK(dto::DataRecord* rec);
+
     // For a given challenger timestamp and key, check if a push is needed against a WI
     bool _checkPushForRead(const VersionSet& versions, const dto::Timestamp& timestamp);
 
@@ -283,6 +288,9 @@ private:  // members
 
     std::shared_ptr<Persistence> _persistence;
 
+    std::unique_ptr<PmemEngine> _pmemEngine;
+
+
     CPOClient _cpo;
 
     sm::metric_groups _metric_groups;
@@ -296,6 +304,9 @@ private:  // members
 
     uint64_t _activeWI{0}; // for number of active WIs
     uint64_t _recordVersions{0};
+    
+    k2::ExponentialHistogram _readPmemEngineLatency;
+    k2::ExponentialHistogram _writePmemEngineLatency;
 
     k2::ExponentialHistogram _readLatency;
     k2::ExponentialHistogram _writeLatency;

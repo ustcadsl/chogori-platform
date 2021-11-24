@@ -28,7 +28,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include <k2/dto/MessageVerbs.h>
 #include "Config.h"
 #include "Log.h"
-#include <k2/pmemStorage/PmemLog.h>
+
 namespace k2 {
 class Persistence {
 public:

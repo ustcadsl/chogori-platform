@@ -31,6 +31,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include "SKVRecord.h"
 #include "Timestamp.h"
 #include "Expression.h"
+#include <k2/pmemStorage/PmemEngine.h>
 
 namespace k2::dto {
 
@@ -91,14 +92,17 @@ struct DataRecord {
     // the user data for the record
     SKVRecord::Storage value;
 
+    // replace the record with the pointer in pmemlog
+    k2::PmemAddress value_pointer;
+
     // the record transaction id/ timestamp
     Timestamp timestamp;
 
     // marked for tombstones
     bool isTombstone = false;
 
-    K2_PAYLOAD_FIELDS(value, timestamp, isTombstone);
-    K2_DEF_FMT(DataRecord, value, timestamp, isTombstone);
+    K2_PAYLOAD_FIELDS(value, value_pointer,timestamp, isTombstone);
+    K2_DEF_FMT(DataRecord, value,value_pointer, timestamp, isTombstone);
 };
 
 // A write intent. This is separate from the DataRecord structure which is used for

@@ -29,7 +29,6 @@ Persistence::Persistence() {
     int id = seastar::this_shard_id();
     String endpoint = _config.persistenceEndpoint()[id % _config.persistenceEndpoint().size()];
     _remoteEndpoint = RPC().getTXEndpoint(endpoint);
-    // _localPlog = std::make_unique<PmemLog>(_config.localPlogPath(), id);
     _flushTimer.setCallback(
         [this] {
             if (Clock::now() - _lastFlush > _config.persistenceAutoflushDeadline()) {
@@ -91,7 +90,6 @@ seastar::future<Status> Persistence::flush() {
                     return std::move(response);
                 });
     }
-    // _localplog->append(_buffer);
     // move the buffered data into a single request and delete the buffer.
     // Any writes after this point will be appended to a new buffer/batch
     dto::K23SI_PersistenceRequest<Payload> request{};

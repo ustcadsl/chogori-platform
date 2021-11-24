@@ -25,22 +25,6 @@ Copyright(c) 2020 Futurewei Cloud
 
 namespace k2 {
 
-Status PmemEngine::open(PmemEngineConfig &plog_meta, PmemEngine ** engine_ptr){
-    if ( plog_meta.chunk_size > plog_meta.engine_capacity
-        || plog_meta.is_sealed == true ){
-        return PmemStatuses::S403_Forbidden_Invalid_Config;
-    }
-    PmemLog * engine = new PmemLog;
-    Status s = engine->init(plog_meta);
-    if (!s.is2xxOK()){
-        K2LOG_E(log::pmem_storage,"Create PmemLog Failed!");
-        delete engine;
-    }else{
-        *engine_ptr = engine;
-    }
-    return s;
-}
-
 Status PmemLog::init(PmemEngineConfig &plog_meta){
     // create the directory if not exist
     if(!std::filesystem::exists(plog_meta.engine_path)){
@@ -114,7 +98,6 @@ Status PmemLog::init(PmemEngineConfig &plog_meta){
 
 std::tuple<Status, PmemAddress> PmemLog::append(Payload &payload){
     PmemAddress pmemAddr;
-    strcpy(pmemAddr.plog_id ,_plog_meta.plog_id);
     pmemAddr.start_offset = _plog_meta.tail_offset;
     pmemAddr.size = payload.getSize();
     // checkout the is_sealed condition
@@ -129,6 +112,7 @@ std::tuple<Status, PmemAddress> PmemLog::append(Payload &payload){
     }
     size_t payload_data_size = payload.getSize();
     char * buffer_data = (char*)malloc(payload_data_size );
+    payload.seek(0);
     //promise not change the payload content
     payload.read(buffer_data, payload_data_size);
     payload.seek(0);

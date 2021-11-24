@@ -35,7 +35,7 @@ using namespace k2;
 std::string testBaseDir = "/mnt/pmem0/chogori-test";
 PmemEngine * engine_ptr = nullptr;
 
-SCENARIO("Generate a new PLOG") {
+SCENARIO("Generate a new PmemLog") {
 
     PmemEngineConfig plogConfig;
     plogConfig.chunk_size = 4ULL << 20;
@@ -51,7 +51,7 @@ SCENARIO("Generate a new PLOG") {
 }
 
 
-SCENARIO("Generate with a existing PLOG") {
+SCENARIO("Generate with a existing PmemLog") {
     PmemEngineConfig plogConfig;
     strcpy(plogConfig.engine_path,testBaseDir.c_str());
     auto status = PmemEngine::open(plogConfig, &engine_ptr);
@@ -60,7 +60,7 @@ SCENARIO("Generate with a existing PLOG") {
     delete engine_ptr;
 }
 
-SCENARIO("Test append small data in PmemLog") {
+SCENARIO("Test append small data to PmemLog") {
     PmemEngineConfig plogConfig;
     strcpy(plogConfig.engine_path,testBaseDir.c_str());
     auto status = PmemEngine::open(plogConfig, &engine_ptr);
@@ -79,7 +79,7 @@ SCENARIO("Test append small data in PmemLog") {
     delete testdata;
 }
 
-SCENARIO("Test append large data in PmemLog") {
+SCENARIO("Test append large data to PmemLog") {
     // test write 1KB data once a time and write 128*1024 times, totally 128MB
     // it will generate 32 plog files in totally
     PmemEngineConfig plogConfig;
@@ -105,7 +105,7 @@ SCENARIO("Test append large data in PmemLog") {
     delete testdata;
 }
 
-SCENARIO("Test read small data within one chunk of PmemLog") {
+SCENARIO("Test read small data within one chunk from PmemLog") {
     //open existing PmemLog
     PmemEngineConfig plogConfig;
     strcpy(plogConfig.engine_path,testBaseDir.c_str());
@@ -129,7 +129,7 @@ SCENARIO("Test read small data within one chunk of PmemLog") {
     delete expect_data;
     delete payload_data;
 }
-SCENARIO("Test read large data across two chunks of PmemLog") {
+SCENARIO("Test read large data across two chunks from PmemLog") {
     //open existing PmemLog
     PmemEngineConfig plogConfig;
     strcpy(plogConfig.engine_path,testBaseDir.c_str());

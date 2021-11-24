@@ -25,16 +25,24 @@ Copyright(c) 2020 Futurewei Cloud
 #include <k2/common/Common.h>
 #include <k2/transport/Payload.h>
 #include <k2/transport/Status.h>
+#include <k2/transport/PayloadSerialization.h>
 #include <tuple>
 namespace k2
 {
+    
+namespace log {
+inline thread_local k2::logging::Logger pmem_storage("k2::pmem_storage");
+}
 
 // define the plog address
 // 
 struct PmemAddress{
-    char plog_id[128] = "plog0";
     uint64_t start_offset = 0;
     uint64_t size = 0;
+    
+
+    K2_PAYLOAD_FIELDS(start_offset, size);
+    K2_DEF_FMT(PmemAddress,start_offset, size);
 };
 
 // define the pmem engine status
@@ -42,21 +50,21 @@ struct PmemAddress{
 // S201_Created_Engine                     Create engine successfully
 // S507_Insufficient_Storage               No enough space for pmem engine
 // S403_Forbidden_Invalid_Config           Invalid pmem engine config
-// 
+
 // Read status
 // S200_OK_Found                           Found target data
 // S403_Forbidden_Invalid_Offset           Invalid offset in pmem engine
 // S403_Forbidden_Invalid_Size             Invalid size in pmem engine
-//
+
 // Append status
 // S200_OK_Append                          Append data successfully           
 // S507_Insufficient_Storage_Over_Capcity  Data size is over the engine capcity
 // S409_Conflict_Append_Sealed_engine      Append data to a sealed engine
-//
+
 // SealStatus
 // S200_OK_Sealed                          Seal the engine successfully
 // S200_OK_AlSealed                        Already sealed before sealing
-//
+
 // File operation
 // S201_Created_File                       Create pmem engine file successfully
 // S200_OK_Map                             Map file to userspace successfully
@@ -144,9 +152,6 @@ struct PmemEngineConfig{
     // engine_path define the path of stored files 
     char engine_path[128] = "/mnt/pmem0/pmem-chogori/";
 
-    // is_sealed: true means sealed, false means activated 
-    bool is_sealed = false;
-
     // current offset of the plog, this value is persisted 
     // when the plog is sealed or close
     uint64_t tail_offset = 0;
@@ -162,6 +167,9 @@ struct PmemEngineConfig{
     // so the name of first chunk is userDataPlog_chunk0.plog
     //           the second chunk is userDataPlog_chunk1.plog
     char plog_id[128] = "userDataPlog";
+
+    // is_sealed: true means sealed, false means activated 
+    bool is_sealed = false;
 };
 
 

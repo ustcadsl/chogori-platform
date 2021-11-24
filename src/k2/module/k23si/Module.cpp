@@ -343,6 +343,10 @@ void K23SIPartitionModule::_registerMetrics() {
         sm::make_counter("push_operations", _pushes, sm::description("Number of pushses"), labels),
         sm::make_gauge("active_WI", _activeWI, sm::description("Number of active WIs"), labels),
         sm::make_counter("record_versions", _recordVersions, sm::description("Number of record versions over all records"), labels),
+        sm::make_histogram("read_pmem_engine_lantecy", [this]{ return _readPmemEngineLatency.getHistogram();},
+                sm::description("Latency of Read Pmem Engine Operations"), labels),
+        sm::make_histogram("write_pmem_engine_lantecy", [this]{ return _writePmemEngineLatency.getHistogram();},
+                sm::description("Latency of Write Pmem Engine Operations"), labels),
         sm::make_histogram("read_latency", [this]{ return _readLatency.getHistogram();},
                 sm::description("Latency of Read Operations"), labels),
         sm::make_histogram("write_latency", [this]{ return _writeLatency.getHistogram();},
@@ -389,6 +393,14 @@ seastar::future<> K23SIPartitionModule::start() {
             });
             _retentionUpdateTimer.armPeriodic(_config.retentionTimestampUpdateInterval());
             _persistence = std::make_shared<Persistence>();
+            
+            PmemEngineConfig plogConfig;
+            std::string pmemPath = fmt::format("{}/shard{}",_config.PmemEnginePath(),seastar::this_shard_id());
+            strcpy(plogConfig.engine_path,pmemPath.c_str());
+            PmemEngine * enginePtr = nullptr;
+            auto status = PmemEngine::open(plogConfig, &enginePtr);
+            _pmemEngine.reset(enginePtr);
+
             return _persistence->start()
                 .then([this] {
                     return _twimMgr.start(_retentionTimestamp, _persistence);
@@ -427,14 +439,29 @@ seastar::future<> K23SIPartitionModule::gracefulStop() {
         });
 }
 
-seastar::future<std::tuple<Status, dto::K23SIReadResponse>>
-_makeReadOK(dto::DataRecord* rec) {
+seastar::future<std::tuple<Status, dto::K23SIReadResponse>> 
+K23SIPartitionModule::_makeReadOK(dto::DataRecord* rec) {
     if (rec == nullptr || rec->isTombstone) {
         return RPCResponse(dto::K23SIStatus::KeyNotFound("read did not find key"), dto::K23SIReadResponse{});
     }
 
     auto response = dto::K23SIReadResponse();
-    response.value = rec->value.share();
+    auto start = k2::Clock::now();
+    auto payload_status = _pmemEngine->read(rec->value_pointer);
+    auto end = k2::Clock::now();
+    auto dur = end - start;
+    _readPmemEngineLatency.add(dur);
+    
+    if( std::get<0>(payload_status).is2xxOK()){
+        k2::dto::SKVRecord::Storage read_storage{};
+        std::get<1>(payload_status).read(read_storage);
+        response.value = read_storage.share();
+        K2LOG_D(log::skvsvr, "Read data from pmem log: {}", read_storage);
+        K2LOG_D(log::skvsvr, "Expect data from dram: {}", rec->value);
+    }
+    else{
+        response.value = rec->value.share();
+    }
     return RPCResponse(dto::K23SIStatus::OK("read succeeded"), std::move(response));
 }
 
@@ -1081,6 +1108,7 @@ K23SIPartitionModule::handleWrite(dto::K23SIWriteRequest&& request, FastDeadline
     // NB: failures in processing a write do not require that we set the TR state to aborted at the TRH. We rely on
     //     the client to do the correct thing and issue an abort on a failure.
     K2LOG_D(log::skvsvr, "Partition: {}, handle write: {}", _partition, request);
+
     if (request.designateTRH) {
         if (!_validateRequestPartition(request)) {
             // tell client their collection partition is gone
@@ -1194,14 +1222,24 @@ Status
 K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, VersionSet& versions) {
     K2LOG_D(log::skvsvr, "Write Request creating WI: {}", request);
     // we need to copy this data into a new memory block so that we don't hold onto and fragment the transport memory
-    dto::DataRecord rec{.value=request.value.copy(), .timestamp=request.mtr.timestamp, .isTombstone=request.isDelete};
+    dto::DataRecord rec{.value=request.value.copy(),.value_pointer ={0,0}, .timestamp=request.mtr.timestamp, .isTombstone=request.isDelete};
 
     auto status = _twimMgr.addWrite(std::move(request.mtr), std::move(request.key), std::move(request.trh), std::move(request.trhCollection));
 
     if (!status.is2xxOK()) {
         return status;
     }
-
+    k2::Payload payload(k2::Payload::DefaultAllocator); 
+    payload.write(rec.value);
+    auto start = k2::Clock::now();
+    auto pmem_status = _pmemEngine->append(payload);
+    auto end = k2::Clock::now();
+    auto dur = end - start;
+    _writePmemEngineLatency.add(dur);
+    
+    if (std::get<0>(pmem_status).is2xxOK()){
+        rec.value_pointer = std::get<1>(pmem_status);
+    }
     // the TWIM accepted the write. Add it as a WI now
     versions.WI.emplace(std::move(rec), request.request_id);
     _activeWI++;
@@ -1447,6 +1485,7 @@ K23SIPartitionModule::handleInspectRecords(dto::K23SIInspectRecordsRequest&& req
     if (versions.WI.has_value()) {
         dto::DataRecord copy {
             .value=versions.WI->data.value.share(),
+            .value_pointer = versions.WI->data.value_pointer,
             .timestamp=versions.WI->data.timestamp,
             .isTombstone=versions.WI->data.isTombstone
         };
@@ -1457,6 +1496,7 @@ K23SIPartitionModule::handleInspectRecords(dto::K23SIInspectRecordsRequest&& req
     for (auto& rec : versions.committed) {
         dto::DataRecord copy{
             .value=rec.value.share(),
+            .value_pointer = rec.value_pointer,
             .timestamp=rec.timestamp,
             .isTombstone=rec.isTombstone
         };
@@ -1495,6 +1535,7 @@ K23SIPartitionModule::handleInspectWIs(dto::K23SIInspectWIsRequest&&) {
         dto::WriteIntent copy {
             .data = {
                 .value=rec.data.value.share(),
+                .value_pointer = rec.data.value_pointer,
                 .timestamp=rec.data.timestamp,
                 .isTombstone=rec.data.isTombstone
             },
