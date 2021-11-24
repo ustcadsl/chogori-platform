@@ -145,6 +145,7 @@ void RPCDispatcher::_handleNewMessage(Request&& request) {
         // TODO emit verb-dimension metric for duration of handling
         try {
             iter->second(std::move(request));
+            K2LOG_D(log::tx, "Call observer Done");
         } catch (std::exception& exc) {
             K2LOG_E(log::tx, "Caught exception while dispatching request: {}", exc.what());
         } catch (...) {
@@ -178,7 +179,7 @@ RPCDispatcher::_send(Verb verb, std::unique_ptr<Payload> payload, TXEndpoint& en
             payload->seek(txconstants::MAX_HEADER_SIZE);
             meta.setPayloadSize(payload->getDataRemaining());
 
-            if (serverep && endpoint == *serverep){
+            if (serverep && endpoint == *serverep){                
                 _handleNewMessage(Request(verb, *RPC().getServerEndpoint(endpoint.protocol), std::move(meta), std::move(payload)));
             }
             else{
@@ -265,7 +266,7 @@ void RPCDispatcher::registerLowTransportMemoryObserver(LowTransportMemoryObserve
 std::unique_ptr<TXEndpoint> RPCDispatcher::getTXEndpoint(String url) {
     K2LOG_D(log::tx, "get endpoint for {}", url)
     // temporary endpoint just so that we can see what the protocol is supposed to be
-    auto ep = TXEndpoint::fromURL(url, nullptr);
+    auto ep = TXEndpoint::fromURL(url, BinaryAllocator());
     if (!ep) {
         K2LOG_W(log::tx, "Unable to get tx endpoint for url: {}", url);
         return nullptr;

@@ -147,7 +147,7 @@ public:
     ConfigVar<std::vector<String>> _tcpRemotes{"tcp_remotes"};
     ConfigVar<String> _cpo{"cpo"};
     ConfigDuration create_collection_deadline{"create_collection_deadline", 1s};
-    ConfigDuration retention_window{"retention_window", 10s}; //600s
+    ConfigDuration retention_window{"retention_window", 200s}; //600s
     ConfigDuration txn_end_deadline{"txn_end_deadline", 60s};
 
     uint64_t read_ops{0};
@@ -180,7 +180,7 @@ private:
     std::unique_ptr<dto::K23SIReadRequest> _makeReadRequest(const dto::Key& key,
                                                            const String& collectionName) const;
     std::unique_ptr<dto::K23SIWriteRequest> _makeWriteRequest(dto::SKVRecord& record, bool erase,
-                                                             bool rejectIfExists);
+                                                             dto::ExistencePrecondition precondition);
 
     template <class T>
     std::unique_ptr<dto::K23SIReadRequest> _makeReadRequest(const T& user_record) const {
@@ -209,6 +209,7 @@ private:
             // response from it. The cpo client's collections map must have this collection
             if (auto it=_cpo_client->collections.find(request.collectionName); it != _cpo_client->collections.end()) {
                 auto& krv = it->second->getPartitionForKey(request.key).partition->keyRangeV;
+                K2LOG_D(log::skvclient, "CollectionName {}, keyRangeVersion {}", request.collectionName, krv);
                 _write_ranges[request.collectionName].insert(krv);
             }
             else {
@@ -259,7 +260,7 @@ public:
                 T userResponseRecord{};
 
                 if (status.is2xxOK()) {
-                    SKVRecord skv_record(collName, request_schema, std::move(k2response.value), true);
+                    dto::SKVRecord skv_record(collName, request_schema, std::move(k2response.value), true);
                     userResponseRecord.__readFields(skv_record);
                 }
 
@@ -268,7 +269,8 @@ public:
     }
 
     template <class T>
-    seastar::future<WriteResult> write(T& record, bool erase=false, bool rejectIfExists=false) {
+    seastar::future<WriteResult> write(T& record, bool erase=false,
+                                       dto::ExistencePrecondition precondition=dto::ExistencePrecondition::None) {
         if (!_valid) {
             return seastar::make_exception_future<WriteResult>(K23SIClientException("Invalid use of K2TxnHandle"));
         }
@@ -278,11 +280,11 @@ public:
 
         std::unique_ptr<dto::K23SIWriteRequest> request;
         if constexpr (std::is_same<T, dto::SKVRecord>()) {
-            request = _makeWriteRequest(record, erase, rejectIfExists);
+            request = _makeWriteRequest(record, erase, precondition);
         } else {
-            SKVRecord skv_record(record.collectionName, record.schema);
+            dto::SKVRecord skv_record(record.collectionName, record.schema);
             record.__writeFields(skv_record);
-            request = _makeWriteRequest(skv_record, erase, rejectIfExists);
+            request = _makeWriteRequest(skv_record, erase, precondition);
         }
 
         _client->write_ops++;
@@ -293,7 +295,7 @@ public:
             (_options.deadline, *request).
             then([this, request=std::move(request)] (auto&& response) {
                 auto& [status, k2response] = response;
-
+                K2LOG_D(log::skvclient, "Response of write request {} is {}", *request.get(),status);
                 _registerRangeForWrite(status, *request);
 
                 _checkResponseStatus(status);
@@ -353,7 +355,7 @@ public:
 
             request = _makePartialUpdateRequest(record, fieldsForPartialUpdate, std::move(key));
         } else {
-            SKVRecord skv_record(record.collectionName, record.schema);
+            dto::SKVRecord skv_record(record.collectionName, record.schema);
             record.__writeFields(skv_record);
             if (key.partitionKey == "") {
                 key = skv_record.getKey();
@@ -388,8 +390,6 @@ public:
                 return seastar::make_ready_future<PartialUpdateResult>(PartialUpdateResult(std::move(status)));
             });
     }
-
-    seastar::future<WriteResult> erase(SKVRecord& record);
 
     // Get one set of paginated results for a query. User may need to call again with same query
     // object to get more results

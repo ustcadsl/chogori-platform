@@ -55,6 +55,14 @@ struct TPCCDataGen {
     {
         for (uint16_t i=1; i <= _customers_per_district(); ++i) {
             auto customer = Customer(random, w_id, d_id, i);
+
+            // populate secondary index idx_customer_name
+            auto idx_customer_name = IdxCustomerName(customer.WarehouseID.value(), customer.DistrictID.value(),
+                customer.LastName.value(), customer.CustomerID.value());
+            data.push_back([_idx_customer_name=std::move(idx_customer_name)] (k2::K2TxnHandle& txn) mutable {
+                return writeRow<IdxCustomerName>(_idx_customer_name, txn);
+            });
+
             data.push_back([_customer=std::move(customer)] (k2::K2TxnHandle& txn) mutable {
                 return writeRow<Customer>(_customer, txn);
             });
@@ -94,8 +102,16 @@ struct TPCCDataGen {
                 });
             }
 
+            auto idx_order_customer = IdxOrderCustomer(order.WarehouseID.value(), order.DistrictID.value(),
+                                     order.CustomerID.value(), order.OrderID.value());
+
             data.push_back([_order=std::move(order)] (k2::K2TxnHandle& txn) mutable {
                 return writeRow<Order>(_order, txn);
+            });
+
+            // populate secondary index idx_order_customer
+            data.push_back([_idx_order_customer=std::move(idx_order_customer)] (k2::K2TxnHandle& txn) mutable {
+                return writeRow<IdxOrderCustomer>(_idx_order_customer, txn);
             });
         }
     }
@@ -146,6 +162,6 @@ struct TPCCDataGen {
     }
 
 private:
-    k2::ConfigVar<uint16_t> _districts_per_warehouse{"districts_per_warehouse"};
+    k2::ConfigVar<int16_t> _districts_per_warehouse{"districts_per_warehouse"};
     k2::ConfigVar<uint32_t> _customers_per_district{"customers_per_district"};
 };

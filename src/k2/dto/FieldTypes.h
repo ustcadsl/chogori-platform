@@ -97,6 +97,30 @@ String FieldToKeyString(const T&) {
 String NullFirstToKeyString();
 String NullLastToKeyString();
 
+// To prevent NaN in fields
+template <typename T>
+bool isNan(const T& field){
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double> )  { // handle NaN float and double
+        if (std::isnan(field)) {
+            return true;
+        }
+    }
+
+    if constexpr (std::is_same_v<T, std::decimal::decimal64>)  { // handle NaN decimal
+        if (std::isnan(std::decimal::decimal64_to_float(field))) {
+            return true;
+        }
+    }
+
+    if constexpr (std::is_same_v<T, std::decimal::decimal128> )  { // handle NaN decimal
+        if (std::isnan(std::decimal::decimal128_to_float(field))) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 } // ns dto
 } // ns k2
 
@@ -106,37 +130,37 @@ String NullLastToKeyString();
             case k2::dto::FieldType::STRING: {                      \
                 func<k2::String>((a), __VA_ARGS__);                 \
             } break;                                                \
-            case FieldType::INT16T: {                               \
+            case k2::dto::FieldType::INT16T: {                      \
                 func<int16_t>((a), __VA_ARGS__);                    \
             } break;                                                \
-            case FieldType::INT32T: {                               \
+            case k2::dto::FieldType::INT32T: {                      \
                 func<int32_t>((a), __VA_ARGS__);                    \
             } break;                                                \
-            case FieldType::INT64T: {                               \
+            case k2::dto::FieldType::INT64T: {                      \
                 func<int64_t>((a), __VA_ARGS__);                    \
             } break;                                                \
-            case FieldType::FLOAT: {                                \
+            case k2::dto::FieldType::FLOAT: {                       \
                 func<float>((a), __VA_ARGS__);                      \
             } break;                                                \
-            case FieldType::DOUBLE: {                               \
+            case k2::dto::FieldType::DOUBLE: {                      \
                 func<double>((a), __VA_ARGS__);                     \
             } break;                                                \
-            case FieldType::BOOL: {                                 \
+            case k2::dto::FieldType::BOOL: {                        \
                 func<bool>((a), __VA_ARGS__);                       \
             } break;                                                \
-            case FieldType::DECIMAL64: {                            \
+            case k2::dto::FieldType::DECIMAL64: {                   \
                 func<std::decimal::decimal64>((a), __VA_ARGS__);    \
             } break;                                                \
-            case FieldType::DECIMAL128: {                           \
+            case k2::dto::FieldType::DECIMAL128: {                  \
                 func<std::decimal::decimal128>((a), __VA_ARGS__);   \
             } break;                                                \
-            case FieldType::FIELD_TYPE: {                           \
-                func<FieldType>((a), __VA_ARGS__);                  \
+            case k2::dto::FieldType::FIELD_TYPE: {                  \
+                func<k2::dto::FieldType>((a), __VA_ARGS__);         \
             } break;                                                \
             default:                                                \
                 auto msg = fmt::format(                             \
                     "cannot apply field of type {}", (a).type);     \
-                throw TypeMismatchException(msg);                   \
+                throw k2::dto::TypeMismatchException(msg);          \
         }                                                           \
     } while (0)
 

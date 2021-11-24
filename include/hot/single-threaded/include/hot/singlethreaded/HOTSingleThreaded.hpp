@@ -1,6 +1,8 @@
 #ifndef __HOT__SINGLE_THREADED__HOT_SINGLE_THREADED__
 #define __HOT__SINGLE_THREADED__HOT_SINGLE_THREADED__
 
+#include <log.h>
+
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -70,11 +72,13 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline b
 
 template<typename ValueType, template <typename> typename KeyExtractor>inline __attribute__((always_inline)) idx::contenthelpers::OptionalValue<ValueType> HOTSingleThreaded<ValueType, KeyExtractor>::lookup(HOTSingleThreaded<ValueType, KeyExtractor>::KeyType const &key) {
 	auto const & fixedSizeKey = idx::contenthelpers::toFixSizedKey(idx::contenthelpers::toBigEndianByteOrder(key));
-	std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> byteKey = std::move(idx::contenthelpers::interpretAsByteArray(fixedSizeKey));
+	uint8_t byteArray[idx::contenthelpers::MAX_STRING_KEY_LENGTH];
+	memset(byteArray, 0, sizeof(byteArray));
+	idx::contenthelpers::interpretAsByteArray(fixedSizeKey, byteArray);
 
 	HOTSingleThreadedChildPointer current =  mRoot;
 	while((!current.isLeaf()) & (current.getNode() != nullptr)) {
-		HOTSingleThreadedChildPointer const * const & currentChildPointer = current.search(byteKey.second.get());
+		HOTSingleThreadedChildPointer const * const & currentChildPointer = current.search(byteArray);
 		current = *currentChildPointer;
 	}
 	return current.isLeaf() ? extractAndMatchLeafValue(current, key) : idx::contenthelpers::OptionalValue<ValueType>();
@@ -105,17 +109,20 @@ template<typename ValueType, template <typename> typename KeyExtractor>inline un
 		++currentDepth;
 	}
 	insertStack[currentDepth].initLeaf(current);
+	K2LOG_D(k2::log::hot, "Leaf depth to insert new node={}", currentDepth);
 	return currentDepth;
 }
 
 template<typename ValueType, template <typename> typename KeyExtractor> inline bool HOTSingleThreaded<ValueType, KeyExtractor>::remove(KeyType const & key) {
 	auto const & fixedSizeKey = idx::contenthelpers::toFixSizedKey(idx::contenthelpers::toBigEndianByteOrder(key));
-	std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> keyBytes = std::move(idx::contenthelpers::interpretAsByteArray(fixedSizeKey));
+	uint8_t byteArray[idx::contenthelpers::MAX_STRING_KEY_LENGTH];
+	memset(byteArray, 0, sizeof(byteArray));
+	idx::contenthelpers::interpretAsByteArray(fixedSizeKey, byteArray);
 	bool wasContained = false;
 
 	if(isRootANode()) {
 		std::array<HOTSingleThreadedInsertStackEntry, 64> insertStack;
-		unsigned int leafDepth = searchForInsert(keyBytes.second.get(), insertStack);
+		unsigned int leafDepth = searchForInsert(byteArray, insertStack);
 		intptr_t tid = insertStack[leafDepth].mChildPointer->getTid();
 		KeyType const & existingKey = extractKey(idx::contenthelpers::tidToValue<ValueType>(tid));
 		wasContained = idx::contenthelpers::contentEquals(existingKey, key);
@@ -225,23 +232,36 @@ template<typename ValueType, template <typename> typename KeyExtractor> template
 
 
 template<typename ValueType, template <typename> typename KeyExtractor> inline bool HOTSingleThreaded<ValueType, KeyExtractor>::insert(ValueType const & value) {
+	K2LOG_D(k2::log::hot, "Insert value={}", (void*)value);
+	
 	bool inserted = true;
 	auto const & fixedSizeKey = idx::contenthelpers::toFixSizedKey(idx::contenthelpers::toBigEndianByteOrder(extractKey(value)));
-	std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> keyBytes = std::move(idx::contenthelpers::interpretAsByteArray(fixedSizeKey));
+	uint8_t byteArray[idx::contenthelpers::MAX_STRING_KEY_LENGTH]; // Change MAX_STRING_KEY_LENGTH to 64
+	memset(byteArray, 0, sizeof(byteArray));
+	uint16_t byteLength = idx::contenthelpers::interpretAsByteArray(fixedSizeKey, byteArray);
+	
+	std::cout << "HOTSingleThreaded.hpp @Insert Insert Key: ";
+	for(int i = 0; i < byteLength; ++i) {
+		std::cout << byteArray[i];
+	}
+	std::cout << std::endl;
 
 	if(isRootANode()) {
 		std::array<HOTSingleThreadedInsertStackEntry, 64> insertStack;
-		unsigned int leafDepth = searchForInsert(keyBytes.second.get(), insertStack);
+		unsigned int leafDepth = searchForInsert(byteArray, insertStack);
 		intptr_t tid = insertStack[leafDepth].mChildPointer->getTid();
 		KeyType const & existingKey = extractKey(idx::contenthelpers::tidToValue<ValueType>(tid));
-		inserted = insertWithInsertStack(insertStack, leafDepth, existingKey, keyBytes.second.get(), value);
+		K2LOG_D(k2::log::hot, "Affected Key={}", existingKey);
+		inserted = insertWithInsertStack(insertStack, leafDepth, existingKey, byteArray, value);
 	} else if(mRoot.isLeaf()) {
 		HOTSingleThreadedChildPointer valueToInsert(idx::contenthelpers::valueToTid(value));
 		ValueType const & currentLeafValue = idx::contenthelpers::tidToValue<ValueType>(mRoot.getTid());
 		auto const & existingFixedSizeKey = idx::contenthelpers::toFixSizedKey(idx::contenthelpers::toBigEndianByteOrder(extractKey(currentLeafValue)));
-		std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> existingKeyBytes = std::move(idx::contenthelpers::interpretAsByteArray(existingFixedSizeKey));
+		uint8_t existingByteArray[idx::contenthelpers::MAX_STRING_KEY_LENGTH];
+		memset(existingByteArray, 0, sizeof(existingByteArray));
+		uint16_t existingByteLength = idx::contenthelpers::interpretAsByteArray(existingFixedSizeKey, existingByteArray);
 
-		inserted = hot::commons::executeForDiffingKeys(existingKeyBytes.second.get(), keyBytes.second.get(), std::max(existingKeyBytes.first, keyBytes.first) , [&](hot::commons::DiscriminativeBit const& significantKeyInformation) {
+		inserted = hot::commons::executeForDiffingKeys(existingByteArray, byteArray, std::max(existingByteLength, byteLength) , [&](hot::commons::DiscriminativeBit const& significantKeyInformation) {
 			hot::commons::BiNode<HOTSingleThreadedChildPointer> const &binaryNode = hot::commons::BiNode<HOTSingleThreadedChildPointer>::createFromExistingAndNewEntry(significantKeyInformation, mRoot, valueToInsert);
 			mRoot = hot::commons::createTwoEntriesNode<HOTSingleThreadedChildPointer, HOTSingleThreadedNode>(binaryNode)->toChildPointer();
 		});
@@ -256,8 +276,10 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline b
 	std::array<HOTSingleThreadedInsertStackEntry, 64> &insertStack, unsigned int leafDepth, KeyType const &existingKey,
 	uint8_t const *newKeyBytes, ValueType const &newValue) {
 	auto const & existingFixedSizeKey = idx::contenthelpers::toFixSizedKey(idx::contenthelpers::toBigEndianByteOrder(existingKey));
-	std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> existingKeyBytes = std::move(idx::contenthelpers::interpretAsByteArray(existingFixedSizeKey));
-	return hot::commons::executeForDiffingKeys(existingKeyBytes.second.get(), newKeyBytes, existingKeyBytes.first, [&](hot::commons::DiscriminativeBit const & significantKeyInformation) {
+	uint8_t existingByteArray[idx::contenthelpers::MAX_STRING_KEY_LENGTH];
+	memset(existingByteArray, 0, sizeof(existingByteArray));
+	uint16_t existingByteLength = idx::contenthelpers::interpretAsByteArray(existingFixedSizeKey, existingByteArray);
+	return hot::commons::executeForDiffingKeys(existingByteArray, newKeyBytes, existingByteLength, [&](hot::commons::DiscriminativeBit const & significantKeyInformation) {
 		unsigned int insertDepth = 0;
 		//searches for the node to insert the new value into.
 		//Be aware that this can result in a false positive. Therefor in case only a single entry is affected and it has a child node it must be inserted into the child node
@@ -266,9 +288,11 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline b
 			++insertDepth;
 		}
 		//this is ensured because mMostSignificantDiscriminativeBitIndex is set to MAX_INT16 for the leaf entry
+		K2LOG_D(k2::log::hot, "InsertDepth={}", insertDepth);
 		assert(insertDepth < leafDepth);
 
 		HOTSingleThreadedChildPointer valueToInsert(idx::contenthelpers::valueToTid(newValue));
+		K2LOG_D(k2::log::hot, "Insert newValue {}", (void*)newValue);
 		insertNewValueIntoNode(insertStack, significantKeyInformation, insertDepth, leafDepth, valueToInsert);
 	});
 }
@@ -277,15 +301,18 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline b
 template<typename ValueType, template <typename> typename KeyExtractor> inline idx::contenthelpers::OptionalValue<ValueType> HOTSingleThreaded<ValueType, KeyExtractor>::upsert(ValueType newValue) {
 	KeyType newKey = extractKey(newValue);
 	auto const & fixedSizeKey = idx::contenthelpers::toFixSizedKey(idx::contenthelpers::toBigEndianByteOrder(extractKey(newValue)));
-	std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> keyBytes = std::move(idx::contenthelpers::interpretAsByteArray(fixedSizeKey));
+	uint8_t byteArray[idx::contenthelpers::MAX_STRING_KEY_LENGTH];
+	memset(byteArray, 0, sizeof(byteArray));
+	idx::contenthelpers::interpretAsByteArray(fixedSizeKey, byteArray);
+	// std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> keyBytes = std::move(idx::contenthelpers::interpretAsByteArray(fixedSizeKey));
 
 	if(isRootANode()) {
 		std::array<HOTSingleThreadedInsertStackEntry, 64> insertStack;
-		unsigned int leafDepth = searchForInsert(keyBytes.second.get(), insertStack);
+		unsigned int leafDepth = searchForInsert(byteArray, insertStack);
 		intptr_t tid = insertStack[leafDepth].mChildPointer->getTid();
 		ValueType const & existingValue = idx::contenthelpers::tidToValue<ValueType>(tid);
 
-		if(insertWithInsertStack(insertStack, leafDepth, extractKey(existingValue), keyBytes.second.get(), newValue)) {
+		if(insertWithInsertStack(insertStack, leafDepth, extractKey(existingValue), byteArray, newValue)) {
 			return idx::contenthelpers::OptionalValue<ValueType>();
 		} else {
 			*insertStack[leafDepth].mChildPointer = HOTSingleThreadedChildPointer(idx::contenthelpers::valueToTid(newValue));
@@ -327,13 +354,16 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline t
 	HOTSingleThreadedChildPointer const * current = &mRoot;
 
 	auto const & fixedSizedSearchKey = idx::contenthelpers::toFixSizedKey(idx::contenthelpers::toBigEndianByteOrder(searchKey));
-	std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> searchKeyBytes = std::move(idx::contenthelpers::interpretAsByteArray(fixedSizedSearchKey));
+	uint8_t searchByteArray[idx::contenthelpers::MAX_STRING_KEY_LENGTH];
+	memset(searchByteArray, 0, sizeof(searchByteArray));
+	idx::contenthelpers::interpretAsByteArray(fixedSizedSearchKey, searchByteArray);
+	// std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> searchKeyBytes = std::move(idx::contenthelpers::interpretAsByteArray(fixedSizedSearchKey));
 
 	HOTSingleThreaded<ValueType, KeyExtractor>::const_iterator it(current, current + 1);
 	while(!current->isLeaf()) {
 		current = it.descend(current->getNode()->begin(), 
 			current->executeForSpecificNodeType(true, [&](auto & node) {
-			return node.search(searchKeyBytes.second.get());
+			return node.search(searchByteArray);
 		}), current->getNode()->end());
 	}
 
@@ -371,7 +401,10 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline  
 		}
 	} else {
 		auto const & fixedSizeKey = idx::contenthelpers::toFixSizedKey(idx::contenthelpers::toBigEndianByteOrder(searchKey));
-		std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> keyBytes = std::move(idx::contenthelpers::interpretAsByteArray(fixedSizeKey));
+		uint8_t byteArray[idx::contenthelpers::MAX_STRING_KEY_LENGTH];
+		memset(byteArray, 0, sizeof(byteArray));
+		uint16_t byteLength = idx::contenthelpers::interpretAsByteArray(fixedSizeKey, byteArray);
+		// std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> keyBytes = std::move(idx::contenthelpers::interpretAsByteArray(fixedSizeKey));
 
 		HOTSingleThreadedChildPointer const * current = &mRoot;
 		std::array<uint16_t, 64> mostSignificantBitIndexes;
@@ -379,15 +412,18 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline  
 		while(!current->isLeaf()) {
 			current = it.descend(current->getNode()->begin(), current->executeForSpecificNodeType(true, [&](auto & node) {
 				mostSignificantBitIndexes[it.mCurrentDepth] = node.mDiscriminativeBitsRepresentation.mMostSignificantDiscriminativeBitIndex;
-				return node.search(keyBytes.second.get());
+				return node.search(byteArray);
 			}), current->getNode()->end());
 		}
 
 		ValueType const & existingValue = *it;
 		auto const & existingFixedSizeKey = idx::contenthelpers::toFixSizedKey(idx::contenthelpers::toBigEndianByteOrder(extractKey(existingValue)));
-		std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> existingKeyBytes = std::move(idx::contenthelpers::interpretAsByteArray(existingFixedSizeKey));
+		uint8_t existingByteArray[idx::contenthelpers::MAX_STRING_KEY_LENGTH];
+		memset(existingByteArray, 0, sizeof(existingByteArray));
+		uint16_t existingByteLength = idx::contenthelpers::interpretAsByteArray(existingFixedSizeKey, existingByteArray);
+		// std::pair<uint16_t, std::unique_ptr<uint8_t const[]>> existingKeyBytes = std::move(idx::contenthelpers::interpretAsByteArray(existingFixedSizeKey));
 
-		bool keysDiff = hot::commons::executeForDiffingKeys(existingKeyBytes.second.get(), keyBytes.second.get(), std::max(existingKeyBytes.first, keyBytes.first), [&](hot::commons::DiscriminativeBit const & significantKeyInformation) {
+		bool keysDiff = hot::commons::executeForDiffingKeys(existingByteArray, byteArray, std::max(existingByteLength, byteLength), [&](hot::commons::DiscriminativeBit const & significantKeyInformation) {
 			//searches for the node to insert the new value into.
 			//Be aware that this can result in a false positive. Therefor in case only a single entry is affected and it has a child node it must be inserted into the child node
 			//this is an alternative approach to using getLeastSignificantDiscriminativeBitForEntry
@@ -437,11 +473,14 @@ inline void insertNewValueIntoNode(std::array<HOTSingleThreadedInsertStackEntry,
 			entryIndex, significantKeyInformation
 		);
 
+		// K2LOG_D(k2::log::hot, "InsertInformation {}", insertInformation);
 		//As entryMask hasOnly a single bit set insertInformation.mAffectedSubtreeMask == entryMask checks whether the entry bit is the only bit set in the affectedSubtreeMask
 		bool isSingleEntry = (insertInformation.getNumberEntriesInAffectedSubtree() == 1);
+		K2LOG_D(k2::log::hot, "IsSingleEntry = {}", isSingleEntry);
 		unsigned int nextInsertDepth = insertDepth + 1u;
 
 		bool isLeafEntry = (nextInsertDepth == leafDepth);
+		K2LOG_D(k2::log::hot, "IsLeafEntry = {}", isLeafEntry);
 
 		if(isSingleEntry & isLeafEntry) {
 			HOTSingleThreadedChildPointer const & leafEntry = *insertStack[nextInsertDepth].mChildPointer;
@@ -486,6 +525,7 @@ template<typename NodeType> inline void insertNewValue(NodeType const &existingN
 	HOTSingleThreadedInsertStackEntry const & insertStackEntry = insertStack[insertDepth];
 
 	if (!existingNode.isFull()) {
+		K2LOG_D(k2::log::hot, "Existing Node is not full");
 		HOTSingleThreadedChildPointer newNodePointer = existingNode.addEntry(insertInformation, valueToInsert);
 		*(insertStackEntry.mChildPointer) = newNodePointer;
 		delete &existingNode;

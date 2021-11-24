@@ -75,6 +75,9 @@ namespace k2
     inline MapIterator mapindexer::last()
     {
         //TODO check 
+        if(idx.empty()) {
+            return idx.end();
+        }
         auto rit = idx.rbegin();
         ++rit;
         return rit.base();
