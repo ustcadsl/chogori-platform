@@ -23,7 +23,7 @@
 #include <k2/dto/K23SI.h>
 //#include <k2/indexer/IndexerInterface.h>
 
-//#include <k2/indexer/MapIndexer.h>
+#include <k2/indexer/MapIndexer.h>
 //#include <k2/indexer/HOTIndexer.h>
 #include "plog.h"
 #include "schema.h"
