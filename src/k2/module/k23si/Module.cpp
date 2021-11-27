@@ -2216,7 +2216,7 @@ K23SIPartitionModule::_getDataRecordForRead(VersionSet& versions, dto::Timestamp
 
 // Helper to remove a WI and delete the key from the indexer of there are no committed records
 void K23SIPartitionModule::_removeWI(KeyValueNode& node) {
-    node.remove_datarecord(0);
+    node.remove_datarecord(0, pbrb); //////
     //TODO check available
     if (node.begin() == nullptr) {
         _indexer.erase(node.get_key());

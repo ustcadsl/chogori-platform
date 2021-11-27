@@ -277,7 +277,7 @@ namespace k2 {
             for (int i = 0; i < 3; ++i)
                 if (timestamp.tEndTSECount() == valuedata[i].timestamp) {
                     set_inmem(i, 1);
-                    datarecord->prevVersion = valuedata[i].valuepointer;
+                    //datarecord->prevVersion = valuedata[i].valuepointer;
                     valuedata[i].valuepointer = datarecord;
                     return 0;
                 }
@@ -377,7 +377,8 @@ namespace k2 {
             if (size_dec()==1) 
                 K2LOG_D(log::indexer, "try to remove with no versions, Key: {} {} {}", key.schemaName, key.partitionKey, key.rangeKey);
             if (valuedata[2].valuepointer != nullptr) {
-                if(valuedata[2].valuepointer->prevVersion != nullptr){
+                //if(valuedata[2].valuepointer->prevVersion != nullptr){
+                if(!is_inmem(2) && valuedata[2].valuepointer->prevVersion != nullptr){ //////
                     valuedata[2].valuepointer = valuedata[2].valuepointer->prevVersion;
                     set_tombstone(2, valuedata[2].valuepointer->isTombstone);
                     set_inmem(2, 0);
