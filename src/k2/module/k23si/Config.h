@@ -64,6 +64,8 @@ struct K23SIConfig {
     // Default is > paginiationLimit so it will always push
     ConfigVar<uint32_t> queryPushLimit{"k23si_query_push_limit", 11};
 
+    // the path of pmem engine
+    ConfigVar<String> PmemEnginePath{"k23si_pmem_engine_path","/mnt/pmem0/chogori-engine"};
     // the endpoint for our persistence
     ConfigVar<std::vector<String>> persistenceEndpoint{"k23si_persistence_endpoints"};
     ConfigDuration persistenceTimeout{"k23si_persistence_timeout", 10s};
