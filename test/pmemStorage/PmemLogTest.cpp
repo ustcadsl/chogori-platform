@@ -189,6 +189,16 @@ SCENARIO("Test write and read SKVRecord::Storage from PmemLog"){
     k2::dto::SKVRecord::Storage read_storage{};
     std::get<1>(readResult).read(read_storage);
     REQUIRE(storage.schemaVersion == read_storage.schemaVersion);
+    
+    k2::dto::SKVRecord reconstructed("collection", std::make_shared<k2::dto::Schema>(schema),
+                                     std::move(read_storage), true);
+    std::optional<k2::String> last = reconstructed.deserializeNext<k2::String>();
+    REQUIRE(!last.has_value());
+    std::optional<k2::String> first = reconstructed.deserializeNext<k2::String>();
+    REQUIRE(first.has_value());
+    REQUIRE(first == "b");
+    std::optional<int32_t> balance = reconstructed.deserializeNext<int32_t>();
+    REQUIRE(!balance.has_value());
 
 }
 
