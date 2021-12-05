@@ -68,14 +68,12 @@ SCENARIO("Test append small data to PmemLog") {
     char * testdata = new char[128];
     memset(testdata, 43, 128);
     sprintf(testdata,"str[1]fortest");
-
     Payload p(Payload::DefaultAllocator(128));
     p.write(testdata, 128);
     p.seek(0);
     auto result = engine_ptr->append(p);
     REQUIRE(std::get<0>(result).is2xxOK());
-    REQUIRE(std::get<1>(result).start_offset == 0); 
-    REQUIRE(std::get<1>(result).size == 128);
+    REQUIRE(std::get<1>(result) == 0); 
     delete engine_ptr;
     delete testdata;
 }
@@ -99,7 +97,6 @@ SCENARIO("Test append large data to PmemLog") {
         p.write(testdata, data_size);
         p.seek(0);
         result = engine_ptr->append(p);
-
     }
     REQUIRE(std::get<0>(result).is2xxOK());
     delete engine_ptr;
@@ -114,8 +111,7 @@ SCENARIO("Test read small data within one chunk from PmemLog") {
     REQUIRE(status.is2xxOK());
     //construct read address
     PmemAddress pmemaddr;
-    pmemaddr.start_offset = 0;
-    pmemaddr.size = 128;
+    pmemaddr = 0;
     // construct the expect data
     char * expect_data = new char[128];
     memset(expect_data, 43, 128);
@@ -138,17 +134,15 @@ SCENARIO("Test read large data across two chunks from PmemLog") {
     REQUIRE(status.is2xxOK());
     //construct read address
     PmemAddress pmemaddr;
-    pmemaddr.start_offset = 100 + 3* 1024*1024;
-    pmemaddr.size = 1024*1024;
+    pmemaddr = 128 + 3*1024*1024 + 4*8;
     char * expect_data = new char[1024*1024];
     memset(expect_data, 45, 1024*1024);
     sprintf(expect_data,"str[3]fortest");
-
     auto result = engine_ptr->read(pmemaddr);
     REQUIRE(std::get<0>(result).is2xxOK());
     char * payload_data = new char[1024*1024];
     std::get<1>(result).read(payload_data, 1024*1024);
-    REQUIRE(strcmp(expect_data,payload_data));
+    REQUIRE(strcmp(expect_data,payload_data) == 0);
     delete engine_ptr;
     delete expect_data;
     delete payload_data;

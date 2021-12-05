@@ -98,25 +98,26 @@ Status PmemLog::init(PmemEngineConfig &plog_meta){
 
 std::tuple<Status, PmemAddress> PmemLog::append(Payload &payload){
     PmemAddress pmemAddr;
-    pmemAddr.start_offset = _plog_meta.tail_offset;
-    pmemAddr.size = payload.getSize();
+    pmemAddr = _plog_meta.tail_offset;
+    PmemSize appendSize = payload.getSize() + 8;
     // checkout the is_sealed condition
     if( _plog_meta.is_sealed ){
         Status status = PmemStatuses::S409_Conflict_Append_Sealed_engine;
         return std::tuple<Status, PmemAddress>(std::move(status), std::move(pmemAddr));
     }
     // checkout the capacity
-    if ( _plog_meta.tail_offset + pmemAddr.size > _plog_meta.engine_capacity){
+    if ( _plog_meta.tail_offset + appendSize > _plog_meta.engine_capacity){
         Status status = PmemStatuses::S507_Insufficient_Storage_Over_Capcity;
         return std::tuple<Status, PmemAddress>(std::move(status), std::move(pmemAddr));
     }
+    char * buffer_data = (char*)malloc(appendSize);
     size_t payload_data_size = payload.getSize();
-    char * buffer_data = (char*)malloc(payload_data_size );
+    * (PmemSize *)(buffer_data) = payload_data_size;
     payload.seek(0);
     //promise not change the payload content
-    payload.read(buffer_data, payload_data_size);
+    payload.read(buffer_data + sizeof (PmemSize), payload_data_size);
     payload.seek(0);
-    Status status = _append(buffer_data,payload_data_size);
+    Status status = _append(buffer_data,appendSize);
     free(buffer_data);
     return std::tuple<Status, PmemAddress>(std::move(status), std::move(pmemAddr));
 }
@@ -169,19 +170,20 @@ Status PmemLog::_append(char *srcdata, size_t len){
 std::tuple<Status, Payload> PmemLog::read(const PmemAddress &readAddr){
     Payload payload(Payload::DefaultAllocator());
     // checkout the effectiveness of start_offset
-    if( readAddr.start_offset > _plog_meta.tail_offset){
+    if( readAddr > _plog_meta.tail_offset){
         Status status = PmemStatuses::S403_Forbidden_Invalid_Offset;
         return std::tuple<Status,Payload>(std::move(status), std::move(payload));
     }
+    PmemSize readSize = *(PmemSize *)_read(readAddr, sizeof(PmemSize));
     // checkout the effectiveness of read size
-    if( readAddr.start_offset + readAddr.size > _plog_meta.tail_offset){
+    if( readAddr + readSize > _plog_meta.tail_offset){
         Status status = PmemStatuses::S403_Forbidden_Invalid_Size;
         return std::tuple<Status,Payload>(std::move(status), std::move(payload));
     }
-    char * read_data = _read(readAddr.start_offset, readAddr.size);
-    payload.reserve(readAddr.size);
+    char * read_data = _read(readAddr + sizeof(PmemSize), readSize);
+    payload.reserve(readSize);
     payload.seek(0);
-    payload.write(read_data, readAddr.size);
+    payload.write(read_data, readSize);
     payload.seek(0);
     free(read_data);
     Status status = PmemStatuses::S200_OK_Found;

@@ -36,14 +36,8 @@ inline thread_local k2::logging::Logger pmem_storage("k2::pmem_storage");
 
 // define the plog address
 // 
-struct PmemAddress{
-    uint64_t start_offset = 0;
-    uint64_t size = 0;
-    
-
-    K2_PAYLOAD_FIELDS(start_offset, size);
-    K2_DEF_FMT(PmemAddress,start_offset, size);
-};
+using PmemAddress = uint64_t;
+using PmemSize = uint64_t;
 
 // define the pmem engine status
 // Open Status
