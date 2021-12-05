@@ -25,6 +25,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include <k2/common/Common.h>
 #include <k2/transport/PayloadSerialization.h>
 #include <k2/transport/Status.h>
+#include <k2/pmemStorage/PmemEngine.h>
 
 #include "Collection.h"
 #include "ControlPlaneOracle.h"
@@ -91,6 +92,9 @@ struct DataRecord {
     // the user data for the record
     SKVRecord::Storage value;
 
+    // value stored in pmem
+    PmemAddress value_pmem_pointer = 0;
+
     // marked for tombstones
     bool isTombstone = false;
 
@@ -109,8 +113,8 @@ struct DataRecord {
     // provide idempotent behavior in the case of retries
     uint64_t request_id = 0;
 
-    K2_PAYLOAD_FIELDS(value, timestamp, isTombstone, status, request_id);
-    K2_DEF_FMT(DataRecord, value, timestamp, isTombstone, status, request_id);
+    K2_PAYLOAD_FIELDS(value, value_pmem_pointer, timestamp, isTombstone, status, request_id);
+    K2_DEF_FMT(DataRecord, value, value_pmem_pointer, timestamp, isTombstone, status, request_id);
     };
 
 // A write intent. This is separate from the DataRecord structure which is used for

@@ -190,6 +190,14 @@ K23SIPartitionModule::K23SIPartitionModule(dto::CollectionMetadata cmeta, dto::P
     _partition(std::move(partition), _cmeta.hashScheme) {
     K2LOG_I(log::skvsvr, "---------Partition: {}", _partition);//////
     pbrb = new PBRB(3000, &_retentionTimestamp, &indexer);//////8192 //32768
+    std::string pmemPath = fmt::format("{}/shard{}",_config.PmemEnginePath(),seastar::this_shard_id());
+    strcpy(_engine_config.engine_path,pmemPath.c_str());
+    auto status = PmemEngine::open(_engine_config,&_engine_ptr);
+    if ( !status.is2xxOK()){
+        K2LOG_E(log::skvsvr,"------Partition: {} fail to create pmem engine: {}" ,
+         _partition,status.message);
+    }
+
 #ifdef OUTPUT_ACCESS_PATTERN  
     ofile.open("RWresults.txt");
 #endif
@@ -404,6 +412,8 @@ K23SIPartitionModule::~K23SIPartitionModule() {
 
 seastar::future<> K23SIPartitionModule::gracefulStop() {
     K2LOG_I(log::skvsvr, "stop for cname={}, part={}", _cmeta.name, _partition);
+    delete _engine_ptr;
+    delete pbrb;
     return _retentionUpdateTimer.stop()
         .then([this] {
             return _txnMgr.gracefulStop();
@@ -423,11 +433,13 @@ seastar::future<> K23SIPartitionModule::gracefulStop() {
 seastar::future<std::tuple<Status, dto::K23SIReadResponse>>
 _makeReadOK(dto::DataRecord* rec) {
     if (rec == nullptr || rec->isTombstone) {
+        K2LOG_I(log::skvsvr,"Read result not OK!");
         return RPCResponse(dto::K23SIStatus::KeyNotFound("read did not find key"), dto::K23SIReadResponse{});
     }
 
     auto response = dto::K23SIReadResponse();
     response.value = rec->value.share();
+    K2LOG_I(log::skvsvr,"Read result is OK: {}",response);
     return RPCResponse(dto::K23SIStatus::OK("read succeeded"), std::move(response));
 }
 
@@ -608,6 +620,16 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
         NodeVerMetadata verMD = KVNode.getNodeVerMetaData(order, pbrb);
         if (verMD.isHot)
             record = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(record));
+
+        // read the previouse datarecord
+        auto read_pmem_status = _engine_ptr->read(record->value_pmem_pointer);
+        if (!std::get<0>(read_pmem_status).is2xxOK()){
+            K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
+            _partition, std::get<0>(read_pmem_status).message);
+        }
+        std::get<1>(read_pmem_status).read(record->value);
+
+
 
         K2LOG_D(log::skvsvr, "Scan at key {}", KVNode.get_key());
         bool needPush = record != nullptr && record->status == dto::DataRecord::WriteIntent && record->timestamp.compareCertain(request.mtr.timestamp) < 0;
@@ -808,10 +830,21 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             K2ASSERT(log::skvsvr, schemaIt != _schemas.end(), "Found Schema: {}", schemaIt->first);
             uint32_t sVer;
             // datarecord
-            if (!nodePtr->is_inmem(order))
+            if (!nodePtr->is_inmem(order)){
+                // read version from pmem engine
+                auto read_pmem_status = _engine_ptr->read(rec->value_pmem_pointer);
+                if (!std::get<0>(read_pmem_status).is2xxOK()){
+                    K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
+                    _partition, std::get<0>(read_pmem_status).message);
+                }
+                std::get<1>(read_pmem_status).read(rec->value);
                 sVer = rec->value.schemaVersion;
+
+                K2LOG_I(log::skvsvr,"Read datarecord  from pmemLog {}",*rec);
+            }
             // hot row
             else {
+                K2LOG_I(log::skvsvr,"Read datarecord value from pbrb {}",rec->value);
                 sVer = pbrb->getSchemaVer(rec);
             }
             auto schemaVer = schemaIt->second.find(sVer);
@@ -856,7 +889,8 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             K2LOG_D(log::skvsvr, "SMAPIDX: {}", SMapIndex);
             if (!nodePtr->is_inmem(order)) {
                 // case 2: cold version (in kvnode)
-                K2LOG_D(log::skvsvr, "Case 2: Cold Version in KVNode");
+                K2LOG_I(log::skvsvr, "Case 2: Cold Version in KVNode");
+
                 clock_t  _findPositionStart = clock(); //////
                 std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex); 
                 BufferPage *pagePtr = retVal.first;
@@ -874,7 +908,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 
                 clock_t  _Headerstart = clock(); //////
                 auto rowAddr = pbrb->cacheRowHeaderFrom(SMapIndex, pagePtr, rowOffset, rec);
-                K2LOG_D(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
+                K2LOG_I(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
                 clock_t  _HeaderEnd = clock(); ////// 
                 totalHeaderms[indexFlag] += (double)(_HeaderEnd - _Headerstart)/CLOCKS_PER_SEC*1000; //////
 
@@ -906,7 +940,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 clock_t _updateKBNStart = clock();
                 void *hotAddr = pbrb->getAddrByPageAndOffset(SMapIndex, pagePtr, rowOffset);
                 int returnValue= nodePtr->insert_hot_datarecord(rec->timestamp, static_cast<dto::DataRecord *>(hotAddr));
-                K2LOG_D(log::skvsvr, "Cache request.key: {} in KVNode and PBRB, schemaID:{}, returnValue:{}, order:{}", request.key, SMapIndex, returnValue, order);
+                K2LOG_I(log::skvsvr, "Cache request.key: {} in KVNode and PBRB, schemaID:{}, returnValue:{}, order:{}", request.key, SMapIndex, returnValue, order);
                 K2LOG_D(log::skvsvr, "Stored hot address: {} in node", hotAddr);
                 clock_t  _updateKVNEnd = clock(); ////// 
                 totalUpdateKVNodems[indexFlag] += (double)(_updateKVNEnd-_updateKBNStart)/CLOCKS_PER_SEC*1000; //////
@@ -970,7 +1004,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
     }
     ////////////////////////////////////
 
-    K2LOG_D(log::skvsvr, "Result of Getrecord with status{} key{}", result ? result->status : -1, nodePtr->get_key());
+    K2LOG_I(log::skvsvr, "Result of Getrecord with status{} key{}", result ? result->status : -1, nodePtr->get_key());
     // case need push: WI && WI.ts < tx.timestamp
     bool needPush = result != nullptr && result->status == dto::DataRecord::WriteIntent && result->timestamp.compareCertain(request.mtr.timestamp) < 0;
     
@@ -1468,6 +1502,15 @@ bool K23SIPartitionModule::_parsePartialRecord(dto::K23SIWriteRequest& request, 
         request.value.excludedFields = std::vector<bool>(schema.fields.size(), false);
     }
 
+    // read the previouse datarecord
+    auto read_pmem_status = _engine_ptr->read(previous.value_pmem_pointer);
+    if (!std::get<0>(read_pmem_status).is2xxOK()){
+        K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
+        _partition, std::get<0>(read_pmem_status).message);
+    }
+    std::get<1>(read_pmem_status).read(previous.value);
+
+
     // based on the latest version to construct the new SKVRecord
     if (request.value.schemaVersion == previous.value.schemaVersion) {
         // quick path --same schema version.
@@ -1773,17 +1816,40 @@ Status
 K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, KeyValueNode& KVNode) {
     K2LOG_D(log::skvsvr, "Write Request creating WI: {}", request);
     // we need to copy this data into a new memory block so that we don't hold onto and fragment the transport memory
-    dto::DataRecord *rec = new dto::DataRecord{.value=request.value.copy(), .isTombstone=request.isDelete, .timestamp=request.mtr.timestamp,
-                        .prevVersion=nullptr, .status=dto::DataRecord::WriteIntent, .request_id=request.request_id};
+    
+    Payload payload(Payload::DefaultAllocator());
+    payload.write(request.value);
+    payload.seek(0);
+    auto pmem_status = _engine_ptr->append(payload);
+    if( !std::get<0>(pmem_status).is2xxOK()){
+        return std::get<0>(pmem_status);
+    }
+    PmemAddress pmemAddr =  std::get<1>(pmem_status);
 
-    //KVNode.insert_datarecord(rec);
+
+    // // read the previouse datarecord
+    // auto read_pmem_status = _engine_ptr->read(pmemAddr);
+    // if (!std::get<0>(read_pmem_status).is2xxOK()){
+    //     K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
+    //     _partition, std::get<0>(read_pmem_status).message);
+    // }
+    // k2::dto::SKVRecord::Storage read_storage{};
+    // std::get<1>(read_pmem_status).read(read_storage);
+
+
+
+
+
+
+    dto::DataRecord *rec = new dto::DataRecord{.value = dto::SKVRecord::Storage{}, .value_pmem_pointer = pmemAddr, .isTombstone=request.isDelete, .timestamp=request.mtr.timestamp,
+                        .prevVersion=nullptr, .status=dto::DataRecord::WriteIntent, .request_id=request.request_id};
+        //KVNode.insert_datarecord(rec);
     //KVNode.printAll();
     KVNode.insert_datarecord(rec, pbrb);
     // TODO: evict old hot version in pbrb!
     KVNode.set_writeintent();
     K2LOG_D(log::skvsvr, "After _createWI:");
     // KVNode.printAll();
-
     auto status = _twimMgr.addWrite(std::move(request.mtr), std::move(request.key), std::move(request.trh), std::move(request.trhCollection));
 
     if (!status.is2xxOK()) {
@@ -2085,6 +2151,7 @@ K23SIPartitionModule::handleInspectRecords(dto::K23SIInspectRecordsRequest&& req
         }
         dto::DataRecord copy {
             .value=rec->value.share(),
+            .value_pmem_pointer =rec->value_pmem_pointer,
             .isTombstone=rec->isTombstone,
             .timestamp=rec->timestamp,
             .prevVersion=rec->prevVersion,
@@ -2138,6 +2205,7 @@ K23SIPartitionModule::handleInspectWIs(dto::K23SIInspectWIsRequest&&) {
 
         dto::DataRecord copy {
                 .value=rec->value.share(),
+                .value_pmem_pointer=rec->value_pmem_pointer,
                 .isTombstone=rec->isTombstone,
                 .timestamp=rec->timestamp,
                 .prevVersion=rec->prevVersion,

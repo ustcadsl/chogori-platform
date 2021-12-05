@@ -26,6 +26,8 @@ Copyright(c) 2020 Futurewei Cloud
 #include <cstdarg>
 #include <k2/pmemStorage/PmemLog.h>
 #include <k2/pmemStorage/PmemEngine.h>
+#include <k2/dto/SKVRecord.h>
+
 #include "catch2/catch.hpp"
 
 
@@ -146,6 +148,48 @@ SCENARIO("Test read large data across two chunks from PmemLog") {
     delete engine_ptr;
     delete expect_data;
     delete payload_data;
+}
+SCENARIO("Test write and read SKVRecord::Storage from PmemLog"){
+    PmemEngineConfig plogConfig;
+    strcpy(plogConfig.engine_path,testBaseDir.c_str());
+    auto status = PmemEngine::open(plogConfig, &engine_ptr);
+    REQUIRE(status.is2xxOK());
+
+    k2::dto::Schema schema;
+    schema.name = "test_schema";
+    schema.version = 1;
+    schema.fields = std::vector<k2::dto::SchemaField> {
+            {k2::dto::FieldType::STRING, "LastName", false, false},
+            {k2::dto::FieldType::STRING, "FirstName", false, false},
+            {k2::dto::FieldType::INT32T, "Balance", false, false}
+    };
+    schema.setPartitionKeyFieldsByName(std::vector<k2::String>{"LastName"});
+    schema.setRangeKeyFieldsByName(std::vector<k2::String>{"FirstName"});
+
+    k2::dto::SKVRecord doc("collection", std::make_shared<k2::dto::Schema>(schema));
+    doc.serializeNull();
+    doc.serializeNext<k2::String>("b");
+    doc.serializeNext<int32_t>(12);
+
+    // Testing a typical use-case of getSKVKeyRecord where the storage is serialized
+    // to payload and then read back later
+    k2::dto::SKVRecord key_record = doc.getSKVKeyRecord();
+    const k2::dto::SKVRecord::Storage& storage = key_record.getStorage();
+    k2::Payload payload(k2::Payload::DefaultAllocator());
+    payload.write(storage);
+    
+    auto writeResult = engine_ptr->append(payload);
+    REQUIRE(std::get<0>(writeResult).is2xxOK());
+
+    PmemAddress payloadAddr = std::get<1>(writeResult);
+
+    auto readResult = engine_ptr->read(payloadAddr);
+    REQUIRE(std::get<0>(readResult).is2xxOK());
+
+    k2::dto::SKVRecord::Storage read_storage{};
+    std::get<1>(readResult).read(read_storage);
+    REQUIRE(storage.schemaVersion == read_storage.schemaVersion);
+
 }
 
 SCENARIO("Remove all the test files")

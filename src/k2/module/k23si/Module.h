@@ -37,7 +37,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include <k2/indexer/IndexerInterface.h>
 #include <k2/indexer/MapIndexer.h>
 #include <k2/indexer/HOTIndexer.h>
-
+#include <k2/dto/SKVRecord.h>
 #include "ReadCache.h"
 #include "TxnManager.h"
 #include "TxnWIMetaManager.h"
@@ -47,6 +47,9 @@ Copyright(c) 2020 Futurewei Cloud
 
 #include <k2/pbrb/indexer.h>
 #include <k2/pbrb/pbrb_design.h>
+#include <k2/pmemStorage/PmemEngine.h>
+#include <k2/pmemStorage/PmemLog.h>
+
 #include <map>
 #include<fstream>
 using namespace std;
@@ -283,7 +286,10 @@ private:  // members
     mapindexer _mapIndexer;
 
     PBRB *pbrb; //////
-  
+    
+    PmemEngine * _engine_ptr;
+    PmemEngineConfig _engine_config;
+
     Index indexer; //////
 
     long pbrbHitNum[12] = {0}; //////
