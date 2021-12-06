@@ -4,6 +4,8 @@ cd ${topname}/../..
 set -e
 CPODIR=/tmp/___cpo_integ_test
 rm -rf ${CPODIR}
+PmemEnginePath=/mnt/pmem0/chogori-engine/*
+rm -rf ${PmemEnginePath}
 EPS="tcp+k2rpc://0.0.0.0:10000"
 
 PERSISTENCE=tcp+k2rpc://0.0.0.0:12001
