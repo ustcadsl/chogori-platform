@@ -844,8 +844,8 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             }
             // hot row
             else {
-                K2LOG_I(log::skvsvr,"Read datarecord value from pbrb {}",rec->value);
                 sVer = pbrb->getSchemaVer(rec);
+                // K2LOG_I(log::skvsvr,"Read datarecord value from pbrb {}",rec->value);
             }
             auto schemaVer = schemaIt->second.find(sVer);
             K2ASSERT(log::skvsvr, schemaVer != schemaIt->second.end(), "sVer: {}", sVer);
