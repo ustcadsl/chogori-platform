@@ -111,7 +111,7 @@ std::tuple<Status, PmemAddress> PmemLog::append(Payload &payload){
         return std::tuple<Status, PmemAddress>(std::move(status), std::move(pmemAddr));
     }
     char * buffer_data = (char*)malloc(appendSize);
-    size_t payload_data_size = payload.getSize();
+    uint64_t payload_data_size = payload.getSize();
     * (PmemSize *)(buffer_data) = payload_data_size;
     payload.seek(0);
     //promise not change the payload content
@@ -123,43 +123,45 @@ std::tuple<Status, PmemAddress> PmemLog::append(Payload &payload){
 }
 
 Status PmemLog::_append(char *srcdata, size_t len){
-    K2LOG_D(log::pmem_storage,"Append data: offset=>{},size=>{} ", _plog_meta.tail_offset, len);
+    K2LOG_D(log::pmem_storage,"Append data: offset=>{},len=>{} ", _plog_meta.tail_offset, len);
     // calculate data need to write in the activate chunk
     size_t remaining_space = _plog_meta.chunk_count * _plog_meta.chunk_size - _plog_meta.tail_offset;
-    size_t write_size = remaining_space <= len? remaining_space : len;
+    size_t first_write_size = remaining_space <= len? remaining_space : len;
     char * addr = _chunk_list[_active_chunk_id].pmem_addr + _plog_meta.tail_offset%_plog_meta.chunk_size;
 
     if (_is_pmem){
-        _copyToPmem(addr, srcdata, write_size);
+        _copyToPmem(addr, srcdata, first_write_size);
     }else{
-        _copyToNonPmem(addr, srcdata, write_size);
+        _copyToNonPmem(addr, srcdata, first_write_size);
     }
     // there is still data need to write to the next chunks
-    if (len > remaining_space){
-        size_t need_new_chunk= ceil((len-remaining_space)/_plog_meta.chunk_size) + 1;
-        for( size_t i = 0; i < need_new_chunk; i++){
+    if (len > first_write_size){
+        size_t need_write_size = len - first_write_size;
+        size_t need_new_chunk = need_write_size % _plog_meta.chunk_size != 0? 
+                                 need_write_size/_plog_meta.chunk_size+1:
+                                 need_write_size/_plog_meta.chunk_size;
+        K2LOG_D(log::pmem_storage, "Need write size:{} ,need new chunk:{}",need_write_size,need_new_chunk);
+        for( size_t i = 1; i <= need_new_chunk; i++){
             String chunkFileName = _genNewChunk();
             auto chunkStatus = _createThenMapFile(chunkFileName, _plog_meta.chunk_size);
             _plog_meta.chunk_count++;
             if(!std::get<0>(chunkStatus).is2xxOK()){
                 return std::get<0>(chunkStatus);
             }
-            char * chunkFileAddr = std::get<1>(chunkStatus);
-            struct FileInfo tmp_chunk = {.file_name=std::move(chunkFileName),.pmem_addr=chunkFileAddr};
+            char * newChunkAddr = std::get<1>(chunkStatus);
+            struct FileInfo tmp_chunk = {.file_name=std::move(chunkFileName),.pmem_addr=newChunkAddr};
             _chunk_list.push_back(std::move(tmp_chunk));
-            if( i == need_new_chunk-1){
-                if (_is_pmem){
-                    _copyToPmem(chunkFileAddr, srcdata+remaining_space + i*_plog_meta.chunk_size, (len-remaining_space)%_plog_meta.chunk_size);
-                }else{
-                    _copyToNonPmem(chunkFileAddr, srcdata+remaining_space + i*_plog_meta.chunk_size, (len-remaining_space)%_plog_meta.chunk_size);
-                }
+            // start to write to another chunk
+            size_t tmp_write_size =  need_write_size >= _plog_meta.chunk_size?
+                                    _plog_meta.chunk_size:
+                                    need_write_size;
+            K2LOG_D(log::pmem_storage, "tmp write size:{}",tmp_write_size);
+            if (_is_pmem){
+                _copyToPmem(newChunkAddr, srcdata + len- need_write_size, tmp_write_size);
             }else{
-                if (_is_pmem){
-                    _copyToPmem(chunkFileAddr, srcdata+remaining_space + i*_plog_meta.chunk_size, _plog_meta.chunk_size);
-                }else{
-                    _copyToNonPmem(chunkFileAddr, srcdata+remaining_space + i*_plog_meta.chunk_size, _plog_meta.chunk_size);
-                }
+                _copyToNonPmem(newChunkAddr, srcdata + len- need_write_size,tmp_write_size);
             }
+            need_write_size -= tmp_write_size;
         }
     }
     _plog_meta.tail_offset += len;
@@ -190,25 +192,33 @@ std::tuple<Status, Payload> PmemLog::read(const PmemAddress &readAddr){
     return std::tuple<Status, Payload>(std::move(status), std::move(payload));
 }
 
- char* PmemLog::_read(uint64_t offset, uint64_t size){
-    K2LOG_D(log::pmem_storage, "Read data: offset =>{},size=>{}",offset,size);
-    char * buffer_data = (char *)malloc(size);
+ char* PmemLog::_read(uint64_t offset, uint64_t len){
+    K2LOG_D(log::pmem_storage, "Read data: offset =>{},len=>{}",offset,len);
+    char * buffer_data = (char *)malloc(len);
     // calculate the size need read in the first chunk
-    size_t remaining_chunk_space = _plog_meta.chunk_size - offset % _plog_meta.chunk_size;
-    size_t read_size = remaining_chunk_space <= size ? remaining_chunk_space: size;
-    char * addr = _chunk_list[offset/_plog_meta.chunk_size].pmem_addr + offset % _plog_meta.chunk_size;
-    memcpy(buffer_data, addr, read_size);
+    size_t start_chunk_id = offset/_plog_meta.chunk_size;
+    size_t start_chunk_offset = offset % _plog_meta.chunk_size;
+    size_t start_chunk_remaining_space = _plog_meta.chunk_size - start_chunk_offset;
+    size_t first_read_size = start_chunk_remaining_space <= len ? start_chunk_remaining_space: len;
+    char * star_addr = _chunk_list[start_chunk_id].pmem_addr + start_chunk_offset;
+    memcpy(buffer_data, star_addr, first_read_size);
     // there is still data in next chunks
-    if(read_size < size){
-        size_t need_read_chunk = ceil((size-read_size)/_plog_meta.chunk_size);
-        int chunk_id = offset/_plog_meta.chunk_size + 1;
-        size_t need_read_size = size - read_size;
-        for(size_t i = 0; i < need_read_chunk; i++){
-            char * chunk_addr = _chunk_list[chunk_id+i].pmem_addr;
-            size_t tmp_read_size =  need_read_size >= _plog_meta.chunk_size? _plog_meta.chunk_size:need_read_size;
-            memcpy(buffer_data + size - need_read_size ,chunk_addr,tmp_read_size);
+    if(len > first_read_size){
+        size_t need_read_size = len - first_read_size;
+        size_t need_read_chunk = need_read_size % _plog_meta.chunk_size != 0? 
+                                 need_read_size/_plog_meta.chunk_size + 1:
+                                 need_read_size/_plog_meta.chunk_size;
+        K2LOG_D(log::pmem_storage, "Need read size:{} ,need read anthor chunk:{}",need_read_size,need_read_chunk);
+        for(size_t i = 1; i <= need_read_chunk; i++){
+            char * chunk_addr = _chunk_list[start_chunk_id+i].pmem_addr;
+            size_t tmp_read_size =  need_read_size >= _plog_meta.chunk_size? 
+                                    _plog_meta.chunk_size:
+                                    need_read_size;
+            K2LOG_D(log::pmem_storage, "tmp read size:{}",tmp_read_size);
+            memcpy(buffer_data + len - need_read_size ,chunk_addr,tmp_read_size);
             need_read_size -= tmp_read_size;
         }
+
     }
     return buffer_data;
 }

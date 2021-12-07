@@ -69,7 +69,7 @@ SCENARIO("Test append small data to PmemLog") {
     REQUIRE(status.is2xxOK());
     char * testdata = new char[128];
     memset(testdata, 43, 128);
-    sprintf(testdata,"str[1]fortest");
+    sprintf(testdata,"str[1]cc");
     Payload p(Payload::DefaultAllocator(128));
     p.write(testdata, 128);
     p.seek(0);
@@ -81,20 +81,21 @@ SCENARIO("Test append small data to PmemLog") {
 }
 
 SCENARIO("Test append large data to PmemLog") {
-    // test write 1KB data once a time and write 128*1024 times, totally 128MB
+    // test write 1KB data once a time and write 64*1024 times, totally 128MB
     // it will generate 32 plog files in totally
     PmemEngineConfig plogConfig;
     strcpy(plogConfig.engine_path,testBaseDir.c_str());
     auto status = PmemEngine::open(plogConfig, &engine_ptr);
     REQUIRE(status.is2xxOK());
 
-    uint32_t times = 128;
+    uint32_t times = 64;
     uint32_t data_size = 1024*1024;
     char * testdata = new char[data_size];
-    memset(testdata, 45, data_size);
+    
     std::tuple<Status, PmemAddress> result;
     for (uint32_t i = 0; i < times; i++){
-        sprintf(testdata,"str[%u]fortest",i);
+        memset(testdata, 33+i, data_size);
+        sprintf(testdata,"str[%u]cc",i);
         Payload p(Payload::DefaultAllocator(1024*1024));
         p.write(testdata, data_size);
         p.seek(0);
@@ -117,7 +118,7 @@ SCENARIO("Test read small data within one chunk from PmemLog") {
     // construct the expect data
     char * expect_data = new char[128];
     memset(expect_data, 43, 128);
-    sprintf(expect_data,"str[1]fortest");
+    sprintf(expect_data,"str[1]cc");
     //read data
     auto result = engine_ptr->read(pmemaddr);
     REQUIRE(std::get<0>(result).is2xxOK());
@@ -138,8 +139,8 @@ SCENARIO("Test read large data across two chunks from PmemLog") {
     PmemAddress pmemaddr;
     pmemaddr = 128 + 3*1024*1024 + 4*8;
     char * expect_data = new char[1024*1024];
-    memset(expect_data, 45, 1024*1024);
-    sprintf(expect_data,"str[3]fortest");
+    memset(expect_data, 36, 1024*1024);
+    sprintf(expect_data,"str[3]cc");
     auto result = engine_ptr->read(pmemaddr);
     REQUIRE(std::get<0>(result).is2xxOK());
     char * payload_data = new char[1024*1024];
@@ -199,9 +200,66 @@ SCENARIO("Test write and read SKVRecord::Storage from PmemLog"){
     REQUIRE(first == "b");
     std::optional<int32_t> balance = reconstructed.deserializeNext<int32_t>();
     REQUIRE(!balance.has_value());
+    delete engine_ptr;
 
 }
+SCENARIO("Append then Read data from two chunks")
+{
+    if(std::filesystem::exists(testBaseDir)){
+        std::filesystem::remove_all(testBaseDir);
+    }
+    PmemEngineConfig plogConfig;
+    strcpy(plogConfig.engine_path,testBaseDir.c_str());
+    auto status = PmemEngine::open(plogConfig, &engine_ptr);
+    REQUIRE(status.is2xxOK());
 
+    // first append data with size [0,    8388534] firt 8 bytes is token by size
+    //                                           |
+    //  userDataPlog_0.plog        [0,     8388607]   -> 73 left space
+    char * previous_data = new char[8388527];
+    memset(previous_data, 'f', 8388527);
+    Payload p1(Payload::DefaultAllocator(8388527));
+    p1.write(previous_data, 8388527);
+    p1.seek(0);
+    auto write_res = engine_ptr->append(p1);
+    REQUIRE(std::get<0>(write_res).is2xxOK());
+    
+    // last data consume space 8388535
+    // second data will consume 103+8 = 111 space
+    // so will write 38 bytes to next chunk
+    //                                 [8388535, 8388645]                   
+    // Plog distribution : [0,     8388607]->[8388608,     16777215]
+
+    char * second_data = new char[103];
+    memset(second_data, 's', 103);
+    Payload p2(Payload::DefaultAllocator(103));
+    p2.write(second_data, 103);
+    p2.seek(0);
+    auto write_res2 = engine_ptr->append(p2);
+    REQUIRE(std::get<0>(write_res2).is2xxOK());
+
+    char * third_data = new char[1024];
+    memset(third_data, 't', 1024);
+    Payload p3(Payload::DefaultAllocator(1024));
+    p3.write(third_data, 1024);
+    p3.seek(0);
+    auto write_res3 = engine_ptr->append(p3);
+    REQUIRE(std::get<0>(write_res3).is2xxOK());
+
+    auto read_result = engine_ptr->read(8388535);
+    REQUIRE(std::get<0>(read_result).is2xxOK());
+    char * read_second_data = new char[103];
+    memset(read_second_data, 'k', 103);
+    std::get<1>(read_result).read(read_second_data, 103);
+    REQUIRE(strcmp(second_data,read_second_data) == 0);
+
+    delete previous_data;
+    delete second_data;
+    delete third_data;
+    delete read_second_data;
+    delete engine_ptr;
+  
+}                                                                               
 SCENARIO("Remove all the test files")
 {
     bool status = false;

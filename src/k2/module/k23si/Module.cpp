@@ -192,11 +192,13 @@ K23SIPartitionModule::K23SIPartitionModule(dto::CollectionMetadata cmeta, dto::P
     pbrb = new PBRB(3000, &_retentionTimestamp, &indexer);//////8192 //32768
     std::string pmemPath = fmt::format("{}/shard{}",_config.PmemEnginePath(),seastar::this_shard_id());
     strcpy(_engine_config.engine_path,pmemPath.c_str());
-    auto status = PmemEngine::open(_engine_config,&_engine_ptr);
+    PmemEngine *tmp_engine_ptr = nullptr;
+    auto status = PmemEngine::open(_engine_config,&tmp_engine_ptr);
     if ( !status.is2xxOK()){
         K2LOG_E(log::skvsvr,"------Partition: {} fail to create pmem engine: {}" ,
          _partition,status.message);
     }
+    _engine_ptr.reset(tmp_engine_ptr);
 
 #ifdef OUTPUT_ACCESS_PATTERN  
     ofile.open("RWresults.txt");
@@ -341,6 +343,10 @@ void K23SIPartitionModule::_registerMetrics() {
         sm::make_counter("finalized_WI", _finalizedWI, sm::description("Number of WIs finalized"), labels),
         sm::make_gauge("record_versions", _recordVersions, sm::description("Number of record versions over all records"), labels),
         sm::make_counter("total_committed_payload", _totalCommittedPayload, sm::description("Total size of committed payloads"), labels),
+        sm::make_histogram("read_pmem_engine_lantecy", [this]{ return _readPmemEngineLatency.getHistogram();},
+                sm::description("Latency of Read Pmem Engine Operations"), labels),
+        sm::make_histogram("write_pmem_engine_lantecy", [this]{ return _writePmemEngineLatency.getHistogram();},
+                sm::description("Latency of Write Pmem Engine Operations"), labels),
         sm::make_histogram("read_latency", [this]{ return _readLatency.getHistogram();},
                 sm::description("Latency of Read Operations"), labels),
         sm::make_histogram("write_latency", [this]{ return _writeLatency.getHistogram();},
@@ -412,7 +418,7 @@ K23SIPartitionModule::~K23SIPartitionModule() {
 
 seastar::future<> K23SIPartitionModule::gracefulStop() {
     K2LOG_I(log::skvsvr, "stop for cname={}, part={}", _cmeta.name, _partition);
-    delete _engine_ptr;
+
     delete pbrb;
     return _retentionUpdateTimer.stop()
         .then([this] {
@@ -621,8 +627,12 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
         if (verMD.isHot)
             record = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(record));
 
-        // read the previouse datarecord
+        auto start = k2::Clock::now();
+         // read the previouse datarecord
         auto read_pmem_status = _engine_ptr->read(record->value_pmem_pointer);
+        auto dur = k2::Clock::now() - start;
+        _readPmemEngineLatency.add(dur);
+
         if (!std::get<0>(read_pmem_status).is2xxOK()){
             K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
             _partition, std::get<0>(read_pmem_status).message);
@@ -831,8 +841,12 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             uint32_t sVer;
             // datarecord
             if (!nodePtr->is_inmem(order)){
+                auto start = k2::Clock::now();
                 // read version from pmem engine
                 auto read_pmem_status = _engine_ptr->read(rec->value_pmem_pointer);
+                auto dur = k2::Clock::now() - start;
+                _readPmemEngineLatency.add(dur);
+                
                 if (!std::get<0>(read_pmem_status).is2xxOK()){
                     K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
                     _partition, std::get<0>(read_pmem_status).message);
@@ -840,7 +854,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 std::get<1>(read_pmem_status).read(rec->value);
                 sVer = rec->value.schemaVersion;
 
-                K2LOG_I(log::skvsvr,"Read datarecord  from pmemLog {}",*rec);
+                // K2LOG_I(log::skvsvr,"Read datarecord  from pmemLog {}",*rec);
             }
             // hot row
             else {
@@ -1502,8 +1516,12 @@ bool K23SIPartitionModule::_parsePartialRecord(dto::K23SIWriteRequest& request, 
         request.value.excludedFields = std::vector<bool>(schema.fields.size(), false);
     }
 
+    auto start = k2::Clock::now();
     // read the previouse datarecord
     auto read_pmem_status = _engine_ptr->read(previous.value_pmem_pointer);
+    auto dur = k2::Clock::now() - start;
+    _readPmemEngineLatency.add(dur);
+
     if (!std::get<0>(read_pmem_status).is2xxOK()){
         K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
         _partition, std::get<0>(read_pmem_status).message);
@@ -1815,32 +1833,23 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
 Status
 K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, KeyValueNode& KVNode) {
     K2LOG_D(log::skvsvr, "Write Request creating WI: {}", request);
-    // we need to copy this data into a new memory block so that we don't hold onto and fragment the transport memory
-    
+
     Payload payload(Payload::DefaultAllocator());
-    payload.write(request.value);
+    payload.write(request.value.share());
     payload.seek(0);
+
+    // here we write value directly to pmem engine
+    auto start = k2::Clock::now();
     auto pmem_status = _engine_ptr->append(payload);
+    auto dur = k2::Clock::now() - start;
+    _writePmemEngineLatency.add(dur);
+
     if( !std::get<0>(pmem_status).is2xxOK()){
         return std::get<0>(pmem_status);
     }
     PmemAddress pmemAddr =  std::get<1>(pmem_status);
-
-
-    // // read the previouse datarecord
-    // auto read_pmem_status = _engine_ptr->read(pmemAddr);
-    // if (!std::get<0>(read_pmem_status).is2xxOK()){
-    //     K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
-    //     _partition, std::get<0>(read_pmem_status).message);
-    // }
-    // k2::dto::SKVRecord::Storage read_storage{};
-    // std::get<1>(read_pmem_status).read(read_storage);
-
-
-
-
-
-
+ 
+     // now datacord does not have value in memory 
     dto::DataRecord *rec = new dto::DataRecord{.value = dto::SKVRecord::Storage{}, .value_pmem_pointer = pmemAddr, .isTombstone=request.isDelete, .timestamp=request.mtr.timestamp,
                         .prevVersion=nullptr, .status=dto::DataRecord::WriteIntent, .request_id=request.request_id};
         //KVNode.insert_datarecord(rec);

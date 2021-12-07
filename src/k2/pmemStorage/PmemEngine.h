@@ -143,9 +143,6 @@ struct PmemEngineConfig{
     // upper limit of pmem engine, default 2GB
     uint64_t engine_capacity = 2ULL << 30;
 
-    // engine_path define the path of stored files 
-    char engine_path[128] = "/mnt/pmem0/pmem-chogori/";
-
     // current offset of the plog, this value is persisted 
     // when the plog is sealed or close
     uint64_t tail_offset = 0;
@@ -155,6 +152,9 @@ struct PmemEngineConfig{
 
     // number of current chunks
     uint64_t chunk_count = 0;
+
+    // engine_path define the path of stored files 
+    char engine_path[128] = "/mnt/pmem0/pmem-chogori/";
 
     // plogId is used to encode the chunk name
     // for example: if the plogId is userDataPlog

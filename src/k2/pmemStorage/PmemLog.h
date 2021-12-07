@@ -106,7 +106,7 @@ private:
     //          return S409_Conflict_Created_File
     //  case 3: create file successfully
     //          return S201_Created_File
-    inline std::tuple<Status, char*> _createThenMapFile(String chunkFile, uint64_t fileSize){
+    inline std::tuple<Status, char*> _createThenMapFile(String fileName, uint64_t fileSize){
         // check avaliable space in engine data path
         const std::filesystem::space_info si = std::filesystem::space(_plog_meta.engine_path);
         if ( si.available < fileSize){
@@ -118,7 +118,7 @@ private:
         char * pmem_addr;
         size_t mapped_len;
         if ((pmem_addr = static_cast<char *>(pmem_map_file(
-                        chunkFile.c_str(),
+                        fileName.c_str(),
                         fileSize,
                         PMEM_FILE_CREATE | PMEM_FILE_EXCL,
                         0666, &mapped_len, &_is_pmem))) == NULL) {

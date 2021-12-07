@@ -287,7 +287,8 @@ private:  // members
 
     PBRB *pbrb; //////
     
-    PmemEngine * _engine_ptr;
+    std::unique_ptr<PmemEngine> _engine_ptr;
+    
     PmemEngineConfig _engine_config;
 
     Index indexer; //////
@@ -378,6 +379,10 @@ private:  // members
     uint64_t _recordVersions{0};
     uint64_t _totalCommittedPayload{0}; //total committed user payload size
     uint64_t _finalizedWI{0}; // total number of finalized WI
+
+    // record the pmem engine operation latency
+    k2::ExponentialHistogram _readPmemEngineLatency;
+    k2::ExponentialHistogram _writePmemEngineLatency;
 
     k2::ExponentialHistogram _readLatency;
     k2::ExponentialHistogram _writeLatency;
