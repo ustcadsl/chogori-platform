@@ -4,7 +4,7 @@ cd ${topname}/../..
 set -e
 CPODIR=/tmp/___cpo_integ_test
 rm -rf ${CPODIR}
-PmemEnginePath=/mnt/pmem0/chogori-engine/*
+PmemEnginePath=/mnt/pmem0/chogori-engine/
 rm -rf ${PmemEnginePath}
 EPS="tcp+k2rpc://0.0.0.0:10000"
 
@@ -18,7 +18,7 @@ COMMON_ARGS="--enable_tx_checksum true --thread-affinity false"
 cpo_child_pid=$!
 
 # start nodepool on 1 cores
-./build/src/k2/cmd/nodepool/nodepool -c1 --log_level WARN k2::skv_server=WARN k2::pbrb=WARN k2::transport=WARN k2::indexer=WARN --tcp_endpoints ${EPS} --k23si_persistence_endpoint ${PERSISTENCE} ${COMMON_ARGS} --prometheus_port 64001 --k23si_cpo_endpoint ${CPO} --tso_endpoint ${TSO} --memory=40G --partition_request_timeout=6s &
+./build/src/k2/cmd/nodepool/nodepool -c1 --log_level WARN k2::skv_server=WARN k2::pbrb=WARN k2::transport=WARN k2::indexer=WARN --k23si_pmem_engine_path ${PmemEnginePath} --tcp_endpoints ${EPS} --k23si_persistence_endpoint ${PERSISTENCE} ${COMMON_ARGS} --prometheus_port 64001 --k23si_cpo_endpoint ${CPO} --tso_endpoint ${TSO} --memory=40G --partition_request_timeout=6s &
 nodepool_child_pid=$!
 
 # start persistence on 1 cores

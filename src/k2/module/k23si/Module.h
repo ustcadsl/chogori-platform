@@ -286,9 +286,9 @@ private:  // members
     mapindexer _mapIndexer;
 
     PBRB *pbrb; //////
-    
+
     std::unique_ptr<PmemEngine> _engine_ptr;
-    
+
     PmemEngineConfig _engine_config;
 
     Index indexer; //////

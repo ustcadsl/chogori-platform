@@ -190,7 +190,8 @@ K23SIPartitionModule::K23SIPartitionModule(dto::CollectionMetadata cmeta, dto::P
     _partition(std::move(partition), _cmeta.hashScheme) {
     K2LOG_I(log::skvsvr, "---------Partition: {}", _partition);//////
     pbrb = new PBRB(3000, &_retentionTimestamp, &indexer);//////8192 //32768
-    std::string pmemPath = fmt::format("{}/shard{}",_config.PmemEnginePath(),seastar::this_shard_id());
+
+    std::string pmemPath = fmt::format("{}/shard{}",_config.pmemEnginePath(),seastar::this_shard_id());
     strcpy(_engine_config.engine_path,pmemPath.c_str());
     PmemEngine *tmp_engine_ptr = nullptr;
     auto status = PmemEngine::open(_engine_config,&tmp_engine_ptr);
