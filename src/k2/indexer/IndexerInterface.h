@@ -190,6 +190,14 @@ namespace k2 {
             valuedata[order].valuepointer = nullptr;
         }
 
+        inline int first_cached_ver() {
+            for (int i = 0;i <= 2;i++) {
+                if (is_inmem(i) && is_exist(i))
+                    return i;
+            }
+            return -1;
+        }
+
         // debugging
         void printAll() {
             std::cout << "KeyValueNode: " << this << " IsWI: " << is_writeintent() << std::endl;
@@ -279,6 +287,7 @@ namespace k2 {
                     set_inmem(i, 1);
                     //datarecord->prevVersion = valuedata[i].valuepointer;
                     valuedata[i].valuepointer = datarecord;
+                    //K2LOG_I(log::indexer, "In KVNode: {}; Insert {} into [{}]", key, (void *)valuedata[i].valuepointer, i);
                     return 0;
                 }
             return 1;

@@ -133,6 +133,7 @@ struct SchemaMetaData
                    uint32_t rowHeaderSize, BufferPage *pagePtr) {
         setInfo(schemaId, pageSize, pageHeaderSize, rowHeaderSize);
         setHeadPage(pagePtr);
+        K2LOG_I(log::pbrb, "Set HeadPagePtr for schema:({}, {}), pagePtr empty:{}", schemaId, schema->name, pagePtr==nullptr);
     }
 
     SchemaMetaData(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize, uint32_t rowHeaderSize) {
@@ -145,8 +146,6 @@ struct SchemaMetaData
 
     void setHeadPage(BufferPage *pagePtr) {
         headPage = pagePtr;
-        K2LOG_I(log::pbrb, "^^^^^^^^^^^^^^^Set HeadPagePtr, pagePtr empty:{}", pagePtr==nullptr);
-        std::cout << "Set HeadPagePtr: " << headPage << std::endl;
     }
 
     // Construct from a Schema
@@ -206,6 +205,9 @@ struct SchemaMetaData
 
 };
 
+typedef mapindexer IndexerT;
+typedef MapIterator IndexerIterator;
+
 class KVN;
 typedef std::map<std::string, KVN> Index;
 
@@ -225,21 +227,22 @@ private:
     std::map<int, std::list<BufferPage *>> _usedPageMap;
 
     // A map to record the schema metadata.
-    std::map<SchemaId, SchemaMetaData> _schemaMap;
 
-    Index *_indexer;
+    IndexerT *_indexer;
 
     uint32_t splitCnt = 0, evictCnt = 0;
 
     //std::vector<void*> largeFieldValueVec;
 
 public:
+
+    std::map<SchemaId, SchemaMetaData> _schemaMap;
     //SchemaMetaData tempSmeta;
     //int *watermark;
     k2::dto::Timestamp watermark;
     //Initialize a PBRB cache
     //PBRB(int maxPageNumber, int *wm, Index *indexer)
-    PBRB(int maxPageNumber, k2::dto::Timestamp *wm, Index *indexer)
+    PBRB(int maxPageNumber, k2::dto::Timestamp *wm, IndexerT *indexer)
     {
         watermark = *wm;
         this->_maxPageNumber = maxPageNumber;
@@ -573,7 +576,7 @@ public:
     std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID);
 
     // Find the page pointer and row offset to cache cold row
-    std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID, String key);
+    std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID, dto::Key key);
     
     // store hot row in the empty row
     // void cacheHotRow(uint32_t schemaID, SKVRecord hotRecord);

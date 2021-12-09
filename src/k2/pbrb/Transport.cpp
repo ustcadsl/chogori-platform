@@ -61,6 +61,8 @@ dto::SKVRecord *PBRB::generateSKVRecordByRow(uint32_t schemaId, void *rAddr, con
                     str.append(cstr, valueSegSize);
                     void *heapAddr = *((void **)((uint8_t *)rAddr + fieldOffset + sizeof(size_t) + valueSegSize));
                     size_t restValueSize = RowFieldSize - valueSegSize;
+                    // auto retVal = findRowByAddr(rAddr);
+                    // K2LOG_I(log::pbrb, "Generate Page: {}, Offset: {}, rAddr:{}", (void *)retVal.first, retVal.second, rAddr);
                     K2LOG_I(log::pbrb, "@@@RowFieldSize:{}, heapAddr:{}, restValueSize:{}", RowFieldSize, (void *)(uint8_t *)heapAddr, restValueSize);
                     str.append((char *)(heapAddr), restValueSize);
                     // -----! NOTICE: size need -1 here. !-----

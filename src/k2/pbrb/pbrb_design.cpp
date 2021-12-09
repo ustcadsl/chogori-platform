@@ -254,6 +254,9 @@ void *PBRB::cacheColdRow(PLogAddr pAddress)
 
 }
 
+
+/* ...New MapIndexer Integrated. Temporally disabled
+
 // cache cold row in pAddress with key, insert hot address into indexer;
 // return hot address.
 void *PBRB::cacheColdRow(PLogAddr pAddress, String key)
@@ -316,6 +319,7 @@ void *PBRB::cacheColdRow(PLogAddr pAddress, String key)
     }
     return nullptr;
 }
+*/
 
 //find an empty slot between the beginOffset and endOffset in the page
 RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset)
@@ -418,37 +422,50 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID)
 }
 
 //find and empty slot that try to keep rows within/between pages as orderly as possible
-std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID, String key) {
-    KVN &kvNode = (*_indexer)[key];
+std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID, dto::Key key) {
+    
+    IndexerIterator iter = _indexer->find(key);
+    if (iter == _indexer->end()) {
+        K2LOG_E(log::pbrb, "Cannot find kvnode for key: {}", key);
+        return std::make_pair(nullptr, 0);
+    }
+    KeyValueNode &node = *_indexer->extractFromIter(iter);
+
     BufferPage *pagePtr;
     RowOffset rowOffset;
     // 1. has hot row:
-    if (kvNode.hasCachedVer()) {
-        pagePtr = getPageAddr(kvNode.addr[0]);
+    int firstHotVer = node.first_cached_ver();
+    if (firstHotVer != -1) {
+        RowAddr hotAddr = static_cast<RowAddr>(node._getpointer(firstHotVer));
+        pagePtr = getPageAddr(hotAddr);
         rowOffset = findEmptySlotInPage(schemaID, pagePtr);
-        if (rowOffset & 0x80000000)
-            return findCacheRowPosition(schemaID);
-        else {
+        if (pbrb::isValid(rowOffset)) {
             // void *hotAddr = cacheRowFromPlog(pagePtr, rowOffset, pAddr);
             // kvNode.insertHotRow(hotAddr);
             return std::make_pair(pagePtr, rowOffset);
+        }
+        else {
+            return findCacheRowPosition(schemaID);
         }
     }
 
     // 2. 3 cold versions.
     else {
-        auto pit = _indexer->find(key);
-        auto nit = pit;
+        IndexerIterator prevIter = _indexer->find(key);
+        IndexerIterator nextIter = prevIter;
 
         int maxRetryCnt = 5;
         BufferPage *prevPageAddr = nullptr;
         RowOffset prevOff = 0;
         for (int i = 0; i < maxRetryCnt; i++) {
-            if (pit != _indexer->begin())
+            if (prevIter != _indexer->begin())
             {
-                pit--;
-                if (pit->second.hasCachedVer()) {
-                    auto retVal = findRowByAddr(pit->second.addr[0]);
+                prevIter--;
+                KeyValueNode &prevNode = *_indexer->extractFromIter(prevIter); 
+                int firstHotVer = prevNode.first_cached_ver();
+                if (firstHotVer != -1) {
+                    RowAddr prevAddr = static_cast<RowAddr>(prevNode._getpointer(firstHotVer));
+                    auto retVal = findRowByAddr(prevAddr);
                     prevPageAddr = retVal.first;
                     prevOff = retVal.second;
                     break;
@@ -459,12 +476,15 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
 
         BufferPage *nextPageAddr = nullptr;
         RowOffset nextOff = 0;
-        for (int i = 0; i < maxRetryCnt && nit != _indexer->end(); i++) {
-            nit++;
-            if (nit == _indexer->end())
+        for (int i = 0; i < maxRetryCnt && nextIter != _indexer->end(); i++) {
+            nextIter++;
+            if (nextIter == _indexer->end())
                 break;
-            if (nit->second.hasCachedVer()) {
-                auto retVal = findRowByAddr(nit->second.addr[0]);
+            KeyValueNode &nextNode = *_indexer->extractFromIter(nextIter); 
+            int firstHotVer = nextNode.first_cached_ver();
+            if (firstHotVer != -1) {
+                RowAddr nextAddr = static_cast<RowAddr>(nextNode._getpointer(firstHotVer));
+                auto retVal = findRowByAddr(nextAddr);
                 nextPageAddr = retVal.first;
                 nextOff = retVal.second;
                 break;
@@ -755,6 +775,7 @@ void *PBRB::copyRowInPages(BufferPage *srcPagePtr, RowOffset srcOffset,
     return dst;
 }
 
+/* New Indexer integrated... Temporally disabled
 bool PBRB::splitPage(BufferPage *pagePtr) {
     
     // 1. get metadata; find a free page.
@@ -910,6 +931,8 @@ bool PBRB::mergePage(BufferPage *pagePtr1, BufferPage *pagePtr2) {
 
     return true;
 }
+
+*/
 
 // 1.2 Row get & set Functions.
 

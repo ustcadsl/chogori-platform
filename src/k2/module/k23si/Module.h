@@ -51,13 +51,13 @@ Copyright(c) 2020 Futurewei Cloud
 #include<fstream>
 using namespace std;
 
-//#define PAYLOAD_ROW
+// #define PAYLOAD_ROW
 #define FIXEDFIELD_ROW
 #define READ_BREAKDOWN
-//#define NO_READ_BREAKDOWN
+// #define NO_READ_BREAKDOWN
 
 #define OUTPUT_READ_INFO
-//#define OUTPUT_ACCESS_PATTERN 
+// #define OUTPUT_ACCESS_PATTERN 
 
 namespace k2 {
 
@@ -284,7 +284,7 @@ private:  // members
 
     PBRB *pbrb; //////
   
-    Index indexer; //////
+    // Index indexer; //////
 
     long pbrbHitNum[12] = {0}; //////
 

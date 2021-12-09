@@ -189,7 +189,7 @@ K23SIPartitionModule::K23SIPartitionModule(dto::CollectionMetadata cmeta, dto::P
     _cmeta(std::move(cmeta)),
     _partition(std::move(partition), _cmeta.hashScheme) {
     K2LOG_I(log::skvsvr, "---------Partition: {}", _partition);//////
-    pbrb = new PBRB(3000, &_retentionTimestamp, &indexer);//////8192 //32768
+    pbrb = new PBRB(3000, &_retentionTimestamp, &_indexer);//////8192 //32768
 #ifdef OUTPUT_ACCESS_PATTERN  
     ofile.open("RWresults.txt");
 #endif
@@ -858,9 +858,11 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 // case 2: cold version (in kvnode)
                 K2LOG_D(log::skvsvr, "Case 2: Cold Version in KVNode");
                 clock_t  _findPositionStart = clock(); //////
-                std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex); 
+                std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex, request.key); 
                 BufferPage *pagePtr = retVal.first;
                 RowOffset rowOffset = retVal.second;
+                // if (pagePtr != nullptr)
+                //     K2LOG_I(log::skvsvr, "find position in: (Page: {}, with max count:{}; Offset: {}) ", static_cast<void *>(pagePtr), pbrb->_schemaMap[SMapIndex].maxRowCnt, rowOffset);
                 clock_t  _findPositionEnd = clock(); //////
                 double Positionms = (double)(_findPositionEnd - _findPositionStart)/CLOCKS_PER_SEC*1000; //////
                 totalFindPositionms[indexFlag] += Positionms; //////
@@ -870,53 +872,52 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 //    pagePtr = retVal.first;
                 //    rowOffset = retVal.second;
                 //}
-        if (pagePtr!=nullptr) { //find empty slot
-                
-                clock_t  _Headerstart = clock(); //////
-                auto rowAddr = pbrb->cacheRowHeaderFrom(SMapIndex, pagePtr, rowOffset, rec);
-                K2LOG_D(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
-                clock_t  _HeaderEnd = clock(); ////// 
-                totalHeaderms[indexFlag] += (double)(_HeaderEnd - _Headerstart)/CLOCKS_PER_SEC*1000; //////
+                if (pagePtr!=nullptr) { //find empty slot
+                    clock_t  _Headerstart = clock(); //////
+                    auto rowAddr = pbrb->cacheRowHeaderFrom(SMapIndex, pagePtr, rowOffset, rec);
+                    K2LOG_I(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
+                    clock_t  _HeaderEnd = clock(); ////// 
+                    totalHeaderms[indexFlag] += (double)(_HeaderEnd - _Headerstart)/CLOCKS_PER_SEC*1000; //////
 
-                #ifdef FIXEDFIELD_ROW
-                // copy fields
-                for(uint32_t j=0; j < schema.fields.size(); j++){
-                    clock_t _copyFieldStart = clock();
-                    if (rec->value.excludedFields.size() && rec->value.excludedFields[j]) {
-                        // A value of NULL in the record is treated the same as if the field doesn't exist in the record
-                        K2LOG_I(log::pbrb, "######A value of NULL in the record");
-                        continue;
+                    #ifdef FIXEDFIELD_ROW
+                    // copy fields
+                    for(uint32_t j=0; j < schema.fields.size(); j++){
+                        clock_t _copyFieldStart = clock();
+                        if (rec->value.excludedFields.size() && rec->value.excludedFields[j]) {
+                            // A value of NULL in the record is treated the same as if the field doesn't exist in the record
+                            K2LOG_I(log::pbrb, "######A value of NULL in the record");
+                            continue;
+                        }
+                        bool success = false;
+                        _cacheFieldValueToPBRB(SMapIndex, schema.fields[j], rec->value.fieldData, success, pagePtr, rowOffset, j);
+                        clock_t  _copyFieldEnd = clock(); //////
+                        totalCopyFeildms[indexFlag] += (double)(_copyFieldEnd-_copyFieldStart)/CLOCKS_PER_SEC*1000; //////
                     }
-                    bool success = false;
-                    _cacheFieldValueToPBRB(SMapIndex, schema.fields[j], rec->value.fieldData, success, pagePtr, rowOffset, j);
-                    clock_t  _copyFieldEnd = clock(); //////
-                    totalCopyFeildms[indexFlag] += (double)(_copyFieldEnd-_copyFieldStart)/CLOCKS_PER_SEC*1000; //////
+                    #endif
+
+                    #ifdef PAYLOAD_ROW
+                        clock_t _copyFieldStart = clock();
+                        pbrb->cacheRowPayloadFromDataRecord(SMapIndex, pagePtr, rowOffset, rec->value.fieldData);//////
+                        clock_t  _copyFieldEnd = clock(); ////// 
+                        totalCopyFeildms[indexFlag] += (double)(_copyFieldEnd-_copyFieldStart)/CLOCKS_PER_SEC*1000; //////; //////
+                    #endif
+
+                    pbrb->setRowBitMapPage(pagePtr, rowOffset);
+                    // update KVNode of indexer.
+                    clock_t _updateKBNStart = clock();
+                    void *hotAddr = pbrb->getAddrByPageAndOffset(SMapIndex, pagePtr, rowOffset);
+                    int returnValue= nodePtr->insert_hot_datarecord(rec->timestamp, static_cast<dto::DataRecord *>(hotAddr));
+                    K2LOG_D(log::skvsvr, "Cache request.key: {} in KVNode and PBRB, schemaID:{}, returnValue:{}, order:{}", request.key, SMapIndex, returnValue, order);
+                    K2LOG_D(log::skvsvr, "Stored hot address: {} in node", hotAddr);
+                    clock_t  _updateKVNEnd = clock(); ////// 
+                    totalUpdateKVNodems[indexFlag] += (double)(_updateKVNEnd-_updateKBNStart)/CLOCKS_PER_SEC*1000; //////
+                    //nodePtr->printAll();
+                    //pbrb->printRowsBySchema(SMapIndex);
+                    //#ifdef FIXEDFIELD_ROW
+                    //    pbrb->printFieldsRow(pagePtr, rowOffset);
+                    //#endif
+                    rec->value.fieldData.seek(0);
                 }
-                #endif
-
-                #ifdef PAYLOAD_ROW
-                    clock_t _copyFieldStart = clock();
-                    pbrb->cacheRowPayloadFromDataRecord(SMapIndex, pagePtr, rowOffset, rec->value.fieldData);//////
-                    clock_t  _copyFieldEnd = clock(); ////// 
-                    totalCopyFeildms[indexFlag] += (double)(_copyFieldEnd-_copyFieldStart)/CLOCKS_PER_SEC*1000; //////; //////
-                #endif
-
-                pbrb->setRowBitMapPage(pagePtr, rowOffset);
-                // update KVNode of indexer.
-                clock_t _updateKBNStart = clock();
-                void *hotAddr = pbrb->getAddrByPageAndOffset(SMapIndex, pagePtr, rowOffset);
-                int returnValue= nodePtr->insert_hot_datarecord(rec->timestamp, static_cast<dto::DataRecord *>(hotAddr));
-                K2LOG_D(log::skvsvr, "Cache request.key: {} in KVNode and PBRB, schemaID:{}, returnValue:{}, order:{}", request.key, SMapIndex, returnValue, order);
-                K2LOG_D(log::skvsvr, "Stored hot address: {} in node", hotAddr);
-                clock_t  _updateKVNEnd = clock(); ////// 
-                totalUpdateKVNodems[indexFlag] += (double)(_updateKVNEnd-_updateKBNStart)/CLOCKS_PER_SEC*1000; //////
-                //nodePtr->printAll();
-                //pbrb->printRowsBySchema(SMapIndex);
-                //#ifdef FIXEDFIELD_ROW
-                //    pbrb->printFieldsRow(pagePtr, rowOffset);
-                //#endif
-                rec->value.fieldData.seek(0);
-        }
                 result = rec;
                 NvmReadNum[indexFlag]++;
                 clock_t _readNVMtart = clock();
@@ -1080,36 +1081,36 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex); 
                 BufferPage *pagePtr = retVal.first;
                 RowOffset rowOffset = retVal.second;
-        if (pagePtr!=nullptr) { //find empty slot    
-                auto rowAddr = pbrb->cacheRowHeaderFrom(SMapIndex, pagePtr, rowOffset, rec);
-                K2LOG_D(log::skvsvr, "----SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
-                ////////////////////////
-                #ifdef FIXEDFIELD_ROW
-                // copy fields
-                for(uint32_t j=0; j < schema.fields.size(); j++){
-                    if (rec->value.excludedFields.size() && rec->value.excludedFields[j]) {
-                        // A value of NULL in the record is treated the same as if the field doesn't exist in the record
-                        continue;
+                if (pagePtr!=nullptr) { //find empty slot    
+                    auto rowAddr = pbrb->cacheRowHeaderFrom(SMapIndex, pagePtr, rowOffset, rec);
+                    K2LOG_D(log::skvsvr, "----SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
+                    ////////////////////////
+                    #ifdef FIXEDFIELD_ROW
+                    // copy fields
+                    for(uint32_t j=0; j < schema.fields.size(); j++){
+                        if (rec->value.excludedFields.size() && rec->value.excludedFields[j]) {
+                            // A value of NULL in the record is treated the same as if the field doesn't exist in the record
+                            continue;
+                        }
+                        bool success = false;
+                        _cacheFieldValueToPBRB(SMapIndex, schema.fields[j], rec->value.fieldData, success, pagePtr, rowOffset, j);
                     }
-                    bool success = false;
-                    _cacheFieldValueToPBRB(SMapIndex, schema.fields[j], rec->value.fieldData, success, pagePtr, rowOffset, j);
+                    #endif
+
+                    #ifdef PAYLOAD_ROW
+                        pbrb->cacheRowPayloadFromDataRecord(SMapIndex, pagePtr, rowOffset, rec->value.fieldData);//////
+                    #endif
+
+                    pbrb->setRowBitMapPage(pagePtr, rowOffset);
+                    // update indexer.
+                    void *hotAddr = pbrb->getAddrByPageAndOffset(SMapIndex, pagePtr, rowOffset);
+                    nodePtr->insert_hot_datarecord(rec->timestamp, static_cast<dto::DataRecord *>(hotAddr));
+                    K2LOG_D(log::skvsvr, "Stored hot address: {} in node", hotAddr);
+                    //#ifdef FIXEDFIELD_ROW
+                    //    pbrb->printFieldsRow(pagePtr, rowOffset);
+                    //#endif
+                    rec->value.fieldData.seek(0);
                 }
-                #endif
-
-                #ifdef PAYLOAD_ROW
-                    pbrb->cacheRowPayloadFromDataRecord(SMapIndex, pagePtr, rowOffset, rec->value.fieldData);//////
-                #endif
-
-                pbrb->setRowBitMapPage(pagePtr, rowOffset);
-                // update indexer.
-                void *hotAddr = pbrb->getAddrByPageAndOffset(SMapIndex, pagePtr, rowOffset);
-                nodePtr->insert_hot_datarecord(rec->timestamp, static_cast<dto::DataRecord *>(hotAddr));
-                K2LOG_D(log::skvsvr, "Stored hot address: {} in node", hotAddr);
-                //#ifdef FIXEDFIELD_ROW
-                //    pbrb->printFieldsRow(pagePtr, rowOffset);
-                //#endif
-                rec->value.fieldData.seek(0);
-        }
                 result = rec;
             }
             else {
