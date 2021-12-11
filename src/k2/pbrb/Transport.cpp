@@ -20,12 +20,9 @@ void _copyFieldFromHotRow(const dto::SchemaField& field, void *srcAddr, dto::SKV
 }
 
 // PBRB Row -> SKVRecord.
-dto::SKVRecord *PBRB::generateSKVRecordByRow(uint32_t schemaId, void *rAddr, const String &collName, std::shared_ptr<dto::Schema> schema, bool isPayloadRow, double &totalReadCopyFeildms) {
+dto::SKVRecord *PBRB::generateSKVRecordByRow(uint32_t schemaId, void *rAddr, const String &collName, std::shared_ptr<dto::Schema> schema, bool isPayloadRow, uint64_t &totalReadCopyFeildms) {
 
     dto::SKVRecord *record = new dto::SKVRecord(collName, schema);
-    // read smd to get fields info.
-    //BufferPage *pagePtr = getPageAddr(rAddr);
-    //K2LOG_I(log::pbrb, "Row: {} (Page: {}, Offset: {})", rAddr, (void *)pagePtr, rowOffset);
     //assert(_schemaMap.find(schemaId) != _schemaMap.end());
     const SchemaMetaData &smd = _schemaMap[schemaId];
     
@@ -34,21 +31,19 @@ dto::SKVRecord *PBRB::generateSKVRecordByRow(uint32_t schemaId, void *rAddr, con
         assert(smd.schema->fields.size() == smd.fieldsInfo.size() && smd.fieldsInfo.size() > 0);
         //K2LOG_D(log::pbrb, "field(s) count: {}", smd.schema->fields.size());
         for (uint32_t idx = 0; idx < smd.schema->fields.size(); idx++) {
-            clock_t _copyFieldStart = clock();
+            auto _copyFieldStart = k2::now_nsec_count();
             // TODO: add nullable fields.
             size_t fieldOffset = smd.fieldsInfo[idx].fieldOffset;
-            //RowAddr srcAddr = static_cast<RowAddr>((uint8_t *)rAddr + fieldOffset);
             void *srcAddr = (void *)((uint8_t *)rAddr + fieldOffset);
             dto::SchemaField& field = smd.schema->fields[idx];
 
             if (field.type == dto::FieldType::STRING) {
                 size_t maxStrSize = smd.fieldsInfo[idx].fieldSize;
-                size_t RowFieldSize; //////
-                memcpy(&RowFieldSize, srcAddr, sizeof(size_t)); //////
-                //srcAddr = static_cast<RowAddr>((uint8_t *)rAddr + fieldOffset + sizeof(size_t)); //////
+                size_t RowFieldSize;
+                memcpy(&RowFieldSize, srcAddr, sizeof(size_t));
                 srcAddr = (void *)((uint8_t *)rAddr + fieldOffset + sizeof(size_t));
                 char *cstr = (char *)(srcAddr);
-                if(RowFieldSize + sizeof(size_t) <= maxStrSize){
+                if(RowFieldSize + sizeof(size_t) <= maxStrSize) {
                     String str(cstr, RowFieldSize);
                     // -----! NOTICE: size need -1 here. !-----
                     // Serialize into record
@@ -56,16 +51,14 @@ dto::SKVRecord *PBRB::generateSKVRecordByRow(uint32_t schemaId, void *rAddr, con
                 } else {
                     //large field whose size exceeds the field size
                     size_t valueSegSize = maxStrSize-sizeof(size_t)-sizeof(void *);
-                    //String str(cstr, valueSegSize);
                     String str;
                     str.append(cstr, valueSegSize);
                     void *heapAddr = *((void **)((uint8_t *)rAddr + fieldOffset + sizeof(size_t) + valueSegSize));
                     size_t restValueSize = RowFieldSize - valueSegSize;
-                    K2LOG_I(log::pbrb, "@@@RowFieldSize:{}, heapAddr:{}, restValueSize:{}", RowFieldSize, (void *)(uint8_t *)heapAddr, restValueSize);
+                    K2LOG_D(log::pbrb, "@@@RowFieldSize:{}, heapAddr:{}, restValueSize:{}", RowFieldSize, (void *)(uint8_t *)heapAddr, restValueSize);
                     str.append((char *)(heapAddr), restValueSize);
                     // -----! NOTICE: size need -1 here. !-----
-                    //if(RowFieldSize > str.size())
-                        K2LOG_I(log::pbrb, "--Copy Field {}: (Type: STRING, FieldOffset: {}, FieldSize:{}, RowFieldSize: {}, size: {}", idx, smd.fieldsInfo[idx].fieldOffset, smd.fieldsInfo[idx].fieldSize, RowFieldSize, str.size());
+                    K2LOG_D(log::pbrb, "--Copy Field {}: (Type: STRING, FieldOffset: {}, FieldSize:{}, RowFieldSize: {}, size: {}", idx, smd.fieldsInfo[idx].fieldOffset, smd.fieldsInfo[idx].fieldSize, RowFieldSize, str.size());
                     record->serializeNext<String>(str);
                 }
             }
@@ -76,12 +69,12 @@ dto::SKVRecord *PBRB::generateSKVRecordByRow(uint32_t schemaId, void *rAddr, con
                     K2LOG_W(log::pbrb, "unable to serialize field");
             }
 
-            clock_t  _copyFieldEnd = clock(); //////
-            totalReadCopyFeildms += (double)(_copyFieldEnd-_copyFieldStart)/CLOCKS_PER_SEC*1000; //////
+            auto _copyFieldEnd = k2::now_nsec_count();
+            totalReadCopyFeildms += _copyFieldEnd - _copyFieldStart;
         }
 
     } else {/////
-        clock_t _copyFieldStart = clock();
+        auto _copyFieldStart = k2::now_nsec_count();
         void* srcAddr = (void*) ((uint8_t *)rAddr + smd.fieldsInfo[0].fieldOffset); //row header offset
         size_t payloadRowSize;
         record->storage.fieldData.seek(0);
@@ -93,15 +86,15 @@ dto::SKVRecord *PBRB::generateSKVRecordByRow(uint32_t schemaId, void *rAddr, con
             record->setStorage(srcAddr, inPlaceSize);
             void *heapAddr = *((void **)((uint8_t *)rAddr + smd.rowSize - sizeof(void *) ));
             size_t outPlaceSize = payloadRowSize - inPlaceSize;
-            record->setStorage(heapAddr, outPlaceSize); //////
-            K2LOG_I(log::pbrb, "@@@payloadRowSize:{}, heapAddr:{}, outPlaceSize:{}", payloadRowSize, (void *)(uint8_t *)heapAddr, outPlaceSize);
+            record->setStorage(heapAddr, outPlaceSize);
+            K2LOG_D(log::pbrb, "@@@payloadRowSize:{}, heapAddr:{}, outPlaceSize:{}", payloadRowSize, (void *)(uint8_t *)heapAddr, outPlaceSize);
         } else {
             //K2LOG_I(log::pbrb, "####payloadRowSize:{}, srcAddr:{}", payloadRowSize, (void *)(uint8_t *)srcAddr);
             //memcpy((void*)&(record->getStorage().fieldData), srcAddr, payloadRowSize);
             record->setStorage(srcAddr, payloadRowSize);
         }
-        clock_t  _copyFieldEnd = clock(); //////
-        totalReadCopyFeildms += (double)(_copyFieldEnd-_copyFieldStart)/CLOCKS_PER_SEC*1000; //////
+        auto _copyFieldEnd = k2::now_nsec_count();
+        totalReadCopyFeildms += _copyFieldEnd - _copyFieldStart;
     }
 
     return record;

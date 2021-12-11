@@ -65,16 +65,6 @@ NodeVerMetadata KeyValueNode::getNodeVerMetaData(int order, PBRB *pbrb) {
         return retVal;
     }
 }
-    // struct NodeVerMetadata{
-    //     bool isHot;
-    //     dto::Timestamp timestamp;
-    //     dto::DataRecord::Status status;
-    //     bool isTombstone;
-    //     uint64_t request_id;
-    //     void print() {
-    //         K2LOG_I(log::pbrb, "Node Metadata: [isHot: {}, timestamp: {}, status: {}, isTombstone: {}, request_id: {}", isHot, timestamp, status, isTombStone, request_id);
-    //     }
-    // };
 
 int KeyValueNode::insert_datarecord(dto::DataRecord *datarecord, PBRB *pbrb) {
     if(size() > 0) {
