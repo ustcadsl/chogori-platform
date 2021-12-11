@@ -18,6 +18,7 @@ Copyright(c) 2020 Futurewei Cloud
 */
 
 #pragma once
+#include <chrono>
 #include "log.h"
 #include "IndexerInterface.h"
 
@@ -29,13 +30,14 @@ namespace k2
     class mapindexer{
     private:
         MapIndexer idx;
-        MapIterator scanit;
+
     public:
+        ~mapindexer();
         KeyValueNode* insert(dto::Key key);
         MapIterator find(dto::Key &key);
         MapIterator begin();
         MapIterator end();
-        MapIterator getiter();
+        // MapIterator getiter();
         MapIterator setiter(dto::Key &key);
         MapIterator lower_bound(const dto::Key &start);
         MapIterator last();
@@ -44,6 +46,12 @@ namespace k2
         size_t size();
         KeyValueNode* extractFromIter(MapIterator const&iterator);
     };
+
+    inline mapindexer::~mapindexer() {
+        for(auto it = idx.begin(); it != idx.end(); ++it) {
+            delete it->second;
+        }
+    }
 
     inline KeyValueNode* mapindexer::insert(dto::Key key)
     {
@@ -64,17 +72,12 @@ namespace k2
     {
         return idx.end();
     }
-    inline MapIterator mapindexer::getiter()
-    {
-        return scanit;
-    }
     inline MapIterator mapindexer::setiter(dto::Key &key)
     {
         return idx.find(key);
     }
     inline MapIterator mapindexer::last()
     {
-        //TODO check 
         if(idx.empty()) {
             return idx.end();
         }
@@ -90,13 +93,22 @@ namespace k2
     inline void mapindexer::erase(dto::Key key)
     {
         auto kit = idx.find(key);
-        if (kit == idx.end()) return;
+        if (kit == idx.end()) 
+            return;            
+        KeyValueNode* toDelete = kit->second;
         idx.erase(kit);
+        delete toDelete;
+        return;
     }
 
     inline size_t mapindexer::size()
     {
-        return idx.size();
+        size_t totalSize = sizeof(idx);
+        K2LOG_I(log::indexer, "Raw size of map={}MB", (double)totalSize/(1024.0*1024.0));
+		for (auto it = idx.begin(); it != idx.end(); it++) {
+			totalSize += sizeof(it->first) + sizeof(it->second);
+		}
+        return totalSize;
     }
 
     inline KeyValueNode* mapindexer::extractFromIter(MapIterator const& iterator)

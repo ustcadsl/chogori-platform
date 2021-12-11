@@ -54,8 +54,7 @@ namespace k2 {
     class KeyValueNode {
     private:
         uint64_t flags;
-        //std::unique_ptr<dto::Key> key;
-        dto::Key key;
+        std::unique_ptr<dto::Key> key;
         typedef struct {
             u_int64_t timestamp;
             dto::DataRecord *valuepointer;
@@ -73,10 +72,7 @@ namespace k2 {
 
         KeyValueNode(dto::Key newKey) {
             flags = 0;
-            //key = std::unique_ptr<dto::Key>(new dto::Key{.schemaName = newKey.schemaName, .partitionKey = newKey.partitionKey, .rangeKey = newKey.rangeKey});
-            key.schemaName = newKey.schemaName;
-            key.partitionKey = newKey.partitionKey;
-            key.rangeKey = newKey.rangeKey;
+            key = std::unique_ptr<dto::Key>(new dto::Key{.schemaName = newKey.schemaName, .partitionKey = newKey.partitionKey, .rangeKey = newKey.rangeKey});
             for (int i = 0; i < 3; ++i) {
                 valuedata[i].timestamp = 0;
                 valuedata[i].valuepointer = nullptr;
@@ -85,8 +81,7 @@ namespace k2 {
 
         KeyValueNode(KeyValueNode&& other)//move constructor
         :flags(other.flags), key(std::move(other.key)){
-            //K2LOG_D(log::indexer, "In Move Constructor key {}", *key);
-            K2LOG_D(log::indexer, "In Move Constructor key {}", key);
+            K2LOG_D(log::indexer, "In Move Constructor key {}", *key);
             for(int i = 0; i< 3; ++i) {
                 valuedata[i].timestamp = other.valuedata[i].timestamp;
                 valuedata[i].valuepointer = other.valuedata[i].valuepointer;
@@ -98,11 +93,14 @@ namespace k2 {
         }
 
         ~KeyValueNode() {
+            // // Datarecord is owned by pbrb and plog, Do not delete after integration
+            // for(int i = 0; i<3; ++i) {
+            //     delete valuedata[i].valuepointer;
+            // }
         }
 
         dto::Key get_key() {
-            //return *key;
-            return key;
+            return *key;
         }
 
         inline bool _get_flag_i(int i) {
@@ -194,7 +192,7 @@ namespace k2 {
         void printAll() {
             std::cout << "KeyValueNode: " << this << " IsWI: " << is_writeintent() << std::endl;
             for (int i = 0; i < 3; ++i) {
-                std::cout << i << ": " << key << ", " << valuedata[i].timestamp << ", " << valuedata[i].valuepointer << " is_inmem: "<< is_inmem(i) << std::endl;
+                std::cout << i << ": " << *key << ", " << valuedata[i].timestamp << ", " << valuedata[i].valuepointer << " is_inmem: "<< is_inmem(i) << std::endl;
             }
         }
 
@@ -375,7 +373,7 @@ namespace k2 {
                 set_inmem(j, is_inmem(j + 1));
             }
             if (size_dec()==1) 
-                K2LOG_D(log::indexer, "try to remove with no versions, Key: {} {} {}", key.schemaName, key.partitionKey, key.rangeKey);
+                K2LOG_D(log::indexer, "try to remove with no versions, Key: {} {} {}", key->schemaName, key->partitionKey, key->rangeKey);
             if (valuedata[2].valuepointer != nullptr) {
                 //if(valuedata[2].valuepointer->prevVersion != nullptr){
                 if(!is_inmem(2) && valuedata[2].valuepointer->prevVersion != nullptr){ //////
@@ -400,6 +398,14 @@ namespace k2 {
 
         dto::DataRecord *begin() {
             return this->_getpointer(0);
+        }
+
+        void printKeyValueNode() {
+            K2LOG_D(log::indexer, "flags={} keyPointer={}", flags, (void*)key.get());
+            for(int i = 0; i<3; ++i) {
+                K2LOG_D(log::indexer, "valuedata {}, timestamp={} valuepointer={}", i, valuedata[i].timestamp, (void*)valuedata[i].valuepointer);
+            }
+            return;
         }
     };
 

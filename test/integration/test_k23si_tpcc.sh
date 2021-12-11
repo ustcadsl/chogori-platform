@@ -56,7 +56,7 @@ trap finish EXIT
 sleep 5
 
 NUMWH=1
-NUMDIST=1
+NUMDIST=10
 RUNBENCKMARK=100
 echo ">>> Starting load ..."
 #./build/src/k2/cmd/tpcc/tpcc_client -c1 --log_level WARN --tcp_remotes ${EPS} --cpo ${CPO} --tso_endpoint ${TSO} --data_load true --num_warehouses ${NUMWH} --districts_per_warehouse ${NUMDIST} --writes_per_load_txn 20 --prometheus_port 63100 ${COMMON_ARGS} --memory=3G --partition_request_timeout=6s --dataload_txn_timeout=600s --do_verification true --num_concurrent_txns=1 --txn_weights={43,4,4,45,4}

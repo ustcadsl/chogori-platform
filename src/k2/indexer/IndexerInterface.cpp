@@ -147,7 +147,7 @@ int KeyValueNode::remove_datarecord(int order, PBRB *pbrb) {
         set_inmem(j, is_inmem(j + 1));
     }
     if (size_dec()==1) 
-        K2LOG_D(log::indexer, "try to remove with no versions, Key: {} {} {}", key.schemaName, key.partitionKey, key.rangeKey);
+        K2LOG_D(log::indexer, "try to remove with no versions, Key: {} {} {}", key->schemaName, key->partitionKey, key->rangeKey);
     if (valuedata[2].valuepointer != nullptr) {
         dto::DataRecord *OldestVer = _getColdVerPtr(2, pbrb);
         if(OldestVer->prevVersion != nullptr){
