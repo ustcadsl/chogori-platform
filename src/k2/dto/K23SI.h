@@ -93,7 +93,7 @@ struct DataRecord {
     SKVRecord::Storage value;
 
     // value stored in pmem
-    PmemAddress value_pmem_pointer = 0;
+    PmemAddress valuePmemPtr = 0;
 
     // marked for tombstones
     bool isTombstone = false;
@@ -113,8 +113,8 @@ struct DataRecord {
     // provide idempotent behavior in the case of retries
     uint64_t request_id = 0;
 
-    K2_PAYLOAD_FIELDS(value, value_pmem_pointer, timestamp, isTombstone, status, request_id);
-    K2_DEF_FMT(DataRecord, value, value_pmem_pointer, timestamp, isTombstone, status, request_id);
+    K2_PAYLOAD_FIELDS(value, valuePmemPtr, timestamp, isTombstone, status, request_id);
+    K2_DEF_FMT(DataRecord, value, valuePmemPtr, timestamp, isTombstone, status, request_id);
     };
 
 // A write intent. This is separate from the DataRecord structure which is used for

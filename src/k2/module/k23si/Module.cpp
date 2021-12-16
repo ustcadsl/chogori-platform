@@ -626,7 +626,7 @@ K23SIPartitionModule::handleQuery(dto::K23SIQueryRequest&& request, dto::K23SIQu
             record = static_cast<dto::DataRecord *>(pbrb->getPlogAddrRow(record));
 
         // read the previouse datarecord
-        auto read_pmem_status = _engine_ptr->read(record->value_pmem_pointer);
+        auto read_pmem_status = _engine_ptr->read(record->valuePmemPtr);
         if (!std::get<0>(read_pmem_status).is2xxOK()){
             K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
             _partition, std::get<0>(read_pmem_status).message);
@@ -839,7 +839,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             K2LOG_I(log::skvsvr, "Case 1: Cold Version not in KVNode");
             auto _readNVMtart = k2::now_nsec_count();
             // read version from pmem engine
-            auto read_pmem_status = _engine_ptr->read(rec->value_pmem_pointer);
+            auto read_pmem_status = _engine_ptr->read(rec->valuePmemPtr);
             if (!std::get<0>(read_pmem_status).is2xxOK()){
                 K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
                 _partition, std::get<0>(read_pmem_status).message);
@@ -858,7 +858,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             if (!nodePtr->is_inmem(order)){
                 auto _readNVMtart = k2::now_nsec_count();
                 // read version from pmem engine
-                auto read_pmem_status = _engine_ptr->read(rec->value_pmem_pointer);
+                auto read_pmem_status = _engine_ptr->read(rec->valuePmemPtr);
                 if (!std::get<0>(read_pmem_status).is2xxOK()){
                     K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
                     _partition, std::get<0>(read_pmem_status).message);
@@ -1446,7 +1446,7 @@ bool K23SIPartitionModule::_parsePartialRecord(dto::K23SIWriteRequest& request, 
     }
 
     // read the previouse datarecord
-    auto read_pmem_status = _engine_ptr->read(previous.value_pmem_pointer);
+    auto read_pmem_status = _engine_ptr->read(previous.valuePmemPtr);
     if (!std::get<0>(read_pmem_status).is2xxOK()){
         K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
         _partition, std::get<0>(read_pmem_status).message);
@@ -1730,7 +1730,7 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, KeyValueNode& 
     PmemAddress pmemAddr =  std::get<1>(pmem_status);
     //K2LOG_I(log::skvsvr,"Write datarecord to pmemLog, pmemAddr: {}, request.value:{}",pmemAddr, request.value);
 
-    dto::DataRecord *rec = new dto::DataRecord{.value = dto::SKVRecord::Storage{}, .value_pmem_pointer = pmemAddr, .isTombstone=request.isDelete, .timestamp=request.mtr.timestamp,
+    dto::DataRecord *rec = new dto::DataRecord{.value = dto::SKVRecord::Storage{}, .valuePmemPtr = pmemAddr, .isTombstone=request.isDelete, .timestamp=request.mtr.timestamp,
                         .prevVersion=nullptr, .status=dto::DataRecord::WriteIntent, .request_id=request.request_id};
     //KVNode.insert_datarecord(rec);
     //KVNode.printAll();
@@ -2040,7 +2040,7 @@ K23SIPartitionModule::handleInspectRecords(dto::K23SIInspectRecordsRequest&& req
         }
         dto::DataRecord copy {
             .value=rec->value.share(),
-            .value_pmem_pointer =rec->value_pmem_pointer,
+            .valuePmemPtr =rec->valuePmemPtr,
             .isTombstone=rec->isTombstone,
             .timestamp=rec->timestamp,
             .prevVersion=rec->prevVersion,
@@ -2094,7 +2094,7 @@ K23SIPartitionModule::handleInspectWIs(dto::K23SIInspectWIsRequest&&) {
 
         dto::DataRecord copy {
                 .value=rec->value.share(),
-                .value_pmem_pointer=rec->value_pmem_pointer,
+                .valuePmemPtr=rec->valuePmemPtr,
                 .isTombstone=rec->isTombstone,
                 .timestamp=rec->timestamp,
                 .prevVersion=rec->prevVersion,
