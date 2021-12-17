@@ -140,7 +140,7 @@ struct PmemStatuses {
 // pmem storage engine config
 struct PmemEngineConfig{
 
-    // upper limit of pmem engine, default 2GB
+    // upper limit of pmem engine, default 20GB
     uint64_t engine_capacity = 20ULL << 30;
 
     // current offset of the plog, this value is persisted 
@@ -197,6 +197,11 @@ class PmemEngine{
     virtual uint64_t getFreeSpace() = 0;
 
     virtual uint64_t getUsedSpace() = 0;
+
+    virtual seastar::metrics::histogram & getPmemAppendLantency() = 0;
+
+    virtual seastar::metrics::histogram & getPmemReadLantency() = 0;
+
 
 };
 

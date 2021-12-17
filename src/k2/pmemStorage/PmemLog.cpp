@@ -128,7 +128,7 @@ Status PmemLog::_append(char *srcdata, size_t len){
     size_t remaining_space = _plog_meta.chunk_count * _plog_meta.chunk_size - _plog_meta.tail_offset;
     size_t first_write_size = remaining_space <= len? remaining_space : len;
     char * addr = _chunk_list[_active_chunk_id].pmem_addr + _plog_meta.tail_offset%_plog_meta.chunk_size;
-
+    k2::OperationLatencyReporter reporter(_writePmemLatency); // for reporting metrics
     if (_is_pmem){
         _copyToPmem(addr, srcdata, first_write_size);
     }else{
@@ -165,9 +165,9 @@ Status PmemLog::_append(char *srcdata, size_t len){
         }
     }
     _plog_meta.tail_offset += len;
+    reporter.report();
     return PmemStatuses::S200_OK_Append;
 }
-
 
 std::tuple<Status, Payload> PmemLog::read(const PmemAddress &readAddr){
     Payload payload(Payload::DefaultAllocator());
@@ -195,6 +195,7 @@ std::tuple<Status, Payload> PmemLog::read(const PmemAddress &readAddr){
  char* PmemLog::_read(uint64_t offset, uint64_t len){
     K2LOG_D(log::pmem_storage, "Read data: offset =>{},len=>{}",offset,len);
     char * buffer_data = (char *)malloc(len);
+    k2::OperationLatencyReporter reporter(_readPmemLatency); // for reporting metrics
     // calculate the size need read in the first chunk
     size_t start_chunk_id = offset/_plog_meta.chunk_size;
     size_t start_chunk_offset = offset % _plog_meta.chunk_size;
@@ -220,6 +221,7 @@ std::tuple<Status, Payload> PmemLog::read(const PmemAddress &readAddr){
         }
 
     }
+    reporter.report();
     return buffer_data;
 }
 

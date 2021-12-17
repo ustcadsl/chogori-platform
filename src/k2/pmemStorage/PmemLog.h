@@ -68,6 +68,13 @@ public:
 
     uint64_t getUsedSpace() override;
 
+    seastar::metrics::histogram & getPmemAppendLantency() override{
+         return _readPmemLatency.getHistogram();
+    }
+
+    seastar::metrics::histogram & getPmemReadLantency() override{
+        return _writePmemLatency.getHistogram();
+    }
 
 
 private:
@@ -176,6 +183,9 @@ private:
     // usually user defined
     PmemEngineConfig _plog_meta;
 
+    k2::ExponentialHistogram _readPmemLatency;
+
+    k2::ExponentialHistogram _writePmemLatency;
 };
 
 }// ns k2

@@ -295,8 +295,8 @@ private:  // members
 
     PBRB *pbrb; 
     
-    PmemEngine * _engine_ptr;
-    PmemEngineConfig _engine_config;
+    PmemEngine * _enginePtr;
+    PmemEngineConfig _engineConfig;
 
     Index indexer; 
 
@@ -393,6 +393,8 @@ private:  // members
 
     k2::ExponentialHistogram _readLatency;
     k2::ExponentialHistogram _writeLatency;
+    k2::ExponentialHistogram _readPmemLogLatency;
+    k2::ExponentialHistogram _writePmemLogLatency;
     k2::ExponentialHistogram _queryPageLatency;
     k2::ExponentialHistogram _pushLatency;
     k2::ExponentialHistogram _queryPageScans;
