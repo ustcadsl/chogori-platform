@@ -72,7 +72,9 @@ void TxnManager::_registerMetrics() {
         sm::make_counter("aborted_txns", _abortedTxns, sm::description("Number of aborted transactions"), labels),
         sm::make_counter("conflict_aborts", _conflictAborts, sm::description("Number of conflict aborts (incumbent abort due to push)"), labels),
         sm::make_histogram("finalization_latency", [this]{ return _finalizationLatency.getHistogram();},
-                sm::description("Latency of Finalizations"), labels)
+                sm::description("Latency of Finalizations"), labels),
+        sm::make_histogram("commit_PIP_latency", [this]{ return _commitPIPLatency.getHistogram();},
+                sm::description("Latency of commitPIP"), labels)              
     });
 }
 
@@ -613,7 +615,7 @@ seastar::future<Status> TxnManager::_forceAborted(TxnRecord& rec) {
         auto timeout = (10s + _config.writeTimeout() * rec.writeRanges.size()) / _config.finalizeBatchSize();
         K2LOG_D(log::skvsvr, "preparing the finalization in force aborted state for TR {}", rec);
 
-        auto fut = seastar::sleep(0s).then([this, &rec, &timeout] () {
+        auto fut = seastar::sleep(_config.writeTimeout()).then([this, &rec, timeout=std::move(timeout)] () {
             return _finalizeTransaction(rec, FastDeadline(timeout))
                 .then([this, &rec] (auto&& status){
                     K2LOG_D(log::skvsvr, "finalize in force aborted async status: {}", status);
@@ -629,17 +631,20 @@ seastar::future<Status> TxnManager::_forceAborted(TxnRecord& rec) {
 }
 
 seastar::future<Status> TxnManager::_commitPIP(TxnRecord& rec) {
+    k2::OperationLatencyReporter reporter(_commitPIPLatency); // for reporting metrics
     K2LOG_D(log::skvsvr, "Setting status to CommitPIP for {}", rec);
     rec.finalizeAction = dto::EndAction::Commit;
     rec.state = dto::TxnRecordState::CommittedPIP;
     // if write async, we should wait until all write keys are persisted successfully
     if (rec.writeAsync) {
         return rec.isAllKeysPersisted.get_future()
-            .then([this, &rec] (auto&& status) {
+            .then([this, &rec, reporter=std::move(reporter)] (auto&& status) mutable {
                 K2LOG_D(log::skvsvr, "all keys persisted with status {} for rec {}", status, rec);
+                reporter.report();
                 return _endPIPHelper(rec);
             });
     }
+    reporter.report();
     return _endPIPHelper(rec);
 }
 
@@ -701,7 +706,7 @@ seastar::future<Status> TxnManager::_endHelper(TxnRecord& rec) {
     auto timeout = (10s + _config.writeTimeout() * rec.writeRanges.size()) / _config.finalizeBatchSize();
 
     if (rec.finalizeInForceAborted) {
-        auto fut = seastar::sleep(0s).then([this, &rec] {
+        auto fut = seastar::sleep(1ms).then([this, &rec] {
             return rec.isFinalizeFinished.get_future().then([this, &rec] (auto&& status) {
                 if (!status.is2xxOK()) {
                     K2LOG_E(log::skvsvr, "finalization in force aborted failed with status {}", status);

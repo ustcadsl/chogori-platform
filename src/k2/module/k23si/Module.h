@@ -310,6 +310,10 @@ private:  // members
 
     k2::ExponentialHistogram _readLatency;
     k2::ExponentialHistogram _writeLatency;
+    k2::ExponentialHistogram _writeKeyLatency;
+    k2::ExponentialHistogram _writeKeyPersistLatency;
+    k2::ExponentialHistogram _notifyWriteKeyPersistLatency;
+    k2::ExponentialHistogram _endLatency;
     k2::ExponentialHistogram _queryPageLatency;
     k2::ExponentialHistogram _pushLatency;
     k2::ExponentialHistogram _queryPageScans;

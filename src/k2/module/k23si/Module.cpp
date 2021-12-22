@@ -249,12 +249,22 @@ seastar::future<> K23SIPartitionModule::_registerVerbs() {
 
     RPC().registerRPCObserver<dto::K23SIWriteKeyRequest, dto::K23SIWriteKeyResponse>
     (dto::Verbs::K23SI_WRITE_KEY, [this](dto::K23SIWriteKeyRequest&& request) {
-        return handleWriteKey(std::move(request));
+        k2::OperationLatencyReporter reporter(_writeKeyLatency); // for reporting metrics
+        return handleWriteKey(std::move(request))
+            .then([this, reporter=std::move(reporter)] (auto&& response) mutable {
+                reporter.report();
+                return std::move(response);
+            });
     });
 
     RPC().registerRPCObserver<dto::K23SIWriteKeyPersistRequest, dto::K23SIWriteKeyPersistResponse>
     (dto::Verbs::K23SI_WRITE_KEY_PERSIST, [this](dto::K23SIWriteKeyPersistRequest&& request) {
-        return handleWriteKeyPersist(std::move(request));
+        k2::OperationLatencyReporter reporter(_writeKeyPersistLatency); // for reporting metrics
+        return handleWriteKeyPersist(std::move(request))
+            .then([this, reporter=std::move(reporter)] (auto&& response) mutable {
+                reporter.report();
+                return std::move(response);
+            });
     });
 
     RPC().registerRPCObserver<dto::K23SITxnPushRequest, dto::K23SITxnPushResponse>
@@ -269,8 +279,15 @@ seastar::future<> K23SIPartitionModule::_registerVerbs() {
 
     RPC().registerRPCObserver<dto::K23SITxnEndRequest, dto::K23SITxnEndResponse>
     (dto::Verbs::K23SI_TXN_END, [this](dto::K23SITxnEndRequest&& request) {
+        k2::OperationLatencyReporter reporter(_endLatency); // for reporting metrics
         return handleTxnEnd(std::move(request))
-            .then([this] (auto&& resp) { return _respondAfterFlush(std::move(resp));});
+            .then([this, reporter=std::move(reporter)] (auto&& resp) { 
+                return _respondAfterFlush(std::move(resp))
+                    .then([this, reporter=std::move(reporter)] (auto&& response) mutable {
+                        reporter.report();
+                        return std::move(response);
+                    });
+            });
     });
 
     RPC().registerRPCObserver<dto::K23SITxnHeartbeatRequest, dto::K23SITxnHeartbeatResponse>
@@ -361,6 +378,14 @@ void K23SIPartitionModule::_registerMetrics() {
                 sm::description("Latency of Read Operations"), labels),
         sm::make_histogram("write_latency", [this]{ return _writeLatency.getHistogram();},
                 sm::description("Latency of Write Operations"), labels),
+        sm::make_histogram("write_key_latency", [this]{ return _writeKeyLatency.getHistogram();},
+                sm::description("Latency of Write Key Operations"), labels),
+        sm::make_histogram("write_key_persist_latency", [this]{ return _writeKeyPersistLatency.getHistogram();},
+                sm::description("Latency of Write Key Persist Operations"), labels),
+        sm::make_histogram("notify_write_key_persist_latency", [this]{ return _notifyWriteKeyPersistLatency.getHistogram();},
+                sm::description("Latency of Notify Write Key Persist Operations"), labels),                
+        sm::make_histogram("end_latency", [this]{ return _endLatency.getHistogram();},
+                sm::description("Latency of End Operations"), labels),                                                
         sm::make_histogram("query_page_latency", [this]{ return _queryPageLatency.getHistogram();},
                 sm::description("Latency of Query Page Operations"), labels),
         sm::make_histogram("push_latency", [this]{ return _pushLatency.getHistogram();},
@@ -1248,8 +1273,23 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, VersionSet& ve
     // we need to copy this data into a new memory block so that we don't hold onto and fragment the transport memory
     dto::DataRecord rec{.value=request.value.copy(), .timestamp=request.mtr.timestamp, .isTombstone=request.isDelete};
 
-    auto status = _twimMgr.addWrite(request.mtr, request.key, request.trh, request.trhCollection);
+    dto::K23SI_MTR mtr{
+        .timestamp = request.mtr.timestamp,
+        .priority = request.mtr.priority
+    };
+    dto::Key key {
+        .schemaName = request.key.schemaName,
+        .partitionKey = request.key.partitionKey,
+        .rangeKey = request.key.rangeKey
+    };
+    dto::Key trh {
+        .schemaName = request.trh.schemaName,
+        .partitionKey = request.trh.partitionKey,
+        .rangeKey = request.trh.rangeKey        
+    };
+    String trhCollection = request.trhCollection;
 
+    auto status = _twimMgr.addWrite(std::move(mtr), std::move(key), std::move(trh), std::move(trhCollection));
     if (!status.is2xxOK()) {
         return status;
     }
@@ -1272,6 +1312,7 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, VersionSet& ve
 
 seastar::future<>
 K23SIPartitionModule::_notifyWriteKeyPersist(String collectionName, dto::K23SI_MTR mtr, dto::Key key, dto::Key writeKey, uint64_t request_id, FastDeadline deadline) {
+    k2::OperationLatencyReporter reporter(_notifyWriteKeyPersistLatency); // for reporting metrics
     K2LOG_D(log::skvsvr, "notify write key persist for key {}, writeKey {}", key, writeKey);
     dto::K23SIWriteKeyPersistRequest request{};
     request.pvid = dto::PVID();
@@ -1280,14 +1321,16 @@ K23SIPartitionModule::_notifyWriteKeyPersist(String collectionName, dto::K23SI_M
     request.key = key;
     request.writeKey = writeKey;
     request.request_id = request_id;
-    return seastar::do_with(std::move(request), [this, deadline] (auto& request) {
+    return seastar::do_with(std::move(request), [this, deadline, reporter=std::move(reporter)] (auto& request) {
+        K2LOG_D(log::skvsvr, "sending write key persist request={}", request);
         return _cpo.partitionRequest<dto::K23SIWriteKeyPersistRequest, dto::K23SIWriteKeyPersistResponse, dto::Verbs::K23SI_WRITE_KEY_PERSIST>(deadline, request)
-            .then([this, &request] (auto response) {
+            .then([this, &request, reporter=std::move(reporter)] (auto response) mutable {
                 auto& [status, _] = response;
                 K2LOG_D(log::skvsvr, "finish the write key persist request {} with status: {}", request, status);
                 if (!status.is2xxOK()) {
                     K2LOG_E(log::skvsvr, "write key persist failed for request {} with status: {}", request, status);
                 }
+                reporter.report();
                 return seastar::make_ready_future();
             });
     });

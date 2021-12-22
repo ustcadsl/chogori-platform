@@ -245,6 +245,7 @@ private: // fields
     uint64_t _abortedTxns{0}; // for aborts rate
     uint64_t _conflictAborts{0}; // for conflict abort rate
     k2::ExponentialHistogram _finalizationLatency;
+    k2::ExponentialHistogram _commitPIPLatency;
 }; // class TxnManager
 
 }  // namespace k2

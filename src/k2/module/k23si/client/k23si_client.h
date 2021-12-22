@@ -62,7 +62,8 @@ public:
     Deadline<> deadline;
     dto::TxnPriority priority;
     bool syncFinalize = false;
-    K2_DEF_FMT(K2TxnOptions, deadline, priority, syncFinalize);
+    bool writeAsync = false;
+    K2_DEF_FMT(K2TxnOptions, deadline, priority, syncFinalize, writeAsync);
 };
 
 template<typename ValueType>
@@ -471,6 +472,9 @@ public:
     // Must be called exactly once by application code and after all ongoing read and write
     // operations are completed
     seastar::future<EndResult> end(bool shouldCommit);
+
+    // check if writes async
+    bool isWriteAsync();
 
     // use to obtain the MTR(which acts as a unique transaction identifier) for this transaction
     const dto::K23SI_MTR& mtr() const;

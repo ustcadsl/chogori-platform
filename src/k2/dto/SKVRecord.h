@@ -34,6 +34,7 @@ namespace k2 {
 class K2TxnHandle;
 class txn_testing;
 class K23SITest;
+class WriteAsyncTest;
 
 namespace dto {
 
@@ -259,6 +260,7 @@ private:
     friend class k2::K2TxnHandle;
     friend class k2::txn_testing;
     friend class k2::K23SITest;
+    friend class k2::WriteAsyncTest;
 };
 
 // Convience macro that does the switch statement on the record field type for the user

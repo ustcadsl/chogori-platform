@@ -39,9 +39,9 @@ using namespace k2;
 class AtomicVerify
 {
 public:
-    AtomicVerify(RandomContext& random, K23SIClient& client, int16_t max_w_id) :
-            _random(random), _client(client), _payment(PaymentT(random, client, 1, max_w_id)),
-            _payment2(PaymentT(random, client, 1, max_w_id)), _max_w_id(max_w_id) {
+    AtomicVerify(RandomContext& random, K23SIClient& client, int16_t max_w_id, bool write_async = false) :
+            _random(random), _client(client), _payment(PaymentT(random, client, 1, max_w_id, write_async)),
+            _payment2(PaymentT(random, client, 1, max_w_id, write_async)), _max_w_id(max_w_id), _write_async(write_async) {
         _payment._force_original_cid = true;
         _payment2._force_original_cid = true;
     }
@@ -68,6 +68,7 @@ private:
     ValuesToCompare _before;
     ValuesToCompare _after;
     int16_t _max_w_id;
+    bool _write_async;
 
 public:
     future<> run();
@@ -76,8 +77,8 @@ public:
 class ConsistencyVerify
 {
 public:
-    ConsistencyVerify(K23SIClient& client, int16_t max_w_id) :
-            _client(client), _max_w_id(max_w_id) {}
+    ConsistencyVerify(K23SIClient& client, int16_t max_w_id, bool write_async = false) :
+            _client(client), _max_w_id(max_w_id), _write_async(write_async) {}
 
     future<> run();
 private:
@@ -104,6 +105,7 @@ private:
     int16_t _cur_w_id;
     int16_t _cur_d_id;
     int64_t _nextOrderID;
+    bool _write_async;
 
     ConfigVar<int16_t> _districts_per_warehouse{"districts_per_warehouse"};
 };

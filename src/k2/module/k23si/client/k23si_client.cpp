@@ -195,7 +195,7 @@ std::unique_ptr<dto::K23SIWriteRequest> K2TxnHandle::_makeWriteRequest(dto::SKVR
 
 std::unique_ptr<dto::K23SIWriteKeyRequest> K2TxnHandle::_makeWriteKeyRequest(dto::K23SIWriteRequest& request) {
     auto it = _cpo_client->collections.find(request.collectionName);
-    if ( it == _cpo_client->collections.end()) {
+    if (it == _cpo_client->collections.end()) {
         K2LOG_E(log::skvclient, "collection {} does not exist for write request {}", request.collectionName, request);
         return nullptr;
     }
@@ -236,6 +236,9 @@ std::unique_ptr<dto::K23SIWriteRequest> K2TxnHandle::_makePartialUpdateRequest(d
     });
 }
 
+bool K2TxnHandle::isWriteAsync() {
+    return _options.writeAsync;
+}
 
 seastar::future<EndResult> K2TxnHandle::end(bool shouldCommit) {
     if (!_valid) {
@@ -248,7 +251,7 @@ seastar::future<EndResult> K2TxnHandle::end(bool shouldCommit) {
         return seastar::make_exception_future<EndResult>(K23SIClientException("Tried to end() with ongoing ops"));
     }
 
-    if (_write_ranges.empty()) {
+    if (_write_ranges.empty() && !isWriteAsync()) {
         _client->successful_txns++;
 
         if (_failed && shouldCommit) {
