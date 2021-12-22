@@ -43,11 +43,12 @@ public:
     DataLoader() = default;
     DataLoader(TPCCData&& data) : _data(std::move(data)) {}
 
-    future<> loadData(K23SIClient& client, int pipeline_depth)
+    future<> loadData(K23SIClient& client, int pipeline_depth, bool writeAsync = false)
     {
         K2TxnOptions options{};
         options.deadline = Deadline(ConfigDuration("dataload_txn_timeout", 600s)());
         options.syncFinalize = true;
+        options.writeAsync = writeAsync;
         std::vector<future<>> futures;
 
         return do_until(

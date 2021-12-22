@@ -29,6 +29,7 @@ using namespace seastar;
 future<> AtomicVerify::getVerificationValues(ValuesToCompare& values) {
     K2TxnOptions options{};
     options.deadline = Deadline(5s);
+    options.writeAsync = _write_async;
     return _client.beginTxn(options)
     // Capturing values by reference here, it must be an instance member variable
     .then([this, &values] (K2TxnHandle&& txn) {
@@ -624,6 +625,7 @@ future<> ConsistencyVerify::verifyDistrictHistorySum() {
 future<> ConsistencyVerify::runForEachWarehouse(consistencyOp op) {
     K2TxnOptions options{};
     options.deadline = Deadline(60s);
+    options.writeAsync = _write_async;
     return _client.beginTxn(options)
     .then([this, op] (K2TxnHandle&& txn) {
         _txn = K2TxnHandle(std::move(txn));
@@ -656,6 +658,7 @@ future<> ConsistencyVerify::runForEachWarehouse(consistencyOp op) {
 future<> ConsistencyVerify::runForEachWarehouseDistrict(consistencyOp op) {
     K2TxnOptions options{};
     options.deadline = Deadline(60s);
+    options.writeAsync = _write_async;
     return _client.beginTxn(options)
     .then([this, op] (K2TxnHandle&& txn) {
         _txn = K2TxnHandle(std::move(txn));

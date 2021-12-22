@@ -43,12 +43,12 @@ parser = argparse.ArgumentParser(description="Utility script to start/stop/kill 
 parser.add_argument("--config_file", default="configs/cluster.cfg",
                     help="Top-level config file that specifies a Chogori cluster")
 parser.add_argument("--state_file", default="state.p", help="Python pickle file of current cluster state")
-parser.add_argument("--username", default="user", help="Username to use when SSHing to other nodes")
+parser.add_argument("--username", default="kvgroup", help="Username to use when SSHing to other nodes")
 parser.add_argument("--start", nargs="*", default=[], help="List of component names (from config_file) to be started")
 parser.add_argument("--remove", nargs="*", default=[], help="List of component names (from config_file) to be removed")
 parser.add_argument("--stop", nargs="*", default=[], help="List of component names (from config_file) to be stopped")
 parser.add_argument("--logs", nargs="*", default=[], help="List of component names (from config_file) to display logs")
-parser.add_argument("--rdma", nargs="?", const=True, default=False, help="Enable RDMA for the components")
+parser.add_argument("--rdma", nargs="?", const=True, default=True, help="Enable RDMA for the components")
 parser.add_argument("--state", nargs="?", const=True, default=False, help="Show the cluster state")
 parser.add_argument("--dry_run", nargs="?", const=True, default=False,
                     help="Change the assumed cluster state without running any ssh commands")
@@ -66,7 +66,7 @@ for r in runnables:
         assignment.add_runnable(r)
         print("Starting:")
         print(r.getDockerRun())
-        pull_cmd = r.getDockerPull()
+        # pull_cmd = r.getDockerPull()
         cmd = r.getDockerRun()
     if r.component in args.stop or "all" in args.stop:
         r = assignment.get_assigned_runnable(r)

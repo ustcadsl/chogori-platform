@@ -613,7 +613,7 @@ seastar::future<Status> TxnManager::_forceAborted(TxnRecord& rec) {
         auto timeout = (10s + _config.writeTimeout() * rec.writeRanges.size()) / _config.finalizeBatchSize();
         K2LOG_D(log::skvsvr, "preparing the finalization in force aborted state for TR {}", rec);
 
-        auto fut = seastar::sleep(0s).then([this, &rec, &timeout] () {
+        auto fut = seastar::sleep(_config.writeTimeout()).then([this, &rec, timeout=std::move(timeout)] () {
             return _finalizeTransaction(rec, FastDeadline(timeout))
                 .then([this, &rec] (auto&& status){
                     K2LOG_D(log::skvsvr, "finalize in force aborted async status: {}", status);
@@ -701,7 +701,7 @@ seastar::future<Status> TxnManager::_endHelper(TxnRecord& rec) {
     auto timeout = (10s + _config.writeTimeout() * rec.writeRanges.size()) / _config.finalizeBatchSize();
 
     if (rec.finalizeInForceAborted) {
-        auto fut = seastar::sleep(0s).then([this, &rec] {
+        auto fut = seastar::sleep(1ms).then([this, &rec] {
             return rec.isFinalizeFinished.get_future().then([this, &rec] (auto&& status) {
                 if (!status.is2xxOK()) {
                     K2LOG_E(log::skvsvr, "finalization in force aborted failed with status {}", status);

@@ -162,7 +162,7 @@ public:  // application lifespan
 private:
     // aggregate the weights so that we use them as bucket boundaries
     std::vector<uint32_t> _aggregate_weights(const std::vector<int>& txn_weights) {
-        K2ASSERT(log::tpcc, txn_weights.size() == 5, "The number of transaction types should be 5, but the actual is {}", txn_weights.size());
+        K2ASSERT(log::tpcc, txn_weights.size() == 6, "The number of transaction types should be 6, but the actual is {}", txn_weights.size());
 
         std::vector<uint32_t> weights;
         uint32_t sum = 0;
@@ -258,7 +258,7 @@ private:
             .then([this] {
                 K2LOG_I(log::tpcc, "Starting item data load");
                 _item_loader = DataLoader(TPCCDataGen().generateItemData());
-                return _item_loader.loadData(_client, _num_concurrent_txns());
+                return _item_loader.loadData(_client, _num_concurrent_txns(), _write_async());
             });
         } else {
             f = f.then([] { return seastar::sleep(5s); });
@@ -269,7 +269,7 @@ private:
             _loader = DataLoader(TPCCDataGen().generateWarehouseData(1 + (_global_id * share),
                                     1 + (_global_id * share) + share));
             K2LOG_I(log::tpcc, "Starting load to server");
-            return _loader.loadData(_client, _num_concurrent_txns());
+            return _loader.loadData(_client, _num_concurrent_txns(), _write_async());
         }).then ([this] {
             K2LOG_I(log::tpcc, "Data load done");
         });
@@ -283,18 +283,21 @@ private:
                 int16_t w_id = (_global_id % _max_warehouses()) + 1;
                 int16_t d_id = (_global_id % _districts_per_warehouse()) + 1;
                 TPCCTxn* curTxn;
+                bool write_async = _write_async();
                 if (txn_type <= _weights[0]) {
-                    curTxn = (TPCCTxn*) new PaymentT(_random, _client, w_id, _max_warehouses());
+                    curTxn = (TPCCTxn*) new PaymentT(_random, _client, w_id, _max_warehouses(), write_async);
                 } else if (txn_type <= _weights[1]) {
-                    curTxn = (TPCCTxn*) new OrderStatusT(_random, _client, w_id);
+                    curTxn = (TPCCTxn*) new OrderStatusT(_random, _client, w_id, write_async);
                 } else if (txn_type <= _weights[2]) {
                     // range from 1-10 is allowed, otherwise set to 10
                     uint16_t batch_size = (_delivery_txn_batch_size() <= 10 && _delivery_txn_batch_size() > 0) ? batch_size : 10;
-                    curTxn = (TPCCTxn*) new DeliveryT(_random, _client, w_id, batch_size);
+                    curTxn = (TPCCTxn*) new DeliveryT(_random, _client, w_id, batch_size, write_async);
                 } else if (txn_type <= _weights[3]) {
-                    curTxn = (TPCCTxn*) new NewOrderT(_random, _client, w_id, _max_warehouses());
+                    curTxn = (TPCCTxn*) new NewOrderT(_random, _client, w_id, _max_warehouses(), write_async);
+                } else if (txn_type <= _weights[4]) {
+                    curTxn = (TPCCTxn*) new StockLevelT(_random, _client, w_id, d_id, write_async);
                 } else {
-                    curTxn = (TPCCTxn*) new StockLevelT(_random, _client, w_id, d_id);
+                    curTxn = (TPCCTxn*) new CustomT(_random, _client, w_id, _write_size(), _write_ratio(), write_async);
                 }
 
                 auto txn_start = k2::Clock::now();
@@ -320,9 +323,12 @@ private:
                     } else if (txn_type <= _weights[3]) {
                         _newOrderTxns++;
                         _newOrderLatency.add(dur);
-                    } else {
+                    } else if (txn_type <= _weights[4]) {
                         _stockLevelTxns++;
                         _stockLevelLatency.add(dur);
+                    } else {
+                        _customTxns++;
+                        _customLatency.add(dur);
                     }
 
                 })
@@ -342,7 +348,11 @@ private:
 
         return seastar::sleep(5s)
         .then([this] {
-            K2LOG_I(log::tpcc, "Starting transactions...");
+            // bugfix for cannot make write key request due to not initing the client
+            return _client.makeCollection("TPCC", getRangeEnds(_tcpRemotes().size(), _max_warehouses()));
+        })
+        .then([this] (auto status){
+            K2LOG_I(log::tpcc, "Starting transactions... status={}", status);
 
             _timer.arm(_testDuration);
             _start = k2::Clock::now();
@@ -386,6 +396,10 @@ private:
 
     ConfigVar<std::vector<String>> _tcpRemotes{"tcp_remotes"};
     ConfigVar<bool> _do_data_load{"data_load"};
+    ConfigVar<bool> _use_when_all{"use_when_all"};
+    ConfigVar<bool> _write_async{"write_async"};
+    ConfigVar<int> _write_size{"write_size"};
+    ConfigVar<int> _write_ratio{"write_ratio"};
     ConfigVar<bool> _do_verification{"do_verification"};
     ConfigVar<int> _num_instances{"num_instances"};
     ConfigVar<int> _instance_id{"instance_id"};
@@ -401,12 +415,14 @@ private:
     k2::ExponentialHistogram _orderStatusLatency;
     k2::ExponentialHistogram _deliveryLatency;
     k2::ExponentialHistogram _stockLevelLatency;
+    k2::ExponentialHistogram _customLatency;
     uint64_t _completedTxns{0};
     uint64_t _newOrderTxns{0};
     uint64_t _paymentTxns{0};
     uint64_t _orderStatusTxns{0};
     uint64_t _deliveryTxns{0};
     uint64_t _stockLevelTxns{0};
+    uint64_t _customTxns{0};
     uint64_t _readOps{0};
     uint64_t _writeOps{0};
     std::vector<uint32_t> _weights;
@@ -420,6 +436,10 @@ int main(int argc, char** argv) {;
         ("cpo", bpo::value<k2::String>(), "URL of Control Plane Oracle (CPO), e.g. 'tcp+k2rpc://192.168.1.2:12345'")
         ("tso_endpoint", bpo::value<k2::String>(), "URL of Timestamp Oracle (TSO), e.g. 'tcp+k2rpc://192.168.1.2:12345'")
         ("data_load", bpo::value<bool>()->default_value(false), "If true, only data gen and load are performed. If false, only benchmark is performed.")
+        ("write_async", bpo::value<bool>()->default_value(false), "If true, txn manager will process write request in async manner.")
+        ("use_when_all", bpo::value<bool>()->default_value(true), "If true, using when all function to process tpcc(). If false, process write/read op one by one.")
+        ("write_size", bpo::value<int>()->default_value(20), "write number in each CustomT txn")
+        ("write_ratio", bpo::value<int>()->default_value(85), "write ratio in a CustomT txn")
         ("num_instances", bpo::value<int>()->default_value(1), "Number of client instances.")
         ("instance_id", bpo::value<int>()->default_value(0), "ID of this client instance.")
         ("num_warehouses", bpo::value<int16_t>()->default_value(2), "Number of TPC-C Warehouses.")
@@ -434,7 +454,7 @@ int main(int argc, char** argv) {;
         ("cpo_request_timeout", bpo::value<ParseableDuration>(), "CPO request timeout")
         ("cpo_request_backoff", bpo::value<ParseableDuration>(), "CPO request backoff")
         ("delivery_txn_batch_size", bpo::value<uint16_t>()->default_value(10), "The batch number of Delivery transaction")
-        ("txn_weights", bpo::value<std::vector<int>>()->multitoken()->default_value(std::vector<int>({43,4,4,45,4})), "A comma-separated list of exactly 5 elements denoting the percentage for each txn type: Payment, OrderStatus, Delivery, NewOrder, and StockLevel");
+        ("txn_weights", bpo::value<std::vector<int>>()->multitoken()->default_value(std::vector<int>({43,4,4,45,4,0})), "A comma-separated list of exactly 6 elements denoting the percentage for each txn type: Payment, OrderStatus, Delivery, NewOrder, StockLevel and CustomT");
 
     app.addApplet<k2::TSO_ClientLib>();
     app.addApplet<Client>();

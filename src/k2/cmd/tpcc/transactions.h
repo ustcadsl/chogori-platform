@@ -103,11 +103,117 @@ public:
     }
 };
 
+class CustomT : public TPCCTxn
+{
+public:
+    CustomT(RandomContext& random, K23SIClient& client, int16_t w_id, int write_size = 20, int write_ratio = 85, bool write_async = false) :
+        _random(random), _client(client), _w_id(w_id), _write_size(write_size), _write_ratio(write_ratio), _write_async(write_async) {
+        
+        _item_id = 1;
+        _failed = false;
+    }
+
+    future<bool> attempt() override {
+        K2TxnOptions options{};
+        options.deadline = Deadline(5s);
+        options.writeAsync = _write_async;      
+        return _client.beginTxn(options)
+        .then([this] (K2TxnHandle&& txn) {
+            _txn = std::move(txn);
+            return runWithTxn();
+        }).handle_exception([] (auto exc) {
+            K2LOG_W_EXC(log::tpcc, exc, "Failed to start txn");
+            return make_ready_future<bool>(false);
+        });
+    }
+
+private:
+    future<bool> runWithTxn() {
+        future<> fut = make_ready_future<>();
+        int writeCount = 0;
+        while (writeCount < _write_size) {
+            if (_random.UniformRandom(1, 100) > _write_ratio) {
+                fut = fut.then([this] {
+                    return readItem();
+                });
+                continue;
+            }
+            fut = fut.then([this, writeCount] {
+                K2LOG_D(log::tpcc, "writeItem called, writeCount={}", writeCount);
+                return writeItem();
+                // if (writeCount % 3 == 0) {
+                //     K2LOG_D(log::tpcc, "writeItem called, writeCount={}", writeCount);
+                //     return writeItem();
+                // } else if (writeCount % 3 == 1) {
+                //     K2LOG_D(log::tpcc, "writeStock called, writeCount={}", writeCount);
+                //     return writeStock();
+                // } else {
+                //     K2LOG_D(log::tpcc, "writeOrder called, writeCount={}", writeCount);
+                //     return writeOrder();
+                // }
+            });
+            writeCount++;
+        }
+        return fut.then([this] {
+            return _txn.end(true);
+        }).then_wrapped([this] (auto&& fut) {
+            if (fut.failed()) {
+                _failed = true;
+                K2LOG_W_EXC(log::tpcc, fut.get_exception(), "Custom Txn failed");
+                fut.ignore_ready_future();
+                return make_ready_future<bool>(false);
+            }
+
+            EndResult result = fut.get0();
+
+            if (result.status.is2xxOK() && !_failed) {
+                return make_ready_future<bool>(true);
+            }
+
+            return make_ready_future<bool>(false);
+        });
+    }
+
+    future<> writeItem() {
+        auto item = Item(_random, _item_id++);
+        return writeRow<Item>(item, _txn).discard_result();;
+    }
+
+    future<> writeStock() {
+        auto stock = Stock(_random, _w_id, _random.UniformRandom(1, _item_id));
+        return writeRow<Stock>(stock, _txn).discard_result();
+    }
+
+    future<> writeOrder() {
+        auto order = Order(_random, _w_id);
+        return writeRow<Order>(order, _txn).discard_result();
+    }
+
+    future<> readItem() {
+        return _txn.read<Item>(Item(_random.UniformRandom(1, _item_id)))
+            .then([this] (auto&& result) {
+                K2LOG_D(log::tpcc, "read item result={}", result);
+                return seastar::make_ready_future<>();
+            });
+    }
+
+private:
+    RandomContext& _random;
+    K23SIClient& _client;
+    K2TxnHandle _txn;   
+    int16_t _w_id;
+    int _write_size;
+    uint32_t _write_ratio;
+    bool _write_async;
+    int32_t _item_id;
+    bool _failed;
+};
+
 class PaymentT : public TPCCTxn
 {
 public:
-    PaymentT(RandomContext& random, K23SIClient& client, int16_t w_id, int16_t max_w_id) :
-                        _random(random), _client(client), _w_id(w_id) {
+    PaymentT(RandomContext& random, K23SIClient& client, int16_t w_id, int16_t max_w_id, bool write_async = false) :
+                        _random(random), _client(client), _w_id(w_id), _write_async(write_async) {
 
         _d_id = random.UniformRandom(1, _districts_per_warehouse());
         // customer id will be re-assign based on probability later during customerUpdate()
@@ -134,6 +240,7 @@ public:
     future<bool> attempt() override {
         K2TxnOptions options{};
         options.deadline = Deadline(5s);
+        options.writeAsync = _write_async;
         return _client.beginTxn(options)
         .then([this] (K2TxnHandle&& txn) {
             _txn = std::move(txn);
@@ -326,6 +433,7 @@ private:
     bool _failed;
     bool _abort; // Used by verification test to force an abort
     bool _force_original_cid; // Used by verification test to force the cid to not change
+    bool _write_async;
 
 private:
     ConfigVar<int16_t> _districts_per_warehouse{"districts_per_warehouse"};
@@ -337,13 +445,14 @@ friend class AtomicVerify;
 class NewOrderT : public TPCCTxn
 {
 public:
-    NewOrderT(RandomContext& random, K23SIClient& client, int16_t w_id, int16_t max_w_id) :
+    NewOrderT(RandomContext& random, K23SIClient& client, int16_t w_id, int16_t max_w_id, bool write_async = false) :
                         _random(random), _client(client), _w_id(w_id), _max_w_id(max_w_id),
-                        _failed(false), _order(random, w_id) {}
+                        _failed(false), _order(random, w_id), _write_async(write_async) {}
 
     future<bool> attempt() override {
         K2TxnOptions options{};
         options.deadline = Deadline(5s);
+        options.writeAsync = _write_async;
         return _client.beginTxn(options)
         .then([this] (K2TxnHandle&& txn) {
             _txn = std::move(txn);
@@ -517,13 +626,14 @@ private:
     std::decimal::decimal64 _d_tax;
     std::decimal::decimal64 _c_discount;
     std::decimal::decimal64 _total_amount = 0;
+    bool _write_async;
 };
 
 class OrderStatusT : public TPCCTxn
 {
 public:
-    OrderStatusT(RandomContext& random, K23SIClient& client, int16_t w_id) :
-                        _random(random), _client(client), _w_id(w_id) {
+    OrderStatusT(RandomContext& random, K23SIClient& client, int16_t w_id, bool write_async = false) :
+                        _random(random), _client(client), _w_id(w_id), _write_async(write_async) {
         _d_id = _random.UniformRandom(1, _districts_per_warehouse());
         _c_id = _random.NonUniformRandom(1023, 1, _customers_per_district()); // by last name later at
 
@@ -533,6 +643,7 @@ public:
     future<bool> attempt() override {
         K2TxnOptions options{};
         options.deadline = Deadline(5s);
+        options.writeAsync = _write_async;
         return _client.beginTxn(options)
         .then([this] (K2TxnHandle&& txn) {
             _txn = std::move(txn);
@@ -833,13 +944,14 @@ private:
     std::vector<int16_t> _out_ol_supply_wid;
     std::vector<std::decimal::decimal64> _out_ol_amount;
     std::vector<int16_t> _out_ol_quantity;
+    bool _write_async;
 };
 
 class DeliveryT : public TPCCTxn
 {
 public:
-    DeliveryT(RandomContext& random, K23SIClient& client, int16_t w_id, uint16_t batch_size) :
-                _random(random), _client(client), _batch_size(batch_size), _w_id(w_id) {
+    DeliveryT(RandomContext& random, K23SIClient& client, int16_t w_id, uint16_t batch_size, bool write_async = false) :
+                _random(random), _client(client), _batch_size(batch_size), _w_id(w_id), _write_async(write_async) {
         if (_batch_size > 10) K2LOG_W(log::tpcc, "DeliveryT Ctor with batch_size bigger than 10. It should be between 1 to 10");
         for (uint16_t i = 0; i < 10; ++i){
             _d_id.push_back(_random.UniformRandom(1, _districts_per_warehouse()));
@@ -864,6 +976,7 @@ public:
                 options.deadline = Deadline(5s);
                 options.priority = dto::TxnPriority::Low;
                 options.syncFinalize = false;
+                options.writeAsync = _write_async;
 
                 return _client.beginTxn(options) // begin a txn
                 .then([this, &vIdx, start = startIdx, end = endIdx] (K2TxnHandle&& txn) {
@@ -1199,6 +1312,7 @@ private:
     std::vector<int16_t> _d_id;
     std::vector<int32_t> _o_carrier_id;
     std::vector<int16_t> _o_line_count = std::vector<int16_t>(10, -1); // Count how many Order Lines for each Order
+    bool _write_async;
 
     ConfigVar<int16_t> _districts_per_warehouse{"districts_per_warehouse"};
 
@@ -1212,8 +1326,8 @@ private:
 class StockLevelT : public TPCCTxn
 {
 public:
-    StockLevelT(RandomContext& random, K23SIClient& client, int16_t w_id, int16_t d_id) :
-                        _random(random), _client(client), _w_id(w_id), _d_id(d_id) {
+    StockLevelT(RandomContext& random, K23SIClient& client, int16_t w_id, int16_t d_id, bool write_async = false) :
+                        _random(random), _client(client), _w_id(w_id), _d_id(d_id), _write_async(write_async) {
         _threshold = _random.UniformRandom(10, 20);
         _low_stock = 0;
 
@@ -1223,6 +1337,7 @@ public:
     future<bool> attempt() override {
         K2TxnOptions options{};
         options.deadline = Deadline(5s);
+        options.writeAsync = _write_async;
         return _client.beginTxn(options)
         .then([this] (K2TxnHandle&& txn) {
             _txn = std::move(txn);
@@ -1360,4 +1475,5 @@ private:
     // output data that Stock-Level-Transaction wants
     // _low_stock count
     int64_t _low_stock;
+    bool _write_async;
 };

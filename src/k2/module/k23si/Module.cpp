@@ -1248,8 +1248,23 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, VersionSet& ve
     // we need to copy this data into a new memory block so that we don't hold onto and fragment the transport memory
     dto::DataRecord rec{.value=request.value.copy(), .timestamp=request.mtr.timestamp, .isTombstone=request.isDelete};
 
-    auto status = _twimMgr.addWrite(request.mtr, request.key, request.trh, request.trhCollection);
+    dto::K23SI_MTR mtr{
+        .timestamp = request.mtr.timestamp,
+        .priority = request.mtr.priority
+    };
+    dto::Key key {
+        .schemaName = request.key.schemaName,
+        .partitionKey = request.key.partitionKey,
+        .rangeKey = request.key.rangeKey
+    };
+    dto::Key trh {
+        .schemaName = request.trh.schemaName,
+        .partitionKey = request.trh.partitionKey,
+        .rangeKey = request.trh.rangeKey        
+    };
+    String trhCollection = request.trhCollection;
 
+    auto status = _twimMgr.addWrite(std::move(mtr), std::move(key), std::move(trh), std::move(trhCollection));
     if (!status.is2xxOK()) {
         return status;
     }
@@ -1281,6 +1296,7 @@ K23SIPartitionModule::_notifyWriteKeyPersist(String collectionName, dto::K23SI_M
     request.writeKey = writeKey;
     request.request_id = request_id;
     return seastar::do_with(std::move(request), [this, deadline] (auto& request) {
+        K2LOG_D(log::skvsvr, "sending write key persist request={}", request);
         return _cpo.partitionRequest<dto::K23SIWriteKeyPersistRequest, dto::K23SIWriteKeyPersistResponse, dto::Verbs::K23SI_WRITE_KEY_PERSIST>(deadline, request)
             .then([this, &request] (auto response) {
                 auto& [status, _] = response;
