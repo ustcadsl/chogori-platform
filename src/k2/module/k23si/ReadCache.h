@@ -26,7 +26,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include <algorithm>
 #include <list>
 #include <iostream>
-
+#include <k2/common/Chrono.h>
 #include <intervaltree.hpp>
 
 template <typename KeyT, typename TimestampT>
@@ -78,19 +78,19 @@ public:
         }
     }
 
-    void insertInterval(KeyT low, KeyT high, TimestampT timestamp, double &totalSerachTreems, double &totalUpdateTreems)
+    void insertInterval(KeyT low, KeyT high, TimestampT timestamp, uint64_t &totalSerachTreens, uint64_t &totalUpdateTreens)
     {
-        clock_t  _searchTreeStart = clock();
+        auto _searchTreeStart = k2::now_nsec_count();
         Intervals::Interval<KeyT, TreeValue>* found = _tree.find(Intervals::Interval<KeyT, TreeValue>(low, high));
-        clock_t  _searchTreeEnd = clock();
-        totalSerachTreems += (double)(_searchTreeEnd-_searchTreeStart)/CLOCKS_PER_SEC*1000; //////
+        auto _searchTreeEnd = k2::now_nsec_count();
+        totalSerachTreens += _searchTreeEnd - _searchTreeStart;
         if (found) {
             _lru.erase(found->value.it);
             _lru.emplace_front(std::move(low), std::move(high), timestamp);
             found->value.it = _lru.begin();
             found->value.timestamp = do_max(timestamp, found->value.timestamp);
-            clock_t  _updateTreeEnd = clock();
-            totalUpdateTreems += (double)(_updateTreeEnd-_searchTreeEnd)/CLOCKS_PER_SEC*1000; //////
+            auto _updateTreeEnd = k2::now_nsec_count();
+            totalUpdateTreens += _updateTreeEnd - _searchTreeEnd;
             return;
         }
 
@@ -106,8 +106,8 @@ public:
             _min = do_max(_min, to_remove.value);
             _lru.pop_back();
         }
-        clock_t  _updateTreeEnd2 = clock();
-        totalUpdateTreems += (double)(_updateTreeEnd2-_searchTreeEnd)/CLOCKS_PER_SEC*1000; //////
+        auto _updateTreeEnd2 = k2::now_nsec_count();
+        totalUpdateTreens += _updateTreeEnd2-_searchTreeEnd;
     }
 
 private:

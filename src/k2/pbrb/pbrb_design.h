@@ -85,7 +85,7 @@ struct SchemaUMap {
 
 static uint32_t FTSize[256] = {
     0,                // NULL_T = 0,
-    100,    // STRING, 128 // NULL characters in string is OK
+    128,    // STRING, // NULL characters in string is OK
     sizeof(int16_t),  // INT16T,
     sizeof(int32_t),  // INT32T,
     sizeof(int64_t),  // INT64T,
@@ -146,7 +146,7 @@ struct SchemaMetaData
     void setHeadPage(BufferPage *pagePtr) {
         headPage = pagePtr;
         K2LOG_I(log::pbrb, "^^^^^^^^^^^^^^^Set HeadPagePtr, pagePtr empty:{}", pagePtr==nullptr);
-        std::cout << "Set HeadPagePtr: " << headPage << std::endl;
+        // std::cout << "Set HeadPagePtr: " << headPage << std::endl;
     }
 
     // Construct from a Schema
@@ -561,6 +561,9 @@ public:
     // Copy the field of row from DataRecord of query to (pagePtr, rowOffset)
     void *cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, void* field, size_t strSize, uint32_t fieldID, bool isStr);
     
+    // Count the space utiliuzation of string fields for each schema
+    void countStringFeildUtilization(BufferPage *pagePtr, RowOffset rowOffset, long &totalFieldsSize, long &totalStoreSize, long &heapFieldNum, bool isPayloadRow);
+
     // Copy the payload of row from DataRecord of query to (pagePtr, rowOffset)
     void *cacheRowPayloadFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, Payload& rowData);
 
@@ -722,8 +725,11 @@ public:
     // Transport Functions:
     
     // PBRB Row -> SKVRecord
-    dto::SKVRecord *generateSKVRecordByRow(uint32_t schemaId, RowAddr rAddr, const String &collName, std::shared_ptr<dto::Schema> schema, bool isPayloadRow, double &totalReadCopyFeildms);
+    dto::SKVRecord *generateSKVRecordByRow(uint32_t schemaId, RowAddr rAddr, const String &collName, std::shared_ptr<dto::Schema> schema, bool isPayloadRow, uint64_t &totalReadCopyFeildms);
+    
+    // SKVRecord -> DataRecord
     dto::DataRecord *generateDataRecord(dto::SKVRecord *skvRecord, void *hotAddr);
+
     // getSchemaVer by hotAddr in SimpleSchema
     uint32_t getSchemaVer(void *hotAddr) {
         auto pagePtr = getPageAddr(hotAddr);

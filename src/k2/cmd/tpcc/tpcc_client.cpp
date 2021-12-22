@@ -374,8 +374,6 @@ private:
             //K2LOG_I(log::tpcc, "PaymentTxn latency={}", _paymentLatency);
             K2LOG_I(log::tpcc, "OrderstatusTxns={} ", _orderStatusTxns);
             //K2LOG_I(log::tpcc, "orderstatus latency={}", _orderStatusLatency);
-            //Read metrics
-            K2LOG_I(log::tpcc, "")
             return make_ready_future();
         });
     }

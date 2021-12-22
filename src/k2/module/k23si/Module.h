@@ -54,13 +54,15 @@ Copyright(c) 2020 Futurewei Cloud
 #include<fstream>
 using namespace std;
 
-//#define PAYLOAD_ROW
-#define FIXEDFIELD_ROW
-// #define READ_BREAKDOWN
-#define NO_READ_BREAKDOWN
+#define PAYLOAD_ROW
+//#define FIXEDFIELD_ROW
+#define READ_BREAKDOWN
+//#define NO_READ_BREAKDOWN
 
 #define OUTPUT_READ_INFO
-//#define OUTPUT_ACCESS_PATTERN 
+//#define OUTPUT_ACCESS_PATTERN
+
+//#define SPACE_UTILIZATION
 
 namespace k2 {
 
@@ -270,7 +272,13 @@ private: // methods
 
     void _registerMetrics();
 
+    void cacheKVRecordtoPBRB(uint32_t SMapIndex, dto::DataRecord* rec, KeyValueNode* nodePtr, int indexFlag);
+
     void doBackgroundPBRBGC(PBRB *pbrb, IndexerT& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod);
+
+    void stringFeildUtilization();
+
+    int getSchemaArrayIndex(String SName);
 
 private:  // members
     // the metadata of our collection
@@ -284,17 +292,16 @@ private:  // members
     // Duplicates are not allowed
     IndexerT _indexer;
 
-    PBRB *pbrb; //////
-
-    std::unique_ptr<PmemEngine> _engine_ptr;
-
+    PBRB *pbrb; 
+    
+    PmemEngine * _engine_ptr;
     PmemEngineConfig _engine_config;
 
-    Index indexer; //////
+    Index indexer; 
 
-    long pbrbHitNum[12] = {0}; //////
+    long pbrbHitNum[12] = {0}; 
 
-    long NvmReadNum[12] = {0}; //////
+    long NvmReadNum[12] = {0}; 
 
     long writeCount[12]={0};
     long readCount[12]={0};
@@ -303,33 +310,37 @@ private:  // members
 
     long totalWriteSize = 0;
 
-    double totalReadms[12]={0}; //////
+    uint64_t totalReadns[12]={0}; 
 
-    double totalCopyFeildms[12]={0}; //////
+    uint64_t totalCopyFeildns[12]={0}; 
 
-    double totalReadCopyFeildms[12]={0}; //////
+    uint64_t totalReadCopyFeildns[12]={0}; 
 
-    double totalGenRecordms[12]={0}; //////
+    uint64_t totalGenRecordns[12]={0};
 
-    double totalIndexms[12]={0}; //////
+    uint64_t totalIndexns[12]={0};
 
-    double totalGetAddrms[12] ={0}; //////
+    uint64_t totalGetAddrns[12] ={0};
 
-    double totalFindPositionms[12] = {0};
+    uint64_t totalFindPositionns[12] = {0};
 
-    double totalHeaderms[12] = {0}; 
+    uint64_t totalHeaderns[12] = {0}; 
 
-    double totalUpdateCachems[12] = {0};
+    uint64_t totalUpdateCachens[12] = {0};
 
-    double totalSerachTreems[12] = {0};
+    uint64_t totalSerachTreens[12] = {0};
 
-    double totalUpdateTreems[12] = {0};
+    uint64_t totalUpdateTreens[12] = {0};
 
-    double totalUpdateKVNodems[12] = {0}; 
+    uint64_t totalUpdateKVNodens[12] = {0}; 
 
-    double totalReadNVMrus[12] = {0}; 
+    uint64_t totalReadNVMns[12] = {0}; 
 
-    double totalReadPBRBms[12] = {0};
+    uint64_t totalReadPBRBns[12] = {0};
+
+    bool enablePBRB = true;
+
+    bool isDonePBRBGC = true;
 
     map<dto::Key, int> writeRecordMap;
 
@@ -378,10 +389,6 @@ private:  // members
     uint64_t _recordVersions{0};
     uint64_t _totalCommittedPayload{0}; //total committed user payload size
     uint64_t _finalizedWI{0}; // total number of finalized WI
-
-    // record the pmem engine operation latency
-    k2::ExponentialHistogram _readPmemEngineLatency;
-    k2::ExponentialHistogram _writePmemEngineLatency;
 
     k2::ExponentialHistogram _readLatency;
     k2::ExponentialHistogram _writeLatency;

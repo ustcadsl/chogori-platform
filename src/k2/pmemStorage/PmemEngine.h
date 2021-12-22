@@ -141,7 +141,7 @@ struct PmemStatuses {
 struct PmemEngineConfig{
 
     // upper limit of pmem engine, default 2GB
-    uint64_t engine_capacity = 2ULL << 30;
+    uint64_t engine_capacity = 50ULL << 30;
 
     // current offset of the plog, this value is persisted 
     // when the plog is sealed or close

@@ -212,16 +212,6 @@ namespace k2 {
         dto::DataRecord *get_datarecord(const dto::Timestamp &timestamp, int &order, PBRB *pbrb);
 
         NodeVerMetadata getNodeVerMetaData(int order, PBRB *pbrb);
-            // struct NodeVerMetadata{
-            //     bool isHot;
-            //     dto::Timestamp timestamp;
-            //     dto::DataRecord::Status status;
-            //     bool isTombstone;
-            //     uint64_t request_id;
-            //     void print() {
-            //         K2LOG_I(log::pbrb, "Node Metadata: [isHot: {}, timestamp: {}, status: {}, isTombstone: {}, request_id: {}", isHot, timestamp, status, isTombStone, request_id);
-            //     }
-            // };
 
         int insert_datarecord(dto::DataRecord *datarecord, PBRB *pbrb);
 
@@ -271,12 +261,12 @@ namespace k2 {
             return 0;
         }
 
-        int insert_hot_datarecord(const dto::Timestamp &timestamp, dto::DataRecord *datarecord) {
+        int insert_hot_datarecord(const dto::Timestamp &timestamp, void *datarecord) {
             for (int i = 0; i < 3; ++i)
                 if (timestamp.tEndTSECount() == valuedata[i].timestamp) {
                     set_inmem(i, 1);
                     //datarecord->prevVersion = valuedata[i].valuepointer;
-                    valuedata[i].valuepointer = datarecord;
+                    valuedata[i].valuepointer = static_cast<dto::DataRecord *>(datarecord);
                     return 0;
                 }
             return 1;

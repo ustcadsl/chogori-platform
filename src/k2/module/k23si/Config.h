@@ -65,8 +65,11 @@ struct K23SIConfig {
     ConfigVar<uint32_t> queryPushLimit{"k23si_query_push_limit", 11};
 
     // control the pbrb is enabled or disabled
-    ConfigVar<bool> enablePBRB{"k23si_enable_pbrb",true};
+    ConfigVar<bool> enablePBRB{"k23si_enable_pbrb", true};
 
+     // control the total number of page allocated in pbrb
+    ConfigVar<uint32_t> totalNumberofPage{"k23si_page_number_pbrb", 3000};
+    
     // the path of pmem engine
     ConfigVar<String> pmemEnginePath{"k23si_pmem_engine_path","/mnt/pmem0/chogori-engine"};
     // the endpoint for our persistence
