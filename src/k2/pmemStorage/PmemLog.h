@@ -68,13 +68,28 @@ public:
 
     uint64_t getUsedSpace() override;
 
-    seastar::metrics::histogram & getPmemAppendLantency() override{
-         return _readPmemLatency.getHistogram();
+    seastar::metrics::histogram & getInsideLantencyStatistics(LantencyType t) override{
+        switch(t){
+            case LantencyType::ReadPmemLatency: 
+                return _readPmemLatency.getHistogram();
+            case LantencyType::WritePmemLatency: 
+                return _writePmemLatency.getHistogram();
+            case LantencyType::AllocateWithinReadLatency:
+                return _allocateWithinReadLatency.getHistogram();
+            case LantencyType::AllocateWithinWriteLatency:
+                return _allocateWithinWriteLatency.getHistogram();
+            case LantencyType::CopyWithinReadLatency:
+                return _copyWithinReadLatency.getHistogram();
+            case LantencyType::CopyWithinWriteLatency:
+                return _copyWithinWriteLatency.getHistogram();
+            default:
+                K2LOG_E(log::pmem_storage,"Try to get a non-existent latency histogram!");
+                k2::ExponentialHistogram tmp_histogram;
+                return tmp_histogram.getHistogram();
+        }
     }
 
-    seastar::metrics::histogram & getPmemReadLantency() override{
-        return _writePmemLatency.getHistogram();
-    }
+
 
 
 private:
@@ -182,8 +197,19 @@ private:
     // metadata of the plog
     // usually user defined
     PmemEngineConfig _plog_meta;
+    
+    // read latency breakdown
+    k2::ExponentialHistogram _allocateWithinReadLatency;
 
+    k2::ExponentialHistogram _copyWithinReadLatency;
+ 
     k2::ExponentialHistogram _readPmemLatency;
+
+
+    //write latency breakdown
+    k2::ExponentialHistogram _allocateWithinWriteLatency;
+
+    k2::ExponentialHistogram _copyWithinWriteLatency;
 
     k2::ExponentialHistogram _writePmemLatency;
 };

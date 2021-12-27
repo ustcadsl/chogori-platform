@@ -110,12 +110,19 @@ std::tuple<Status, PmemAddress> PmemLog::append(Payload &payload){
         Status status = PmemStatuses::S507_Insufficient_Storage_Over_Capcity;
         return std::tuple<Status, PmemAddress>(std::move(status), std::move(pmemAddr));
     }
+    // caculate the allocation latency
+    k2::OperationLatencyReporter areporter(_allocateWithinWriteLatency);
     char * buffer_data = (char*)malloc(appendSize);
+    areporter.report();
     uint64_t payload_data_size = payload.getSize();
+
+    // caculate the memory copy latency
+    k2::OperationLatencyReporter creporter(_copyWithinWriteLatency);
     * (PmemSize *)(buffer_data) = payload_data_size;
     payload.seek(0);
     //promise not change the payload content
     payload.read(buffer_data + sizeof (PmemSize), payload_data_size);
+    creporter.report();
     payload.seek(0);
     Status status = _append(buffer_data,appendSize);
     free(buffer_data);
@@ -170,7 +177,10 @@ Status PmemLog::_append(char *srcdata, size_t len){
 }
 
 std::tuple<Status, Payload> PmemLog::read(const PmemAddress &readAddr){
+    k2::OperationLatencyReporter areporter(_allocateWithinReadLatency);
     Payload payload(Payload::DefaultAllocator());
+    payload.ensureCapacity(8);
+    areporter.report();
     // checkout the effectiveness of start_offset
     if( readAddr > _plog_meta.tail_offset){
         Status status = PmemStatuses::S403_Forbidden_Invalid_Offset;
@@ -185,7 +195,9 @@ std::tuple<Status, Payload> PmemLog::read(const PmemAddress &readAddr){
     char * read_data = _read(readAddr + sizeof(PmemSize), readSize);
     payload.reserve(readSize);
     payload.seek(0);
+    k2::OperationLatencyReporter creporter(_copyWithinReadLatency);
     payload.write(read_data, readSize);
+    creporter.report();
     payload.seek(0);
     free(read_data);
     Status status = PmemStatuses::S200_OK_Found;
@@ -194,7 +206,9 @@ std::tuple<Status, Payload> PmemLog::read(const PmemAddress &readAddr){
 
  char* PmemLog::_read(uint64_t offset, uint64_t len){
     K2LOG_D(log::pmem_storage, "Read data: offset =>{},len=>{}",offset,len);
+    k2::OperationLatencyReporter areporter(_allocateWithinReadLatency);
     char * buffer_data = (char *)malloc(len);
+    areporter.report();
     k2::OperationLatencyReporter reporter(_readPmemLatency); // for reporting metrics
     // calculate the size need read in the first chunk
     size_t start_chunk_id = offset/_plog_meta.chunk_size;

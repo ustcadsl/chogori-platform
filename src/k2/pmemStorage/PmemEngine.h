@@ -167,6 +167,22 @@ struct PmemEngineConfig{
 };
 
 
+enum LantencyType : uint8_t {
+    NULL_T = 0,
+    
+    AllocateWithinReadLatency,
+
+    AllocateWithinWriteLatency,
+    
+    CopyWithinReadLatency,
+    
+    CopyWithinWriteLatency,
+    
+    ReadPmemLatency,
+    
+    WritePmemLatency,
+};
+
 //
 //  K2 pmem storage engine interface
 //
@@ -186,7 +202,7 @@ class PmemEngine{
 
     virtual ~PmemEngine(){}    
 
-    virtual Status init(PmemEngineConfig &plog_meta) = 0;
+    virtual Status init(PmemEngineConfig &) = 0;
 
     virtual std::tuple<Status, PmemAddress> append(Payload & ) = 0;
 
@@ -198,9 +214,7 @@ class PmemEngine{
 
     virtual uint64_t getUsedSpace() = 0;
 
-    virtual seastar::metrics::histogram & getPmemAppendLantency() = 0;
-
-    virtual seastar::metrics::histogram & getPmemReadLantency() = 0;
+    virtual seastar::metrics::histogram & getInsideLantencyStatistics(LantencyType) = 0;
 
 
 };

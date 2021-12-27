@@ -343,18 +343,47 @@ void K23SIPartitionModule::_registerMetrics() {
         sm::make_counter("finalized_WI", _finalizedWI, sm::description("Number of WIs finalized"), labels),
         sm::make_gauge("record_versions", _recordVersions, sm::description("Number of record versions over all records"), labels),
         sm::make_counter("total_committed_payload", _totalCommittedPayload, sm::description("Total size of committed payloads"), labels),
+
+        // here we do read lantecy breakdown related to pmemlog 
         sm::make_histogram("read_latency", [this]{ return _readLatency.getHistogram();},
                 sm::description("Latency of Read Operations"), labels),
         sm::make_histogram("read_PmemLog_latency", [this]{ return _readPmemLogLatency.getHistogram();},
                 sm::description("Latency of Read PmemLog Operations"), labels),
-        sm::make_histogram("read_Pmem_latency", [this]{ return _enginePtr->getPmemReadLantency();},
+        sm::make_histogram("read_Pmem_latency", [this]{ 
+            return _enginePtr->getInsideLantencyStatistics(LantencyType::ReadPmemLatency);},
                 sm::description("Latency of Read Persisent Memory Operations"), labels),
+        sm::make_histogram("allocate_within_read_pmemlog_latency", [this]{ 
+            return _enginePtr->getInsideLantencyStatistics(LantencyType::AllocateWithinReadLatency);},
+                sm::description("Latency of Allocate Space While Reading data from PmemLog"), labels),
+        sm::make_histogram("copy_within_read_pmemlog_latency", [this]{ 
+            return _enginePtr->getInsideLantencyStatistics(LantencyType::CopyWithinReadLatency);},
+                sm::description("Latency of Copy Data While Reading data from PmemLog"), labels),
+        sm::make_histogram("read_outside_PmemLog_copy_latency", [this]{ 
+            return _readOutsidePmemLogCopyLatency.getHistogram();},
+                sm::description("Latency of Copy Data outside Read PmemLog Operations"), labels),
+
+
+        // here we do write lantecy breakdown related to pmemlog 
         sm::make_histogram("write_latency", [this]{ return _writeLatency.getHistogram();},
                 sm::description("Latency of Write Operations"), labels),
         sm::make_histogram("write_PmemLog_latency", [this]{ return _writePmemLogLatency.getHistogram();},
                 sm::description("Latency of Write PmemLog Operations"), labels),        
-        sm::make_histogram("write_Pmem_latency", [this]{ return _enginePtr->getPmemAppendLantency();},
-                sm::description("Latency of Write Persisent Memory Operations"), labels),        
+        sm::make_histogram("write_Pmem_latency", [this]{ 
+            return _enginePtr->getInsideLantencyStatistics(LantencyType::WritePmemLatency);},
+                sm::description("Latency of Write Persisent Memory Operations"), labels),  
+        sm::make_histogram("allocate_within_write_pmemlog_latency", [this]{ 
+            return _enginePtr->getInsideLantencyStatistics(LantencyType::AllocateWithinWriteLatency);},
+                sm::description("Latency of Allocate Space While Writing Data from PmemLog"), labels),
+        sm::make_histogram("copy_within_write_pmemlog_latency", [this]{ 
+            return _enginePtr->getInsideLantencyStatistics(LantencyType::CopyWithinWriteLatency);},
+                sm::description("Latency of Copy Data While Writing Data from PmemLog"), labels),
+        sm::make_histogram("write_outside_PmemLog_allocate_latency", [this]{ 
+            return _writeOutsidePmemLogAllocateLatency.getHistogram();},
+                sm::description("Latency of Allocate outside Write PmemLog Operations"), labels),
+        sm::make_histogram("write_outside_PmemLog_copy_latency", [this]{ 
+            return _writeOutsidePmemLogCopyLatency.getHistogram();},
+                sm::description("Latency of Copy Data outside Write PmemLog Operations"), labels),
+
         sm::make_histogram("query_page_latency", [this]{ return _queryPageLatency.getHistogram();},
                 sm::description("Latency of Query Page Operations"), labels),
         sm::make_histogram("push_latency", [this]{ return _pushLatency.getHistogram();},
@@ -853,7 +882,9 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
                 _partition, std::get<0>(read_pmem_status).message);
             }
+            k2::OperationLatencyReporter creporter(_readOutsidePmemLogCopyLatency);
             std::get<1>(read_pmem_status).read(rec->value);
+            creporter.report();
             reporter.report();
             auto _readNVMEnd = k2::now_nsec_count();
             totalReadNVMns[indexFlag] += _readNVMEnd - _readNVMtart;
@@ -874,7 +905,9 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                     K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
                     _partition, std::get<0>(read_pmem_status).message);
                 }
+                k2::OperationLatencyReporter creporter(_readOutsidePmemLogCopyLatency);
                 std::get<1>(read_pmem_status).read(rec->value);
+                creporter.report();
                 reporter.report();
                 sVer = rec->value.schemaVersion;
                 //K2LOG_I(log::skvsvr,"Read datarecord  from pmemLog, schemaVersion:{}, excludedFields:{}",rec->value.schemaVersion, rec->value.excludedFields);
@@ -1733,8 +1766,13 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, KeyValueNode& 
     // we need to copy this data into a new memory block so that we don't hold onto and fragment the transport memory
     
     k2::OperationLatencyReporter reporter(_writePmemLogLatency);
+    k2::OperationLatencyReporter areporter(_writeOutsidePmemLogAllocateLatency);
     Payload payload(Payload::DefaultAllocator());
+    payload.ensureCapacity(8);
+    areporter.report();
+    k2::OperationLatencyReporter creporter(_writeOutsidePmemLogCopyLatency);
     payload.write(request.value);
+    creporter.report();
     payload.seek(0);
     auto pmem_status = _enginePtr->append(payload);
     if( !std::get<0>(pmem_status).is2xxOK()){

@@ -31,7 +31,7 @@ private:
   k2::dto::Schema schema;
 
 };
-void BM_spin_empty(benchmark::State& state) {
+void BM_COPY_TO_PAYLOAD(benchmark::State& state) {
   for (auto _ : state) {
     for (int x = 0; x < state.range(0); ++x) {
       benchmark::DoNotOptimize(x);
@@ -39,7 +39,7 @@ void BM_spin_empty(benchmark::State& state) {
   }
 }
 
-BENCHMARK(BM_spin_empty)
+BENCHMARK(BM_COPY_TO_PAYLOAD)
   ->ComputeStatistics("max", [](const std::vector<double>& v) -> double {
     return *(std::max_element(std::begin(v), std::end(v)));
   })
