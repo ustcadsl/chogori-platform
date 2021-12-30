@@ -55,15 +55,10 @@ function finish {
 
 sleep 5
 
-<<<<<<< HEAD
-NUMWH=1
-NUMDIST=10
-RUNBENCKMARK=600
-=======
 NUMWH=$1
 NUMDIST=10
 RUNBENCKMARK=300
->>>>>>> 66fa07066e38c0c884a03e79fe2a26a6eed5a3fd
+
 echo ">>> Starting load ..."
 #./build/src/k2/cmd/tpcc/tpcc_client -c1 --log_level WARN --tcp_remotes ${EPS} --cpo ${CPO} --tso_endpoint ${TSO} --data_load true --num_warehouses ${NUMWH} --districts_per_warehouse ${NUMDIST} --writes_per_load_txn 20 --prometheus_port 63100 ${COMMON_ARGS} --memory=3G --partition_request_timeout=6s --dataload_txn_timeout=600s --do_verification true --num_concurrent_txns=1 --txn_weights={43,4,4,45,4}
 ./build/src/k2/cmd/tpcc/tpcc_client -c1 --log_level INFO  --tcp_remotes ${EPS} --cpo ${CPO} --tso_endpoint ${TSO} --data_load true --num_warehouses ${NUMWH} --districts_per_warehouse ${NUMDIST} --writes_per_load_txn 10 --prometheus_port 63100 ${COMMON_ARGS} --memory=20G --partition_request_timeout=6s --dataload_txn_timeout=6000s --do_verification false --num_concurrent_txns=1 --txn_weights={43,4,4,45,4}
