@@ -140,15 +140,15 @@ struct PmemStatuses {
 // pmem storage engine config
 struct PmemEngineConfig{
 
-    // upper limit of pmem engine, default 20GB
-    uint64_t engine_capacity = 20ULL << 30;
+    // upper limit of pmem engine, default 100GB
+    uint64_t engine_capacity = 100ULL << 30;
 
     // current offset of the plog, this value is persisted 
     // when the plog is sealed or close
     uint64_t tail_offset = 0;
 
-    // control chunk size, default 8MB
-    uint64_t chunk_size = 8ULL << 20;
+    // control chunk size, default 80MB
+    uint64_t chunk_size = 80ULL << 20;
 
     // number of current chunks
     uint64_t chunk_count = 0;

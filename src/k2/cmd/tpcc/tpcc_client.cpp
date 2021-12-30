@@ -257,7 +257,7 @@ private:
             })
             .then([this] {
                 K2LOG_I(log::tpcc, "Starting item data load");
-                _item_loader = DataLoader(TPCCDataGen().generateItemData());
+                _item_loader = DataLoader(std::move(TPCCDataGen(TPCCDataType::ItemData).configItemData()));
                 return _item_loader.loadData(_client, _num_concurrent_txns());
             });
         } else {
@@ -266,8 +266,8 @@ private:
 
         return f.then ([this, share] {
             K2LOG_I(log::tpcc, "Starting data gen");
-            _loader = DataLoader(TPCCDataGen().generateWarehouseData(1 + (_global_id * share),
-                                    1 + (_global_id * share) + share));
+            _loader = DataLoader(std::move(TPCCDataGen(TPCCDataType::WarehouseData).configWarehouseData(1 + (_global_id * share),
+                                    1 + (_global_id * share) + share)));
             K2LOG_I(log::tpcc, "Starting load to server");
             return _loader.loadData(_client, _num_concurrent_txns());
         }).then ([this] {
@@ -283,15 +283,15 @@ private:
                 int16_t w_id = (_global_id % _max_warehouses()) + 1;
                 int16_t d_id = (_global_id % _districts_per_warehouse()) + 1;
                 TPCCTxn* curTxn;
-                if (txn_type <= _weights[0]) {
+             if (txn_type <= _weights[0]) {
                     curTxn = (TPCCTxn*) new PaymentT(_random, _client, w_id, _max_warehouses());
-                } /*else if (txn_type <= _weights[1]) {
+                } else if (txn_type <= _weights[1]) {
                     curTxn = (TPCCTxn*) new OrderStatusT(_random, _client, w_id);
                 } else if (txn_type <= _weights[2]) {
                     // range from 1-10 is allowed, otherwise set to 10
                     uint16_t batch_size = (_delivery_txn_batch_size() <= 10 && _delivery_txn_batch_size() > 0) ? batch_size : 10;
                     curTxn = (TPCCTxn*) new DeliveryT(_random, _client, w_id, batch_size);
-                }*/ else if (txn_type <= _weights[3]) {
+                } else if (txn_type <= _weights[3]) {
                     curTxn = (TPCCTxn*) new NewOrderT(_random, _client, w_id, _max_warehouses());
                 } else {
                     curTxn = (TPCCTxn*) new StockLevelT(_random, _client, w_id, d_id);

@@ -41,7 +41,7 @@ using namespace k2;
 class DataLoader {
 public:
     DataLoader() = default;
-    DataLoader(TPCCData&& data) : _data(std::move(data)) {}
+    DataLoader(TPCCDataGen&& dataGen) : _dataGen(std::move(dataGen)) {}
 
     future<> loadData(K23SIClient& client, int pipeline_depth)
     {
@@ -49,9 +49,16 @@ public:
         options.deadline = Deadline(ConfigDuration("dataload_txn_timeout", 600s)());
         options.syncFinalize = true;
         std::vector<future<>> futures;
+        _data = _dataGen.generateData();
 
         return do_until(
-            [this] { return _data.size() == 0; },
+            [this] { 
+                if( _data.size() == 0 && _dataGen.hasData() ){
+                    _data = _dataGen.generateData();
+                    // K2LOG_I(log::tpcc, "Generate data once!");
+                }
+                return _data.size() == 0 && !_dataGen.hasData(); 
+            },
             [this, options, pipeline_depth, &client] {
                 std::vector<future<>> futures;
 
@@ -93,8 +100,8 @@ private:
             });
         });
     }
-
     TPCCData _data;
+    TPCCDataGen _dataGen;
     ConfigVar<size_t> _writes_per_load_txn{"writes_per_load_txn"};
 };
 

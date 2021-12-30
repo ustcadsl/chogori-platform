@@ -192,8 +192,13 @@ K23SIPartitionModule::K23SIPartitionModule(dto::CollectionMetadata cmeta, dto::P
     K2LOG_I(log::skvsvr, "---------Partition: {}, pageNum:{}", _partition, pageNum);
     pbrb = new PBRB(pageNum, &_retentionTimestamp, &indexer);
     enablePBRB = _config.enablePBRB();
+    // config the pmem engine 
     std::string pmemPath = fmt::format("{}/shard{}",_config.pmemEnginePath(),seastar::this_shard_id());
     strcpy(_engineConfig.engine_path,pmemPath.c_str());
+    _engineConfig.engine_capacity = _config.pmemEngineCapacity();
+    _engineConfig.chunk_size = _config.pmemEngineChunkSize();
+
+    // open the engine
     auto status = PmemEngine::open(_engineConfig,&_enginePtr);
     if ( !status.is2xxOK()){
         K2LOG_E(log::skvsvr,"------Partition: {} fail to create pmem engine: {}" ,

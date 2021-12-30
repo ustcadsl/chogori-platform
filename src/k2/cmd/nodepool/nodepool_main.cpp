@@ -42,6 +42,8 @@ int main(int argc, char** argv) {
         ("k23si_enable_pbrb",bpo::value<bool>(),"enable pbrb in k2 module")
         ("k23si_page_number_pbrb",bpo::value<uint32_t>(),"the number of page in pbrb module")
         ("k23si_pmem_engine_path",bpo::value<k2::String>(),"Path of the pmem engine")
+        ("k23si_pmem_engine_capacity",bpo::value<uint64_t>(),"Capacity of the pmem engine")
+        ("k23si_pmem_engine_chunk_size",bpo::value<uint64_t>(),"Chunk size of the pmem engine")
         ("k23si_persistence_endpoints", bpo::value<std::vector<k2::String>>()->multitoken()->default_value(std::vector<k2::String>()), "A space-delimited list of k2 persistence endpoints, each core will pick one endpoint");
 
     app.addApplet<k2::APIServer>();

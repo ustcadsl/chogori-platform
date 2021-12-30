@@ -72,6 +72,13 @@ struct K23SIConfig {
     
     // the path of pmem engine
     ConfigVar<String> pmemEnginePath{"k23si_pmem_engine_path","/mnt/pmem0/chogori-engine"};
+
+    // the capacity of pmem engine
+    ConfigVar<uint64_t> pmemEngineCapacity{"k23si_pmem_engine_capacity",100ULL <<30};
+
+    // the basic chunk size of pmem engine
+    ConfigVar<uint64_t> pmemEngineChunkSize{"k23si_pmem_engine_chunk_size",80ULL << 20};
+
     // the endpoint for our persistence
     ConfigVar<std::vector<String>> persistenceEndpoint{"k23si_persistence_endpoints"};
     ConfigDuration persistenceTimeout{"k23si_persistence_timeout", 10s};
