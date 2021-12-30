@@ -146,7 +146,7 @@ struct SchemaMetaData
     void setHeadPage(BufferPage *pagePtr) {
         headPage = pagePtr;
         K2LOG_I(log::pbrb, "^^^^^^^^^^^^^^^Set HeadPagePtr, pagePtr empty:{}", pagePtr==nullptr);
-        std::cout << "Set HeadPagePtr: " << headPage << std::endl;
+        // std::cout << "Set HeadPagePtr: " << headPage << std::endl;
     }
 
     // Construct from a Schema

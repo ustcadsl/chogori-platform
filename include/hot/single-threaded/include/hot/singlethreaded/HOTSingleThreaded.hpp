@@ -239,12 +239,6 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline b
 	uint8_t byteArray[idx::contenthelpers::MAX_STRING_KEY_LENGTH]; // Change MAX_STRING_KEY_LENGTH to 64
 	memset(byteArray, 0, sizeof(byteArray));
 	uint16_t byteLength = idx::contenthelpers::interpretAsByteArray(fixedSizeKey, byteArray);
-	
-	std::cout << "HOTSingleThreaded.hpp @Insert Insert Key: ";
-	for(int i = 0; i < byteLength; ++i) {
-		std::cout << byteArray[i];
-	}
-	std::cout << std::endl;
 
 	if(isRootANode()) {
 		std::array<HOTSingleThreadedInsertStackEntry, 64> insertStack;
@@ -659,15 +653,15 @@ template<typename ValueType, template <typename> typename KeyExtractor> std::pai
 }
 
 template<typename ValueType, template<typename> typename KeyExtractor> inline size_t HOTSingleThreaded<ValueType, KeyExtractor>::size() const {
-	std::map<size_t, size_t> leafNodesPerDepth;
-	getValueDistribution(mRoot, 0, leafNodesPerDepth);
-
-	size_t LeafNodeCount = 0;
-	for (auto leafNodesOnDepth : leafNodesPerDepth) {
-		LeafNodeCount += leafNodesOnDepth.second;
-	}
-
-	return LeafNodeCount;
+	std::map<std::string, double> HOTSize;
+	collectStatsForSubtree(mRoot, HOTSize);
+	size_t totalSize = HOTSize["total"];
+	std::cout << "Raw size of HOT=" << (double)totalSize/(1024.0*1024.0) << "MB" << std::endl;
+	std::cout << "Height of HOT=" <<  mRoot.getHeight() << std::endl;
+	for(auto it = begin(); it != end(); ++it) {
+		totalSize += sizeof(*it);
+	}	
+	return totalSize;
 }
 
 template<typename ValueType, template <typename> typename KeyExtractor> inline void HOTSingleThreaded<ValueType, KeyExtractor>::getValueDistribution(HOTSingleThreadedChildPointer const & childPointer, size_t depth, std::map<size_t, size_t> & leafNodesPerDepth) const {

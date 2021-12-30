@@ -22,7 +22,7 @@ Copyright(c) 2020 Futurewei Cloud
 */
 
 #pragma once
-
+#include <chrono>
 #include <map>
 #include <unordered_map>
 #include <deque>
@@ -93,8 +93,8 @@ struct VersionSet {
 */
 
 // the type holding versions for all keys, i.e. the indexer
-//typedef HOTindexer IndexerT;
-//typedef HotIterator IndexerIterator;
+// typedef HOTindexer IndexerT;
+// typedef HotIterator IndexerIterator;
 typedef mapindexer IndexerT;
 typedef MapIterator IndexerIterator;
 
@@ -274,7 +274,7 @@ private: // methods
 
     void cacheKVRecordtoPBRB(uint32_t SMapIndex, dto::DataRecord* rec, KeyValueNode* nodePtr, int indexFlag);
 
-    void doBackgroundPBRBGC(PBRB *pbrb, mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod);
+    void doBackgroundPBRBGC(PBRB *pbrb, IndexerT& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod);
 
     void stringFeildUtilization();
 
@@ -291,7 +291,6 @@ private:  // members
     // (newest item is at front of the deque)
     // Duplicates are not allowed
     IndexerT _indexer;
-    mapindexer _mapIndexer;
 
     PBRB *pbrb; 
     
@@ -399,6 +398,43 @@ private:  // members
     k2::ExponentialHistogram _pushLatency;
     k2::ExponentialHistogram _queryPageScans;
     k2::ExponentialHistogram _queryPageReturns;
+
+    // Add for hot and map test
+    //read 
+    k2::Duration _readSum;
+    k2::Duration _readCacheSum;
+    k2::Duration _readIndexerSum;
+    k2::Duration _readItorSum;
+    k2::Duration _readNodeSum;
+    uint64_t _totalRead{0};
+
+    k2::Duration _writeValidateSum;
+    k2::Duration _writeFindSum;
+    k2::Duration _createWISum;
+    //partial update
+    k2::Duration _partialUpdateSum;
+    k2::Duration _partialUpdateIndexerSum;
+    uint64_t _totalPartialUpdate{0};
+    //insert
+    k2::Duration _insertSum;
+    k2::Duration _insertIndexerSum;
+    uint64_t _totalInsert{0};
+    //delete
+    k2::Duration _deleteIndexerSum;
+    uint64_t  _totalDelete{0};
+
+    //query
+    k2::Duration _querySum;
+    k2::Duration _initItSum;
+    k2::Duration _forwardSum;
+    k2::Duration _isDoneSum;
+    k2::Duration _scanAdSum;
+    k2::Duration _getRecSum;
+    k2::Duration _handleSum;
+    k2::Duration _updateCacheSum;
+    k2::Duration _handleEndSum;
+    uint64_t _totalQuery{0};
+    uint64_t _totalScanNum{0};
 };
 
 } // ns k2
