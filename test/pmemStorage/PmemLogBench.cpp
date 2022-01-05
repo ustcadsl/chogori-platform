@@ -23,28 +23,157 @@ Copyright(c) 2020 Futurewei Cloud
 
 #include <benchmark/benchmark.h>
 #include <cstdarg>
-#include <k2/pmemStorage/PmemLog.h>
-#include <k2/pmemStorage/PmemEngine.h>
+#include <filesystem>
 #include <k2/dto/SKVRecord.h>
-class SKVRecordGenerator{
-private:
-  k2::dto::Schema schema;
 
-};
-void BM_COPY_TO_PAYLOAD(benchmark::State& state) {
-  for (auto _ : state) {
-    for (int x = 0; x < state.range(0); ++x) {
-      benchmark::DoNotOptimize(x);
-    }
+#include "TPCCRawDataGenerator.h"
+//  this is a copy from the datagen in tpcc
+
+// test the raw memcpy latency
+static void BM_memcpy(benchmark::State& state) {
+  char* src = new char[state.range(0)];
+  char* dst = new char[2U << 30];
+  memset(src, 'x', state.range(0));
+  size_t offset = 0;
+  for (auto _ : state){
+    memcpy(dst+offset, src, state.range(0));
+    offset = (offset+state.range(0)) % (2U<<30);
   }
+  state.SetBytesProcessed(int64_t(state.iterations()) *
+                          int64_t(state.range(0)));
+  delete[] src;
+  delete[] dst;
 }
+BENCHMARK(BM_memcpy)->Arg(8)->Arg(64)->Arg(128)->Arg(256)->Arg(512)->Arg(1<<10)->Arg(8<<10);
 
-BENCHMARK(BM_COPY_TO_PAYLOAD)
-  ->ComputeStatistics("max", [](const std::vector<double>& v) -> double {
-    return *(std::max_element(std::begin(v), std::end(v)));
-  })
-  ->Arg(512);
+static void BM_pmemcpy(benchmark::State& state) {
+  char* src = new char[state.range(0)];
+  char* dst; size_t mappedLen; int isPmem;
+  std::string filePath =  "/mnt/pmem0/pmemlog-bench/tmp.file";
+  if(std::filesystem::exists(filePath)){
+        std::filesystem::remove_all(filePath);
+    }
+  dst = static_cast<char *>(pmem_map_file(
+                        filePath.c_str(),
+                        2U<<30,
+                        PMEM_FILE_CREATE | PMEM_FILE_EXCL,
+                        0666, &mappedLen, &isPmem));
+  if (dst == NULL){
+    std::cout << "error map " << std::endl;
+    return;
+  }
+  memset(src, 'x', state.range(0));
+  size_t offset = 0;
+  for (auto _ : state){
+    pmem_memcpy_nodrain(dst+offset, src, state.range(0));
+    offset = (offset+state.range(0)) % (2U<<30);
+  }
+  state.SetBytesProcessed(int64_t(state.iterations()) *
+                          int64_t(state.range(0)));
+  delete[] src;
+  pmem_unmap(dst, 8<<20);
+}
+BENCHMARK(BM_pmemcpy)->Arg(8)->Arg(64)->Arg(128)->Arg(256)->Arg(512)->Arg(1<<10)->Arg(8<<10);
+
+static void BM_Convert_SKV_Item_Data(benchmark::State& state) {
+  PmemDataLoader pmemLoader;
+  TPCCRawDataGen tpccDataGen(TPCCDataType::ItemData);
+  tpccDataGen.configItemData(100000);
+  auto tpccRawData = tpccDataGen.generateData();
+  size_t skv_space = tpccRawData.size();
+  setupSchemaPointers();
+  int i = 0;
+  for (auto _ : state) {
+      i = (i+1)%skv_space;
+      tpccRawData[i](&pmemLoader, TestOperation::SKVRecordConvert);
+  }
+  state.SetItemsProcessed(int64_t(state.iterations()));
+}
+BENCHMARK(BM_Convert_SKV_Item_Data);
+
+static void BM_Convert_Payload_Item_Data(benchmark::State& state) {
+  PmemDataLoader pmemLoader;
+  TPCCRawDataGen tpccDataGen(TPCCDataType::ItemData);
+  tpccDataGen.configItemData(100000);
+  auto tpccRawData = tpccDataGen.generateData();
+  size_t skv_space = tpccRawData.size();
+  setupSchemaPointers();
+  int i = 0;
+  for (auto _ : state) {
+      i = (i+1)%skv_space;
+      tpccRawData[i](&pmemLoader, TestOperation::PayloadConvert);
+  }
+  state.SetItemsProcessed(int64_t(state.iterations()));
+}
+BENCHMARK(BM_Convert_Payload_Item_Data);
+
+static void BM_Write_Item_Data(benchmark::State& state) {
+  PmemDataLoader pmemLoader;
+  TPCCRawDataGen tpccDataGen(TPCCDataType::ItemData);
+  tpccDataGen.configItemData(100000);
+  auto tpccRawData = tpccDataGen.generateData();
+  size_t skv_space = tpccRawData.size();
+  setupSchemaPointers();
+  int i = 0;
+  for (auto _ : state) {
+      i = (i+1)%skv_space;
+      tpccRawData[i](&pmemLoader, TestOperation::PmemLoad);
+  }
+  state.SetItemsProcessed(int64_t(state.iterations()));
+}
+BENCHMARK(BM_Write_Item_Data);
+
+static void BM_Convert_SKV_Warehouse_Data(benchmark::State& state) {
+  PmemDataLoader pmemLoader;
+  TPCCRawDataGen tpccDataGen(TPCCDataType::WarehouseData);
+  tpccDataGen.configWarehouseData(1,2);
+  auto tpccRawData = tpccDataGen.generateData();
+  setupSchemaPointers();
+  size_t skv_space = tpccRawData.size();
+  int i = 0;
+  for (auto _ : state) {
+      i = (i+1)%skv_space;
+      tpccRawData[i](&pmemLoader, TestOperation::SKVRecordConvert);
+  }
+  state.SetItemsProcessed(int64_t(state.iterations()));
+}
+BENCHMARK(BM_Convert_SKV_Warehouse_Data);
+
+static void BM_Convert_Payload_Warehouse_Data(benchmark::State& state) {
+  PmemDataLoader pmemLoader;
+  TPCCRawDataGen tpccDataGen(TPCCDataType::WarehouseData);
+  tpccDataGen.configWarehouseData(1,2);
+  auto tpccRawData = tpccDataGen.generateData();
+  setupSchemaPointers();
+  size_t skv_space = tpccRawData.size();
+  int i = 0;
+  for (auto _ : state) {
+      i = (i+1)%skv_space;
+      tpccRawData[i](&pmemLoader, TestOperation::PayloadConvert);
+  }
+  state.SetItemsProcessed(int64_t(state.iterations()));
+}
+BENCHMARK(BM_Convert_Payload_Warehouse_Data);
+
+static void BM_Write_Warehouse_Data(benchmark::State& state) {
+  PmemDataLoader pmemLoader;
+  TPCCRawDataGen tpccDataGen(TPCCDataType::WarehouseData);
+  tpccDataGen.configWarehouseData(1,2);
+  auto tpccRawData = tpccDataGen.generateData();
+  setupSchemaPointers();
+  size_t skv_space = tpccRawData.size();
+  int i = 0;
+  for (auto _ : state) {
+      i = (i+1)%skv_space;
+      tpccRawData[i](&pmemLoader, TestOperation::PmemLoad);
+  }
+  state.SetItemsProcessed(int64_t(state.iterations()));
+}
+BENCHMARK(BM_Write_Warehouse_Data);
 
 
-
-BENCHMARK_MAIN();
+int main(int argc, char** argv) {
+  benchmark::Initialize(&argc, argv);
+  benchmark::RunSpecifiedBenchmarks();
+  benchmark::Shutdown();
+}
