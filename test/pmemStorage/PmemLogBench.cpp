@@ -44,7 +44,7 @@ static void BM_memcpy(benchmark::State& state) {
   delete[] src;
   delete[] dst;
 }
-BENCHMARK(BM_memcpy)->Arg(8)->Arg(64)->Arg(128)->Arg(256)->Arg(512)->Arg(1<<10)->Arg(8<<10);
+BENCHMARK(BM_memcpy)->Arg(64)->Arg(128)->Arg(256)->Arg(512)->Arg(1<<10)->Arg(8<<10);
 
 static void BM_pmemcpy(benchmark::State& state) {
   char* src = new char[state.range(0)];
@@ -65,7 +65,7 @@ static void BM_pmemcpy(benchmark::State& state) {
   memset(src, 'x', state.range(0));
   size_t offset = 0;
   for (auto _ : state){
-    pmem_memcpy_nodrain(dst+offset, src, state.range(0));
+    pmem_memcpy_persist(dst+offset, src, state.range(0));
     offset = (offset+state.range(0)) % (2U<<30);
   }
   state.SetBytesProcessed(int64_t(state.iterations()) *
@@ -73,35 +73,19 @@ static void BM_pmemcpy(benchmark::State& state) {
   delete[] src;
   pmem_unmap(dst, 8<<20);
 }
-BENCHMARK(BM_pmemcpy)->Arg(8)->Arg(64)->Arg(128)->Arg(256)->Arg(512)->Arg(1<<10)->Arg(8<<10);
-
-static void BM_Convert_SKV_Item_Data(benchmark::State& state) {
-  PmemDataLoader pmemLoader;
-  TPCCRawDataGen tpccDataGen(TPCCDataType::ItemData);
-  tpccDataGen.configItemData(100000);
-  auto tpccRawData = tpccDataGen.generateData();
-  size_t skv_space = tpccRawData.size();
-  setupSchemaPointers();
-  int i = 0;
-  for (auto _ : state) {
-      i = (i+1)%skv_space;
-      tpccRawData[i](&pmemLoader, TestOperation::SKVRecordConvert);
-  }
-  state.SetItemsProcessed(int64_t(state.iterations()));
-}
-BENCHMARK(BM_Convert_SKV_Item_Data);
+BENCHMARK(BM_pmemcpy)->Arg(64)->Arg(128)->Arg(256)->Arg(512)->Arg(1<<10)->Arg(8<<10);
 
 static void BM_Convert_Payload_Item_Data(benchmark::State& state) {
   PmemDataLoader pmemLoader;
   TPCCRawDataGen tpccDataGen(TPCCDataType::ItemData);
   tpccDataGen.configItemData(100000);
+  setupSchemaPointers();
   auto tpccRawData = tpccDataGen.generateData();
   size_t skv_space = tpccRawData.size();
-  setupSchemaPointers();
   int i = 0;
   for (auto _ : state) {
       i = (i+1)%skv_space;
-      tpccRawData[i](&pmemLoader, TestOperation::PayloadConvert);
+      pmemLoader.testOperation(*tpccRawData[i], TestOperation::PayloadConvert);
   }
   state.SetItemsProcessed(int64_t(state.iterations()));
 }
@@ -111,45 +95,29 @@ static void BM_Write_Item_Data(benchmark::State& state) {
   PmemDataLoader pmemLoader;
   TPCCRawDataGen tpccDataGen(TPCCDataType::ItemData);
   tpccDataGen.configItemData(100000);
+  setupSchemaPointers();
   auto tpccRawData = tpccDataGen.generateData();
   size_t skv_space = tpccRawData.size();
-  setupSchemaPointers();
   int i = 0;
   for (auto _ : state) {
       i = (i+1)%skv_space;
-      tpccRawData[i](&pmemLoader, TestOperation::PmemLoad);
+      pmemLoader.testOperation(*tpccRawData[i], TestOperation::PmemLoad);
   }
   state.SetItemsProcessed(int64_t(state.iterations()));
 }
 BENCHMARK(BM_Write_Item_Data);
 
-static void BM_Convert_SKV_Warehouse_Data(benchmark::State& state) {
-  PmemDataLoader pmemLoader;
-  TPCCRawDataGen tpccDataGen(TPCCDataType::WarehouseData);
-  tpccDataGen.configWarehouseData(1,2);
-  auto tpccRawData = tpccDataGen.generateData();
-  setupSchemaPointers();
-  size_t skv_space = tpccRawData.size();
-  int i = 0;
-  for (auto _ : state) {
-      i = (i+1)%skv_space;
-      tpccRawData[i](&pmemLoader, TestOperation::SKVRecordConvert);
-  }
-  state.SetItemsProcessed(int64_t(state.iterations()));
-}
-BENCHMARK(BM_Convert_SKV_Warehouse_Data);
-
 static void BM_Convert_Payload_Warehouse_Data(benchmark::State& state) {
   PmemDataLoader pmemLoader;
   TPCCRawDataGen tpccDataGen(TPCCDataType::WarehouseData);
   tpccDataGen.configWarehouseData(1,2);
-  auto tpccRawData = tpccDataGen.generateData();
   setupSchemaPointers();
+  auto tpccRawData = tpccDataGen.generateData();
   size_t skv_space = tpccRawData.size();
   int i = 0;
   for (auto _ : state) {
       i = (i+1)%skv_space;
-      tpccRawData[i](&pmemLoader, TestOperation::PayloadConvert);
+      pmemLoader.testOperation(*tpccRawData[i], TestOperation::PayloadConvert);
   }
   state.SetItemsProcessed(int64_t(state.iterations()));
 }
@@ -159,13 +127,13 @@ static void BM_Write_Warehouse_Data(benchmark::State& state) {
   PmemDataLoader pmemLoader;
   TPCCRawDataGen tpccDataGen(TPCCDataType::WarehouseData);
   tpccDataGen.configWarehouseData(1,2);
-  auto tpccRawData = tpccDataGen.generateData();
   setupSchemaPointers();
+  auto tpccRawData = tpccDataGen.generateData();
   size_t skv_space = tpccRawData.size();
   int i = 0;
   for (auto _ : state) {
       i = (i+1)%skv_space;
-      tpccRawData[i](&pmemLoader, TestOperation::PmemLoad);
+      pmemLoader.testOperation(*tpccRawData[i], TestOperation::PmemLoad);
   }
   state.SetItemsProcessed(int64_t(state.iterations()));
 }

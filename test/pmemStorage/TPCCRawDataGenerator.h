@@ -20,14 +20,14 @@ Copyright(c) 2020 Futurewei Cloud
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 */
-
+#include <utility>
+#include <iostream>
 #include <k2/pmemStorage/PmemLog.h>
 #include <k2/pmemStorage/PmemEngine.h>
 #include <libpmem.h>
 #include "TPCCRawDataSchema.h"
 
 enum TestOperation{
-    SKVRecordConvert,
     PayloadConvert,
     PmemLoad,
 }; 
@@ -48,21 +48,13 @@ class PmemDataLoader{
     delete _enginePtr;
   }
   
-  template <class T>
-  void testOperation(T& t, TestOperation testOp){
- 
-      dto::SKVRecord skv_record(t.collectionName, t.schema);
-      t.__writeFields(skv_record);
-     
-     if( testOp == TestOperation::PayloadConvert){
-          Payload payload(Payload::DefaultAllocator());
-          payload.write(skv_record.getStorage());
-          payload.seek(0);
-      }
+
+  void testOperation(dto::SKVRecord& skv, TestOperation testOp){
+      Payload payload(Payload::DefaultAllocator());
+      payload.write(skv.getStorage());
+      payload.seek(0);
+
       if( testOp == TestOperation::PmemLoad){
-          Payload payload(Payload::DefaultAllocator());
-          payload.write(skv_record.getStorage());
-          payload.seek(0);
           _enginePtr->append(payload);
       }
       
@@ -75,7 +67,8 @@ class PmemDataLoader{
 };
 
 
-typedef std::vector<std::function<void(PmemDataLoader* loader, TestOperation testOp)>> TPCCRawData;
+typedef std::vector<std::shared_ptr<dto::SKVRecord>> TPCCRawData;
+
 enum TPCCDataType{
     ItemData,
     WarehouseData,
@@ -118,9 +111,9 @@ public:
 
         for (uint32_t i=1; i<=_itemDataCount; ++i) {
             auto item = Item(random, i);
-            data.push_back([_item=std::move(item)] (PmemDataLoader* loader, TestOperation testOp) mutable {
-              loader->testOperation(_item, testOp);
-            });
+            auto skv_item = std::make_shared<dto::SKVRecord>(item.collectionName, item.schema);
+            item.__writeFields(*skv_item.get());
+            data.push_back(skv_item);
         }
         _itemDataCurr += _itemDataCount;
         return data;
@@ -138,18 +131,19 @@ public:
             // populate secondary index idx_customer_name
             auto idx_customer_name = IdxCustomerName(customer.WarehouseID.value(), customer.DistrictID.value(),
                 customer.LastName.value(), customer.CustomerID.value());
-            data.push_back([_idx_customer_name=std::move(idx_customer_name)] (PmemDataLoader* loader, TestOperation testOp) mutable {
-                loader->testOperation(_idx_customer_name, testOp);
-            });
 
-            data.push_back([_customer=std::move(customer)] (PmemDataLoader* loader, TestOperation testOp) mutable {
-                loader->testOperation(_customer, testOp);
-            });
+            auto skv_idx_customer_name = std::make_shared<dto::SKVRecord>(idx_customer_name.collectionName, idx_customer_name.schema);
+            idx_customer_name.__writeFields(*skv_idx_customer_name);            
+            data.push_back(skv_idx_customer_name);
+
+            auto skv_customer = std::make_shared<dto::SKVRecord>(customer.collectionName, customer.schema);
+            customer.__writeFields(*skv_customer);
+            data.push_back(skv_customer);
 
             auto history = History(random, w_id, d_id, i);
-            data.push_back([_history=std::move(history)] (PmemDataLoader* loader, TestOperation testOp) mutable {
-                loader->testOperation(_history, testOp);
-            });
+            auto skv_history = std::make_shared<dto::SKVRecord>(history.collectionName, history.schema);
+            history.__writeFields(*skv_history);
+            data.push_back(skv_history);
         }
     }
 
@@ -169,29 +163,29 @@ public:
 
             for (int j=1; j<=order.OrderLineCount; ++j) {
                 auto order_line = OrderLine(random, order, j);
-                data.push_back([_order_line=std::move(order_line)] (PmemDataLoader* loader, TestOperation testOp) mutable {
-                    loader->testOperation(_order_line, testOp);
-                });
+                auto skv_order_line = std::make_shared<dto::SKVRecord>(order_line.collectionName, order_line.schema);
+                order_line.__writeFields(*skv_order_line);
+                data.push_back(skv_order_line);
             }
 
             if (i >= 2101) {
                 auto new_order = NewOrder(order);
-                data.push_back([_new_order=std::move(new_order)] (PmemDataLoader* loader, TestOperation testOp) mutable {
-                    loader->testOperation(_new_order, testOp);
-                });
+                auto skv_new_order = std::make_shared<dto::SKVRecord>(new_order.collectionName, new_order.schema);
+                new_order.__writeFields(*skv_new_order);
+                data.push_back(skv_new_order);
             }
 
             auto idx_order_customer = IdxOrderCustomer(order.WarehouseID.value(), order.DistrictID.value(),
                                      order.CustomerID.value(), order.OrderID.value());
 
-            data.push_back([_order=std::move(order)] (PmemDataLoader* loader, TestOperation testOp) mutable {
-                loader->testOperation(_order, testOp);
-            });
-
+            auto skv_order = std::make_shared<dto::SKVRecord>(order.collectionName, order.schema);
+            order.__writeFields(*skv_order);            
+            data.push_back(skv_order);
+            
+            auto skv_idx_order_customer = std::make_shared<dto::SKVRecord>(idx_order_customer.collectionName, idx_order_customer.schema);
+            idx_order_customer.__writeFields(*skv_idx_order_customer);    
             // populate secondary index idx_order_customer
-            data.push_back([_idx_order_customer=std::move(idx_order_customer)] (PmemDataLoader* loader, TestOperation testOp) mutable {
-                loader->testOperation(_idx_order_customer, testOp);
-            });
+            data.push_back(skv_idx_order_customer);
         }
     }
     TPCCRawDataGen configWarehouseData(uint32_t id_start, uint32_t id_end){
@@ -234,22 +228,24 @@ public:
         for(uint32_t i = _wareHouseDataIdCurr; i < _wareHouseDataIdCurr + num_warehouses; ++i ){
             auto warehouse = Warehouse(random, i);
 
-            data.push_back([_warehouse=std::move(warehouse)] (PmemDataLoader* loader, TestOperation testOp) mutable {
-                loader->testOperation(_warehouse, testOp);
-            });
+            auto skv_warehouse = std::make_shared<dto::SKVRecord>(warehouse.collectionName, warehouse.schema);
+            warehouse.__writeFields(*skv_warehouse);    
+            data.push_back(skv_warehouse);
 
             for (uint32_t j=1; j<100001; ++j) {
                 auto stock = Stock(random, i, j);
-                data.push_back([_stock=std::move(stock)] (PmemDataLoader* loader, TestOperation testOp) mutable {
-                    loader->testOperation(_stock, testOp);
-                });
+
+                auto skv_stock = std::make_shared<dto::SKVRecord>(stock.collectionName, stock.schema);
+                stock.__writeFields(*skv_stock);    
+                data.push_back(skv_stock);
             }
 
             for (uint16_t j=1; j <= _districts_per_warehouse; ++j) {
                 auto district = District(random, i, j);
-                data.push_back([_district=std::move(district)] (PmemDataLoader* loader, TestOperation testOp) mutable {
-                    loader->testOperation(_district, testOp);
-                });
+
+                auto skv_district = std::make_shared<dto::SKVRecord>(district.collectionName, district.schema);
+                district.__writeFields(*skv_district);    
+                data.push_back(skv_district);
 
                 generateCustomerData(data, random, i, j);
                 generateOrderData(data, random, i, j);
