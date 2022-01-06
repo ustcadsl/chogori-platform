@@ -22,7 +22,7 @@
 #include <k2/dto/Collection.h>
 #include <k2/dto/K23SI.h>
 //#include <k2/indexer/IndexerInterface.h>
-
+#include <fstream>
 #include <k2/indexer/MapIndexer.h>
 //#include <k2/indexer/HOTIndexer.h>
 #include "plog.h"
@@ -236,14 +236,34 @@ private:
 
 public:
 
+    struct cacheRowPosMetrix{
+        int size = 0;
+        std::vector<int> idxStep;
+        std::vector<int> case1;
+        std::vector<int> case2;
+        std::vector<int> type;
+        std::vector<String> sname;
+        void insert(int a, int b, int c, int t, String s) {
+            idxStep.push_back(a);
+            case1.push_back(b);
+            case2.push_back(c);
+            type.push_back(t);
+            sname.push_back(s);
+            return;
+        }
+        int fcrpBase = 0;
+        int fcrpNew = 0;
+    } fcrp;
     std::map<SchemaId, SchemaMetaData> _schemaMap;
     //SchemaMetaData tempSmeta;
     //int *watermark;
+    std::ofstream ofile;
     k2::dto::Timestamp watermark;
     //Initialize a PBRB cache
     //PBRB(int maxPageNumber, int *wm, Index *indexer)
     PBRB(int maxPageNumber, k2::dto::Timestamp *wm, IndexerT *indexer)
     {
+        ofile.open("fcrp.txt");
         watermark = *wm;
         this->_maxPageNumber = maxPageNumber;
         auto aligned_val = std::align_val_t{_pageSize}; //page size = 64KB
@@ -734,6 +754,18 @@ public:
         return smd.schema->version;
     }
 
+    void fcrpOutput() {
+        K2LOG_I(log::pbrb, "Output fcrp info");
+        int size = fcrp.idxStep.size();
+        for(int i = 0;i < size;i++){
+            ofile << fcrp.sname[i] << ", "
+                  << fcrp.type[i] << ", "
+                  << fcrp.idxStep[i] << ", " 
+                  << fcrp.case1[i] << ", "
+                  << fcrp.case2[i] << std::endl;
+        }
+        ofile.close();
+    }
 };
 
 }

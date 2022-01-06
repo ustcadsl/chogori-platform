@@ -399,6 +399,7 @@ seastar::future<> K23SIPartitionModule::start() {
 }
 
 K23SIPartitionModule::~K23SIPartitionModule() {
+    delete pbrb;
     K2LOG_I(log::skvsvr, "dtor for cname={}, part={}", _cmeta.name, _partition);
 }
 
@@ -416,6 +417,7 @@ seastar::future<> K23SIPartitionModule::gracefulStop() {
         })
         .then([this] {
             _unregisterVerbs();
+            pbrb->fcrpOutput();
             K2LOG_I(log::skvsvr, "stopped");
         });
 }
