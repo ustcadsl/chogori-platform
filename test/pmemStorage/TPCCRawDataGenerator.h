@@ -49,14 +49,14 @@ class PmemDataLoader{
   }
   
 
-  void testOperation(dto::SKVRecord& skv, TestOperation testOp){
+  int64_t testOperation(dto::SKVRecord& skv, TestOperation testOp){
       Payload payload(Payload::DefaultAllocator());
       payload.write(skv.getStorage());
       payload.seek(0);
-
       if( testOp == TestOperation::PmemLoad){
           _enginePtr->append(payload);
       }
+      return payload.getSize();
       
   }
 

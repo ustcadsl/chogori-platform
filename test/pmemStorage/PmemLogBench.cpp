@@ -49,7 +49,12 @@ BENCHMARK(BM_memcpy)->Arg(64)->Arg(128)->Arg(256)->Arg(512)->Arg(1<<10)->Arg(8<<
 static void BM_pmemcpy(benchmark::State& state) {
   char* src = new char[state.range(0)];
   char* dst; size_t mappedLen; int isPmem;
-  std::string filePath =  "/mnt/pmem0/pmemlog-bench/tmp.file";
+  std::string benchDir = "/mnt/pmem0/pmemlog-bench";
+  if(!std::filesystem::exists(benchDir)){
+      std::filesystem::create_directory(benchDir);
+  }
+  std::string filePath = "/mnt/pmem0/pmemlog-bench/tmp0.file";
+  
   if(std::filesystem::exists(filePath)){
         std::filesystem::remove_all(filePath);
     }
@@ -64,16 +69,18 @@ static void BM_pmemcpy(benchmark::State& state) {
   }
   memset(src, 'x', state.range(0));
   size_t offset = 0;
+  int step = state.range(0) <= 64? 64: state.range(0);
   for (auto _ : state){
-    pmem_memcpy_persist(dst+offset, src, state.range(0));
-    offset = (offset+state.range(0)) % (2U<<30);
+      pmem_memcpy_persist(dst + offset, src, state.range(0));
+      offset = (offset+step) % (2U<<30);
+
   }
   state.SetBytesProcessed(int64_t(state.iterations()) *
                           int64_t(state.range(0)));
   delete[] src;
   pmem_unmap(dst, 8<<20);
 }
-BENCHMARK(BM_pmemcpy)->Arg(64)->Arg(128)->Arg(256)->Arg(512)->Arg(1<<10)->Arg(8<<10);
+BENCHMARK(BM_pmemcpy)->Arg(8)->Arg(32)->Arg(64)->Arg(128)->Arg(256)->Arg(512)->Arg(1<<10)->Arg(8<<10);
 
 static void BM_Convert_Payload_Item_Data(benchmark::State& state) {
   PmemDataLoader pmemLoader;
@@ -99,11 +106,14 @@ static void BM_Write_Item_Data(benchmark::State& state) {
   auto tpccRawData = tpccDataGen.generateData();
   size_t skv_space = tpccRawData.size();
   int i = 0;
+  int64_t average_size = 0;
   for (auto _ : state) {
       i = (i+1)%skv_space;
-      pmemLoader.testOperation(*tpccRawData[i], TestOperation::PmemLoad);
+      average_size += pmemLoader.testOperation(*tpccRawData[i], TestOperation::PmemLoad);
   }
   state.SetItemsProcessed(int64_t(state.iterations()));
+  state.SetBytesProcessed(average_size);
+  // std::cout<< "Warehouse data average size: " << average_size/state.iterations() << std::endl;
 }
 BENCHMARK(BM_Write_Item_Data);
 
@@ -131,11 +141,14 @@ static void BM_Write_Warehouse_Data(benchmark::State& state) {
   auto tpccRawData = tpccDataGen.generateData();
   size_t skv_space = tpccRawData.size();
   int i = 0;
+  int64_t average_size = 0;
   for (auto _ : state) {
       i = (i+1)%skv_space;
-      pmemLoader.testOperation(*tpccRawData[i], TestOperation::PmemLoad);
+      average_size += pmemLoader.testOperation(*tpccRawData[i], TestOperation::PmemLoad);
   }
   state.SetItemsProcessed(int64_t(state.iterations()));
+  state.SetBytesProcessed(average_size);
+  // std::cout<< "Warehouse data average size: " << average_size/state.iterations() << std::endl;
 }
 BENCHMARK(BM_Write_Warehouse_Data);
 
