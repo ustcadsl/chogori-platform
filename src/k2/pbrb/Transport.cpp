@@ -63,11 +63,11 @@ dto::SKVRecord *PBRB::generateSKVRecordByRow(uint32_t schemaId, void *rAddr, con
                     size_t restValueSize = RowFieldSize - valueSegSize;
                     // auto retVal = findRowByAddr(rAddr);
                     // K2LOG_I(log::pbrb, "Generate Page: {}, Offset: {}, rAddr:{}", (void *)retVal.first, retVal.second, rAddr);
-                    K2LOG_I(log::pbrb, "@@@RowFieldSize:{}, heapAddr:{}, restValueSize:{}", RowFieldSize, (void *)(uint8_t *)heapAddr, restValueSize);
+                    // K2LOG_I(log::pbrb, "@@@RowFieldSize:{}, heapAddr:{}, restValueSize:{}", RowFieldSize, (void *)(uint8_t *)heapAddr, restValueSize);
                     str.append((char *)(heapAddr), restValueSize);
                     // -----! NOTICE: size need -1 here. !-----
-                    //if(RowFieldSize > str.size())
-                        K2LOG_I(log::pbrb, "--Copy Field {}: (Type: STRING, FieldOffset: {}, FieldSize:{}, RowFieldSize: {}, size: {}", idx, smd.fieldsInfo[idx].fieldOffset, smd.fieldsInfo[idx].fieldSize, RowFieldSize, str.size());
+                    // if(RowFieldSize > str.size())
+                    // K2LOG_I(log::pbrb, "--Copy Field {}: (Type: STRING, FieldOffset: {}, FieldSize:{}, RowFieldSize: {}, size: {}", idx, smd.fieldsInfo[idx].fieldOffset, smd.fieldsInfo[idx].fieldSize, RowFieldSize, str.size());
                     record->serializeNext<String>(str);
                 }
             }

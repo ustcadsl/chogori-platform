@@ -102,8 +102,8 @@ void *PBRB::cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, 
             memcpy(fieldValueSegment, strPtr->substr(segmentSize, strSize).c_str(), strSize-segmentSize); //////
             memcpy(destPtr, &fieldValueSegment, sizeof(void *));
 
-            void *retVal = *((void **)((uint8_t *)destPtr));
-            K2LOG_I(log::pbrb, "^^^strSize:{}, fieldValueSegment:{}, destPtr:{}", strSize, (void *)(uint8_t *)fieldValueSegment, retVal);
+            // void *retVal = *((void **)((uint8_t *)destPtr));
+            // K2LOG_I(log::pbrb, "^^^strSize:{}, fieldValueSegment:{}, destPtr:{}", strSize, (void *)(uint8_t *)fieldValueSegment, retVal);
             //delete (uint8_t *)retVal;
             //////////////////////////////
             copySize = maxStrSize;
@@ -321,29 +321,6 @@ void *PBRB::cacheColdRow(PLogAddr pAddress, String key)
 }
 */
 
-//find an empty slot between the beginOffset and endOffset in the page
-RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset)
-{
-    //uint32_t schemaId = getSchemaIDPage(pagePtr);
-    uint32_t maxRowCnt = _schemaMap[schemaID].maxRowCnt;
-    
-    if (endOffset > maxRowCnt)
-        return 0xFFFFFFFF;
-    // TODO: Skip full pages.
-    for (uint32_t i = beginOffset; i < endOffset; i++)
-    {
-        uint32_t byteIndex = i / 8;
-        uint8_t curByte = readFromPage<uint8_t>(pagePtr, _pageHeaderSize + byteIndex, 1);
-        
-        uint32_t Offset = i % 8;
-        curByte = curByte >> Offset;
-        uint8_t bitValue = curByte & (uint8_t) 0x1;
-        if (bitValue == 0)
-            return i; //find an empty slot, return the offset
-    }
-    return 0xFFFFFFFF; //not find an empty slot
-}
-
 //find an empty slot in the page
 /*RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr)
 {
@@ -380,32 +357,72 @@ RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr, RowO
     return 0xFFFFFFFF; //not find an empty slot
 }*/
 
+//find an empty slot between the beginOffset and endOffset in the page
+RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset)
+{
+    // auto start = Clock::now();
+    //uint32_t schemaId = getSchemaIDPage(pagePtr);
+    uint32_t maxRowCnt = _schemaMap[schemaID].maxRowCnt;
+    int result = -1;
+    if (endOffset > maxRowCnt)
+        return 0xFFFFFFFF;
+    // TODO: Skip full pages.
+    for (uint32_t i = beginOffset; i < endOffset; i++)
+    {
+        uint32_t byteIndex = i / 8;
+        uint8_t curByte = readFromPage<uint8_t>(pagePtr, _pageHeaderSize + byteIndex, 1);
+        
+        uint32_t Offset = i % 8;
+        curByte = curByte >> Offset;
+        uint8_t bitValue = curByte & (uint8_t) 0x1;
+        if (bitValue == 0) {
+            result = i;
+            break; //find an empty slot, return the offset
+        }
+    }
+    // auto end = Clock::now();
+    // auto ns = nsec(end - start).count();
+    // auto smd = _schemaMap[schemaID];
+    // fcrp.InsertInPage(fcrp.accessId, smd.schema->name, ns, smd.curPageNum, smd.curRowNum, 2);
+    return result; //not find an empty slot
+}
+
 RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr)
 {
-	//uint32_t schemaId = getSchemaIDPage(pagePtr); 
+	//uint32_t schemaId = getSchemaIDPage(pagePtr);
+    // auto start = Clock::now();
 	const SchemaMetaData& smd = _schemaMap[schemaID];
+    int result = -1;
 	uint32_t maxRowCnt = smd.maxRowCnt;
-	for (uint32_t i = 0; i < smd.occuBitmapSize; i++) {
+    
+    for (uint32_t i = 0; i < smd.occuBitmapSize; i++) {
 		uint8_t bitmap = pagePtr->content[_pageHeaderSize + i];
 		if (bitmap == 0xFF)
 			continue;
 		for (uint32_t j = 0; j < 8; j++) {
 			if ((bitmap >> j & 0x1) == 0) {
 				if (i * 8 + j < maxRowCnt)
-					return i * 8 + j;
+					result = i * 8 + j;
 				else
 					// out of range.
-					return 0xFFFFFFFF;
+					result = 0xFFFFFFFF;
+                // auto end = Clock::now();
+                // auto ns = nsec(end - start).count();
+                // fcrp.InsertInPage(fcrp.accessId, smd.schema->name, ns, smd.curPageNum, smd.curRowNum, 1);
+                return result;
 			}
 		}
 	}
-	return 0xFFFFFFFF; //not find an empty slot
+    // auto end = Clock::now();
+    // auto ns = nsec(end - start).count();
+    // fcrp.InsertInPage(fcrp.accessId, smd.schema->name, ns, smd.curPageNum, smd.curRowNum, 1);
+	return result; //not find an empty slot
 }
 
 //find an empty slot by querying the page one by one in turn
 std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID)
 {
-    fcrp.fcrpBase++;
+    // fcrp.fcrpBase++;
     BufferPage *pagePtr = _schemaMap[schemaID].headPage;
     //K2LOG_D(log::pbrb, "^^^^^^^^findCacheRowPosition, schemaID:{}, pagePtr empty:{}", schemaID, pagePtr==nullptr);
     while (pagePtr != nullptr) {
@@ -425,8 +442,14 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID)
 //find and empty slot that try to keep rows within/between pages as orderly as possible
 std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID, dto::Key key) {
     
-    fcrp.fcrpNew++;
+    fcrp.accessId++;
+    // fcrp.fcrpNew++;
+    // K2LOG_I(log::pbrb, "SchemaID: {}", schemaID);
+    // _schemaMap[schemaID].printInfo();
     String sname = _schemaMap[schemaID].schema->name;
+    // K2LOG_I(log::pbrb, "SchemaName: {}", sname);
+    int pageNum = _schemaMap[schemaID].curPageNum;
+    int rowNum = _schemaMap[schemaID].curRowNum;
     auto idxStart = Clock::now();
     IndexerIterator iter = _indexer->find(key);
     if (iter == _indexer->end()) {
@@ -452,21 +475,21 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
             auto p = std::make_pair(pagePtr, rowOffset);
             auto case1End = Clock::now();
             auto case1Ns = nsec(case1End - case1Start).count();
-            fcrp.insert(idxNsecs, case1Ns, 0, 11, sname);
+            fcrp.Insert(fcrp.accessId, idxNsecs, case1Ns, 11, sname, 0, 0, pageNum, rowNum);
             return p;
         }
         else {
             auto ret = findCacheRowPosition(schemaID);
             auto case1End = Clock::now();
             auto case1Ns = nsec(case1End - case1Start).count();
-            fcrp.insert(idxNsecs, case1Ns, 0, 12, sname);
+            fcrp.Insert(fcrp.accessId, idxNsecs, case1Ns, 12, sname, 0, 0, pageNum, rowNum);
             return ret;
         }
     }
 
     // 2. 3 cold versions.
     else {
-        auto case2Start = Clock::now();
+        // auto case2Start = Clock::now();
         IndexerIterator prevIter = _indexer->find(key);
         IndexerIterator nextIter = prevIter;
 
@@ -508,13 +531,15 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
             }
         }
         auto case2PointerEnd = Clock::now();
+        auto prevTime = nsec(case2Next - case2prev).count();
+        auto nextTime = nsec(case2PointerEnd - case2Next).count();
         std::pair<BufferPage *, RowOffset> ret;
         // cannot find neighboring pages...
         if (prevPageAddr == nullptr && nextPageAddr == nullptr) {
             ret = findCacheRowPosition(schemaID);
             auto case2End = Clock::now();
-            auto case2Ns = nsec(case2End - case2Start).count();
-            fcrp.insert(idxNsecs, 0, case2Ns, 21, sname);
+            auto case2Ns = nsec(case2End - case2PointerEnd).count();
+            fcrp.Insert(fcrp.accessId, idxNsecs, case2Ns, 21, sname, prevTime, nextTime, pageNum, rowNum);
             return ret;
         }
 
@@ -528,8 +553,8 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
                 ret = std::make_pair(nextPageAddr, off);
 
             auto case2End = Clock::now();
-            auto case2Ns = nsec(case2End - case2Start).count();
-            fcrp.insert(idxNsecs, 0, case2Ns, 22, sname);
+            auto case2Ns = nsec(case2End - case2PointerEnd).count();
+            fcrp.Insert(fcrp.accessId, idxNsecs, case2Ns, 22, sname, prevTime, nextTime, pageNum, rowNum);
 
             return ret;
         }
@@ -543,8 +568,8 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
                 ret = std::make_pair(prevPageAddr, off);
 
             auto case2End = Clock::now();
-            auto case2Ns = nsec(case2End - case2Start).count();
-            fcrp.insert(idxNsecs, 0, case2Ns, 23, sname);
+            auto case2Ns = nsec(case2End - case2PointerEnd).count();
+            fcrp.Insert(fcrp.accessId, idxNsecs, case2Ns, 23, sname, prevTime, nextTime, pageNum, rowNum);
             return ret;
         }
 
@@ -561,8 +586,8 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
                     ret = std::make_pair(prevPageAddr, off);
 
                 auto case2End = Clock::now();
-                auto case2Ns = nsec(case2End - case2Start).count();
-                fcrp.insert(idxNsecs, 0, case2Ns, 24, sname);               
+                auto case2Ns = nsec(case2End - case2PointerEnd).count();
+                fcrp.Insert(fcrp.accessId, idxNsecs, case2Ns, 24, sname, prevTime, nextTime, pageNum, rowNum);               
                 return ret;
             }
 
@@ -578,8 +603,8 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
                     ret = std::make_pair(prevPageAddr, off);
                 
                 auto case2End = Clock::now();
-                auto case2Ns = nsec(case2End - case2Start).count();
-                fcrp.insert(idxNsecs, 0, case2Ns, 25, sname);               
+                auto case2Ns = nsec(case2End - case2PointerEnd).count();
+                fcrp.Insert(fcrp.accessId, idxNsecs, case2Ns, 25, sname, prevTime, nextTime, pageNum, rowNum);               
                 return ret;
 
             }
@@ -593,8 +618,8 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
                     ret = std::make_pair(nextPageAddr, off);
                 
                 auto case2End = Clock::now();
-                auto case2Ns = nsec(case2End - case2Start).count();
-                fcrp.insert(idxNsecs, 0, case2Ns, 26, sname);    
+                auto case2Ns = nsec(case2End - case2PointerEnd).count();
+                fcrp.Insert(fcrp.accessId, idxNsecs, case2Ns, 26, sname, prevTime, nextTime, pageNum, rowNum);    
                 return ret;
             }
         }

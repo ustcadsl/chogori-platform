@@ -841,6 +841,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
         #endif
 
             uint32_t SMapIndex = pbrb->mapCachedSchema(request.key.schemaName, schemaVer->first);
+            // K2LOG_I(log::skvsvr, "Find SMapIndex: {}", SMapIndex);
             if(SMapIndex == 0){ //add a new schema to PBRB schema metadata
                 SimpleSchema S;
                 S.name = request.key.schemaName;
@@ -849,12 +850,14 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                     S.fields.push_back(schema.fields[i]);
                 }
                 auto sID = pbrb->addSchemaUMap(S);
+                K2LOG_I(log::skvsvr, "Setting new entry in _schemaMap: {}", sID);
                 pbrb->createCacheForSchema(sID, S.version);
                 SMapIndex = sID+1;
             }
 
             // insert the SKV record to the PBRB cache, return the RAM address of the cached slot
             SMapIndex--;
+            // pbrb->_schemaMap[SMapIndex].printInfo();
             K2LOG_D(log::skvsvr, "SMAPIDX: {}", SMapIndex);
             if (!nodePtr->is_inmem(order)) {
                 // case 2: cold version (in kvnode)
@@ -867,6 +870,10 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 //     K2LOG_I(log::skvsvr, "find position in: (Page: {}, with max count:{}; Offset: {}) ", static_cast<void *>(pagePtr), pbrb->_schemaMap[SMapIndex].maxRowCnt, rowOffset);
                 clock_t  _findPositionEnd = clock(); //////
                 double Positionms = (double)(_findPositionEnd - _findPositionStart)/CLOCKS_PER_SEC*1000; //////
+                // PBRB::cacheRowPosMetrix &fcrp = pbrb->fcrp;
+                // auto accId = fcrp.accessId - 1;
+                // K2LOG_I(log::skvsvr, "PositionMs: {}, findCacheRowPosNs: {}", Positionms, fcrp.idxStep[accId] + fcrp.findStep[accId] + fcrp.prev[accId] + fcrp.next[accId]);
+                pbrb->fcrp.moduleNs.push_back((int) Positionms * 1000);
                 totalFindPositionms[indexFlag] += Positionms; //////
                 //if (pagePtr==nullptr) {
                 //    pbrb->doBackgroundPageListGC(request.key.schemaName, SMapIndex, _indexer, _retentionTimestamp,  _cmeta.retentionPeriod); 
@@ -876,8 +883,8 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 //}
                 if (pagePtr!=nullptr) { //find empty slot
                     clock_t  _Headerstart = clock(); //////
-                    auto rowAddr = pbrb->cacheRowHeaderFrom(SMapIndex, pagePtr, rowOffset, rec);
-                    K2LOG_I(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
+                    pbrb->cacheRowHeaderFrom(SMapIndex, pagePtr, rowOffset, rec);
+                    // K2LOG_I(log::skvsvr, "--------SMapIndex:{}, rowOffset:{}, rowAddr:{}, pagePtr empty:{}", SMapIndex, rowOffset, rowAddr, pagePtr==nullptr);
                     clock_t  _HeaderEnd = clock(); ////// 
                     totalHeaderms[indexFlag] += (double)(_HeaderEnd - _Headerstart)/CLOCKS_PER_SEC*1000; //////
 

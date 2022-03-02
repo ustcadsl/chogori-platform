@@ -106,7 +106,6 @@ struct BufferPage
     uint8_t content[pageSize];
 };
 
-
 struct fieldMetaData
 {
     uint32_t fieldSize;
@@ -127,19 +126,25 @@ struct SchemaMetaData
     std::vector<fieldMetaData> fieldsInfo;
     uint32_t rowSize;
 
+    uint32_t curPageNum = 0;
+    uint32_t curRowNum = 0;
     BufferPage *headPage = nullptr;
 
-    SchemaMetaData(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize, 
-                   uint32_t rowHeaderSize, BufferPage *pagePtr) {
+    void printInfo()
+    {
+        K2LOG_I(log::pbrb, "{}, {}, {}, {}, {}, {}, {}, {}", (void *)schema, occuBitmapSize, nullableBitmapSize, maxRowCnt, rowSize, curPageNum, curRowNum, (void *)headPage);
+    }
+
+    SchemaMetaData(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize,
+                    uint32_t rowHeaderSize, BufferPage *pagePtr) {
         setInfo(schemaId, pageSize, pageHeaderSize, rowHeaderSize);
         setHeadPage(pagePtr);
-        K2LOG_I(log::pbrb, "Set HeadPagePtr for schema:({}, {}), pagePtr empty:{}", schemaId, schema->name, pagePtr==nullptr);
+        K2LOG_I(log::pbrb, "Set HeadPagePtr for schema:({}, {}), pagePtr empty:{}", schemaId, schema->name, pagePtr == nullptr);
     }
 
     SchemaMetaData(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize, uint32_t rowHeaderSize) {
         setInfo(schemaId, pageSize, pageHeaderSize, rowHeaderSize);
     }
-
 
     // Default Construct
     SchemaMetaData() {}
@@ -165,7 +170,7 @@ struct SchemaMetaData
         for (size_t i = 0;i < schema->fields.size();i++) {
             k2::dto::FieldType currFT = schema->fields[i].type;
             fieldMetaData fieldObj;
-            
+
             fieldObj.fieldSize = FTSize[static_cast<int>(currFT)];
             fieldObj.fieldOffset = currRowOffset;
             fieldObj.isNullable = false;
@@ -178,7 +183,7 @@ struct SchemaMetaData
 
             // K2LOG_I(log::pbrb, "Current type: {}, offset: {}, currRowOffset: {}, rowHeaderSize :{}, nullableBitmapSize: {}", schema->fields[i].type, fieldObj.fieldOffset, currRowOffset, rowHeaderSize, nullableBitmapSize);
         }
-        
+
         // set rowSize
         rowSize = currRowOffset;
         setOccuBitmapSize(pageSize);
@@ -238,22 +243,84 @@ public:
 
     struct cacheRowPosMetrix{
         int size = 0;
+        //
         std::vector<int> idxStep;
-        std::vector<int> case1;
-        std::vector<int> case2;
+        std::vector<int> findStep;
+        std::vector<int> prev;
+        std::vector<int> next;
         std::vector<int> type;
+        std::vector<int> accessId1;
         std::vector<String> sname;
-        void insert(int a, int b, int c, int t, String s) {
+        std::vector<int> totalInPageTime;
+        std::vector<int> pageSize1;
+        std::vector<int> rowSize1;
+        std::vector<int> moduleNs;
+
+        void Insert(int id, int a, int b, int t, String s, int p, int n, int pn, int rn)
+        {
+            accessId1.push_back(id);
             idxStep.push_back(a);
-            case1.push_back(b);
-            case2.push_back(c);
+            findStep.push_back(b);
             type.push_back(t);
             sname.push_back(s);
+            prev.push_back(p);
+            next.push_back(n);
+            pageSize1.push_back(pn);
+            rowSize1.push_back(rn);
             return;
+        }
+
+        std::vector<int> accessIds;
+        std::vector<String> sname2;
+        std::vector<int> inPageTime;
+        std::vector<int> pageSize2;
+        std::vector<int> rowSize2;
+        std::vector<int> inPageType;
+        // insert id, time, pageNum, rowNum for access "id"
+        void InsertInPage(int id, String sname, int time, int p, int r, int type)
+        {
+            // K2LOG_I(log::pbrb, "insert accessId:{}, Sname:{}, time:{} ns, pageNum: {}, rowNum: {}, Type:{}", id, sname, time, p, r, type);
+            accessIds.push_back(id);
+            inPageTime.push_back(time);
+            pageSize2.push_back(p);
+            rowSize2.push_back(r);
+            inPageType.push_back(type);
+            sname2.push_back(sname);
+        }
+
+        // add all in page time;
+        void TotalInPageTime()
+        {
+            int size = accessIds.size();
+            int lastId = accessIds[0];
+            int curId = accessIds[0];
+            int time = 0;
+            pageSize1.push_back(pageSize2[0]);
+            rowSize1.push_back(rowSize2[0]);
+            for (int idx = 0; idx < size; idx++)
+            {
+                curId = accessIds[idx];
+                if (curId != lastId)
+                {
+                    totalInPageTime.push_back(time);
+                    time = inPageTime[idx];
+                    pageSize1.push_back(pageSize2[idx]);
+                    rowSize1.push_back(rowSize2[idx]);
+                    lastId = curId;
+                }
+                else
+                {
+                    time += inPageTime[idx];
+                }
+            }
+            inPageTime.push_back(time);
         }
         int fcrpBase = 0;
         int fcrpNew = 0;
+        int accessId = 0;
+
     } fcrp;
+    int align[10000];
     std::map<SchemaId, SchemaMetaData> _schemaMap;
     //SchemaMetaData tempSmeta;
     //int *watermark;
@@ -263,7 +330,6 @@ public:
     //PBRB(int maxPageNumber, int *wm, Index *indexer)
     PBRB(int maxPageNumber, k2::dto::Timestamp *wm, IndexerT *indexer)
     {
-        ofile.open("fcrp.txt");
         watermark = *wm;
         this->_maxPageNumber = maxPageNumber;
         auto aligned_val = std::align_val_t{_pageSize}; //page size = 64KB
@@ -280,8 +346,7 @@ public:
         // method 2:
         // alloc maxPageNumber pages when initialize.
         BufferPage *basePtr = static_cast<BufferPage *>(operator new(maxPageNumber * sizeof(BufferPage), aligned_val));
-        std::cout << std::dec << "\nPBRB: Allocated " << maxPageNumber << " Pages in " << basePtr << std::endl;
-        K2LOG_I(log::pbrb, "\nPBRB: Allocated: {} Pages in", maxPageNumber);
+        K2LOG_I(log::pbrb, "PBRB: Allocated: {} Pages in: {}", maxPageNumber, (void *)basePtr);
         for (int idx = 0; idx < maxPageNumber; idx++)
         {
             _freePageList.push_back(basePtr + idx);
@@ -403,7 +468,7 @@ public:
 
     // Row Struct:
     // CRC (4) | Timestamp (16) | PlogAddr (8) | Status (1) | isTombStone(1)
-    
+
     // CRC:
     uint32_t getCRCRow();
     void setCRCRow();
@@ -411,7 +476,7 @@ public:
     // Timestamp: (RowAddr + 4, 16)
     dto::Timestamp getTimestampRow(RowAddr rAddr);
     void setTimestampRow(RowAddr rAddr, dto::Timestamp &ts);
-    
+
     // PlogAddr: (RowAddr + 20, 8)
     void *getPlogAddrRow(RowAddr rAddr);
     void setPlogAddrRow(RowAddr rAddr, void *PlogAddr);
@@ -422,29 +487,33 @@ public:
 
     // isTombstone: (RowAddr + 29, 1)
     bool getIsTombstoneRow(RowAddr rAddr);
-    Status setIsTombstoneRow(RowAddr rAddr, const bool& isTombstone);
+    Status setIsTombstoneRow(RowAddr rAddr, const bool &isTombstone);
 
     // requestId: (RowAddr + 30, 8)
     uint64_t getRequestIdRow(RowAddr rAddr);
-    Status setRequestIdRow(RowAddr rAddr, const uint64_t& request_id);
+    Status setRequestIdRow(RowAddr rAddr, const uint64_t &request_id);
 
     // 2. Occupancy Bitmap functions.
 
-    //a bit for a row, page size = 64KB, row size = 128B, there are at most 512 rows, so 512 bits=64 Bytes is sufficient
+    // a bit for a row, page size = 64KB, row size = 128B, there are at most 512 rows, so 512 bits=64 Bytes is sufficient
     void setRowBitMapPage(BufferPage *pagePtr, RowOffset rowOffset)
     {
+        SchemaMetaData &smd = _schemaMap[getSchemaIDPage(pagePtr)];
         uint32_t byteIndex = rowOffset / 8;
         uint32_t offset = rowOffset % 8;
         pagePtr->content[_pageHeaderSize + byteIndex] |= 0x1 << offset;
         setHotRowsNumPage(pagePtr, getHotRowsNumPage(pagePtr) + 1);
+        smd.curRowNum++;
     }
 
     void clearRowBitMapPage(BufferPage *pagePtr, RowOffset rowOffset)
     {
+        SchemaMetaData &smd = _schemaMap[getSchemaIDPage(pagePtr)];
         uint32_t byteIndex = rowOffset / 8;
         uint32_t offset = rowOffset % 8;
         pagePtr->content[_pageHeaderSize + byteIndex] &= ~(0x1 << offset);
         setHotRowsNumPage(pagePtr, getHotRowsNumPage(pagePtr) - 1);
+        smd.curRowNum--;
     }
 
     inline bool isBitmapSet(BufferPage *pagePtr, RowOffset rowOffset)
@@ -481,10 +550,10 @@ public:
     }
 
     BufferPage *createCacheForSchema(SchemaId schemaId, SchemaVer schemaVer) {
-        
+    
         if (_freePageList.empty())
             return nullptr;
-        
+
         // Get a page and set schemaMetadata.
         BufferPage *pagePtr = _freePageList.front();
         SchemaMetaData smd(schemaId, _pageSize, _pageHeaderSize, _rowHeaderSize, pagePtr);
@@ -509,21 +578,23 @@ public:
             return nullptr;
 
         BufferPage *pagePtr = _schemaMap[schemaId].headPage;
+        _schemaMap[schemaId].curPageNum++;
         if (pagePtr == nullptr)
             return createCacheForSchema(schemaId);
         else {
             K2ASSERT(log::pbrb, _freePageList.size() > 0, "There is no free page in free page list!");
             BufferPage *newPage = _freePageList.front();
-            
+
             // Initialize Page.
             //memset(newPage, 0, sizeof(BufferPage));
             initializePage(newPage);
             setSchemaIDPage(newPage, schemaId);
             setSchemaVerPage(newPage, _schemaMap[schemaId].schema->version);
-            
+
             BufferPage *tail = _schemaMap[schemaId].headPage;
             // set nextpage
-            while(getNextPage(tail) != nullptr) {
+            while (getNextPage(tail) != nullptr)
+            {
                 tail = getNextPage(tail);
             }
 
@@ -545,7 +616,7 @@ public:
     }
 
     float totalPageUsage() {
-        return 1- ((float)_freePageList.size()/(float)_maxPageNumber);
+        return 1 - ((float)_freePageList.size() / (float)_maxPageNumber);
     }
 
     void outputHeader(BufferPage *pagePtr) {
@@ -574,18 +645,18 @@ public:
 
     // move cold row in pAddress to PBRB and insert hot address into KVNode
     void *cacheColdRow(PLogAddr pAddress, String key);
-    
+
     // Copy memory from plog to (pagePtr, rowOffset)
     void *cacheRowFromPlog(BufferPage *pagePtr, RowOffset rowOffset, PLogAddr pAddress);
 
     // Copy the header of row from DataRecord of query to (pagePtr, rowOffset)
-    void *cacheRowHeaderFrom(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, dto::DataRecord* rec);
+    void *cacheRowHeaderFrom(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, dto::DataRecord *rec);
 
     // Copy the field of row from DataRecord of query to (pagePtr, rowOffset)
-    void *cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, void* field, size_t strSize, uint32_t fieldID, bool isStr);
-    
+    void *cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, void *field, size_t strSize, uint32_t fieldID, bool isStr);
+
     // Copy the payload of row from DataRecord of query to (pagePtr, rowOffset)
-    void *cacheRowPayloadFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, Payload& rowData);
+    void *cacheRowPayloadFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, Payload &rowData);
 
     // find an empty slot between the beginOffset and endOffset in the page
     RowOffset findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset);
@@ -597,7 +668,7 @@ public:
 
     // Find the page pointer and row offset to cache cold row
     std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID, dto::Key key);
-    
+
     // store hot row in the empty row
     // void cacheHotRow(uint32_t schemaID, SKVRecord hotRecord);
 
@@ -606,7 +677,7 @@ public:
 
     // evict row and return cold addr.
     PLogAddr evictRow(void *rowAddr);
-    
+
     //mark the row as unoccupied when evicting a hot row
     void removeHotRow(BufferPage *pagePtr, RowOffset offset);
 
@@ -630,7 +701,7 @@ public:
 
     // copy a row from (srcPagePtr, srcOffset) to (dstPagePtr, dstOffset)
     void *copyRowInPages(BufferPage *srcPagePtr, RowOffset srcOffset, BufferPage *dstPagePtr, RowOffset dstOffset);
-    
+
     //insert a hot row into a pagelist according to schemaID
     //bool insertHotRow(int schemaID, Row hotRow) {}
 
@@ -642,7 +713,7 @@ public:
 
     //void doBackgroundPageListGC(String schemaName, uint32_t schemaID, mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod);
 
-    float getAveragePageListUsage(float& maxPageListUsage);
+    float getAveragePageListUsage(float &maxPageListUsage);
 
     float getCurPageListUsage(uint32_t schemaID);
 
@@ -709,7 +780,7 @@ public:
                     printHeaderRow(pagePtr, i);
                     printFieldsRow(pagePtr, i);
                 }
-            
+
             pagePtr = getNextPage(pagePtr);
         }
     }
@@ -741,28 +812,70 @@ public:
     uint32_t addSchemaUMap(SimpleSchema schemaPtr){
         return schemaUMap.addSchema(schemaPtr);
     }
-    
+
     // Transport Functions:
-    
+
     // PBRB Row -> SKVRecord
     dto::SKVRecord *generateSKVRecordByRow(uint32_t schemaId, RowAddr rAddr, const String &collName, std::shared_ptr<dto::Schema> schema, bool isPayloadRow, double &totalReadCopyFeildms);
     dto::DataRecord *generateDataRecord(dto::SKVRecord *skvRecord, void *hotAddr);
     // getSchemaVer by hotAddr in SimpleSchema
-    uint32_t getSchemaVer(void *hotAddr) {
+    uint32_t getSchemaVer(void *hotAddr){
         auto pagePtr = getPageAddr(hotAddr);
         SchemaMetaData &smd = _schemaMap[getSchemaIDPage(pagePtr)];
         return smd.schema->version;
     }
 
-    void fcrpOutput() {
-        K2LOG_I(log::pbrb, "Output fcrp info");
+    void fcrpOutput()
+    {
+        ofile.open("fcrp_1.csv");
+        K2LOG_I(log::pbrb, "======= Output fcrp info =======");
+        // fcrp.TotalInPageTime();
         int size = fcrp.idxStep.size();
-        for(int i = 0;i < size;i++){
-            ofile << fcrp.sname[i] << ", "
-                  << fcrp.type[i] << ", "
-                  << fcrp.idxStep[i] << ", " 
-                  << fcrp.case1[i] << ", "
-                  << fcrp.case2[i] << std::endl;
+        ofile << "AccessId, SchemaName, Type, Indexer, Find, FindPrev, FindNext, PageNum, RowNum, TotalTime, ModuleTotalTime" << std::endl;
+        for (int i = 0; i < size; i++)
+        {
+            ofile << fcrp.accessId1[i] << ", "
+                    << fcrp.sname[i] << ", "
+                    << fcrp.type[i] << ", "
+                    << fcrp.idxStep[i] << ", "
+                    << fcrp.findStep[i] << ", "
+                    << fcrp.prev[i] << ", "
+                    << fcrp.next[i] << ", "
+                    // << fcrp.totalInPageTime[i] << ", "
+                    << fcrp.pageSize1[i] << ", "
+                    << fcrp.rowSize1[i] << ", "
+                    << fcrp.idxStep[i] + fcrp.findStep[i] + fcrp.prev[i] + fcrp.next[i] << ", "
+                    << std::endl;
+        }
+        ofile.close();
+
+        // ofile.open("fcrp_2.csv");
+        // K2LOG_I(log::pbrb, "======= Output fcrp(InPage) info =======");
+        // ofile << "AccessId, SchemaName, Type, Time, PageNum, RowNum" << std::endl;
+        // int size2 = fcrp.accessIds.size();
+        // for (int i = 0; i < size2; i++) {
+        //     ofile << fcrp.accessIds[i] << ", "
+        //           << fcrp.sname2[i] << ", "
+        //           << fcrp.inPageType[i] << ", "
+        //           << fcrp.inPageTime[i] << ", "
+        //           << fcrp.pageSize2[i] << ", "
+        //           << fcrp.rowSize2[i]
+        //           << std::endl;
+        // }
+        // ofile.close();
+        K2LOG_I(log::pbrb, "======= Finished output fcrp info =======");
+
+        ofile.open("schema.csv");
+        ofile << "SchemaId, SchemaName, RowSize, OccuBitmapSize, MaxRowCnt" << std::endl;
+        for (auto &iter : _schemaMap)
+        {
+            SchemaId id = iter.first;
+            auto smd = iter.second;
+            ofile << id << ", "
+                    << smd.schema->name << ", "
+                    << smd.rowSize << ", "
+                    << smd.occuBitmapSize << ", "
+                    << smd.maxRowCnt << std::endl;
         }
         ofile.close();
     }

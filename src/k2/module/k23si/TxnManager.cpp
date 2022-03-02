@@ -39,6 +39,7 @@ void TxnManager::_addBgTask(TxnRecord& rec, Func&& func) {
 }
 
 TxnManager::TxnManager() {
+    K2LOG_I(log::skvsvr, "ctor");
 }
 
 void TxnRecord::unlinkHB(HBList& hblist) {
