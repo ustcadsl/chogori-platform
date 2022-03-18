@@ -117,6 +117,10 @@ struct fieldMetaData
 //extern SchemaUMap schemaUMap;
 //extern uint32_t FTSize[];
 
+// std::map<std::pair<String, uint32_t>, uint32_t> schemaMap (name + version) -> version 
+// uint32_t cursor = 0;
+// inserting:
+//      
 struct SchemaMetaData
 {
     SimpleSchema *schema;
@@ -129,6 +133,7 @@ struct SchemaMetaData
     uint32_t curPageNum = 0;
     uint32_t curRowNum = 0;
     BufferPage *headPage = nullptr;
+    BufferPage *tailPage = nullptr;
 
     void printInfo()
     {
@@ -151,6 +156,7 @@ struct SchemaMetaData
 
     void setHeadPage(BufferPage *pagePtr) {
         headPage = pagePtr;
+        tailPage = pagePtr;
     }
 
     // Construct from a Schema
@@ -573,6 +579,7 @@ public:
         return pagePtr;
     };
 
+
     BufferPage *AllocNewPageForSchema(SchemaId schemaId) {
         if (_freePageList.empty())
             return nullptr;
@@ -591,20 +598,64 @@ public:
             setSchemaIDPage(newPage, schemaId);
             setSchemaVerPage(newPage, _schemaMap[schemaId].schema->version);
 
-            BufferPage *tail = _schemaMap[schemaId].headPage;
+            // optimize: using tailPage.
+            BufferPage *tail = _schemaMap[schemaId].tailPage;
             // set nextpage
-            while (getNextPage(tail) != nullptr)
-            {
-                tail = getNextPage(tail);
-            }
-
+            // while (getNextPage(tail) != nullptr)
+            // {
+            //     tail = getNextPage(tail);
+            // }
+            setPrevPage(newPage, tail);
+            setNextPage(newPage, nullptr);
             setNextPage(tail, newPage);
+            _schemaMap[schemaId].tailPage = newPage;
 
             _freePageList.pop_front();
+            // K2LOG_I(log::pbrb, "Alloc new page type 1: sid: {}, sname: {}, currPageNum: {}", schemaId, _schemaMap[schemaId].schema->name, _schemaMap[schemaId].curPageNum);
             K2LOG_D(log::pbrb, "Remaining _freePageList size:{}", _freePageList.size());
 
             return newPage;
         }
+    };
+
+    BufferPage *AllocNewPageForSchema(SchemaId schemaId, BufferPage *pagePtr) {
+        // TODO: validation
+        if (_freePageList.empty())
+            return nullptr;
+
+        K2ASSERT(log::pbrb, _freePageList.size() > 0, "There is no free page in free page list!");
+        BufferPage *newPage = _freePageList.front();
+        _schemaMap[schemaId].curPageNum++;
+
+        // Initialize Page.
+        //memset(newPage, 0, sizeof(BufferPage));
+        initializePage(newPage);
+        setSchemaIDPage(newPage, schemaId);
+        setSchemaVerPage(newPage, _schemaMap[schemaId].schema->version);
+
+        // insert behind pagePtr
+        // pagePtr -> newPage -> nextPage;
+
+        BufferPage *nextPage = getNextPage(pagePtr);
+        // nextPtr != tail
+        if (nextPage != nullptr) {
+            setNextPage(newPage, nextPage);
+            setPrevPage(newPage, pagePtr);
+            setNextPage(pagePtr, newPage);
+            setPrevPage(nextPage, newPage);
+        }
+        else {
+            setNextPage(newPage, nullptr);
+            setPrevPage(newPage, pagePtr);
+            setNextPage(pagePtr, newPage);
+            _schemaMap[schemaId].tailPage = newPage;
+        }
+
+        _freePageList.pop_front();
+        // K2LOG_I(log::pbrb, "Alloc new page type 2: sid: {}, sname: {}, currPageNum: {}, fromPagePtr: {}", schemaId, _schemaMap[schemaId].schema->name, _schemaMap[schemaId].curPageNum, (void *)pagePtr);
+        K2LOG_D(log::pbrb, "Remaining _freePageList size:{}", _freePageList.size());
+
+        return newPage;
     };
 
     std::list<BufferPage *> getFreePageList() {
@@ -668,6 +719,9 @@ public:
 
     // Find the page pointer and row offset to cache cold row
     std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID, dto::Key key);
+
+    // Find Cache Row Position From pagePtr to end
+    std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID, BufferPage *pagePtr);
 
     // store hot row in the empty row
     // void cacheHotRow(uint32_t schemaID, SKVRecord hotRecord);
@@ -831,7 +885,7 @@ public:
         K2LOG_I(log::pbrb, "======= Output fcrp info =======");
         // fcrp.TotalInPageTime();
         int size = fcrp.idxStep.size();
-        ofile << "AccessId, SchemaName, Type, Indexer, Find, FindPrev, FindNext, PageNum, RowNum, TotalTime, ModuleTotalTime" << std::endl;
+        ofile << "AccessId, SchemaName, Type, Indexer, Find, FindPrev, FindNext, PageNum, RowNum, TotalTime" << std::endl;
         for (int i = 0; i < size; i++)
         {
             ofile << fcrp.accessId1[i] << ", "

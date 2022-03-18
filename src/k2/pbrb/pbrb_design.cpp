@@ -395,6 +395,11 @@ RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr)
     int result = -1;
 	uint32_t maxRowCnt = smd.maxRowCnt;
     
+    // Mar. 2022: skip the full pages.
+    if (getHotRowsNumPage(pagePtr) == smd.maxRowCnt) {
+        return result;
+    }
+
     for (uint32_t i = 0; i < smd.occuBitmapSize; i++) {
 		uint8_t bitmap = pagePtr->content[_pageHeaderSize + i];
 		if (bitmap == 0xFF)
@@ -417,6 +422,46 @@ RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr)
     // auto ns = nsec(end - start).count();
     // fcrp.InsertInPage(fcrp.accessId, smd.schema->name, ns, smd.curPageNum, smd.curRowNum, 1);
 	return result; //not find an empty slot
+}
+
+// Find Cache Row Position From pagePtr to end
+std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID, BufferPage *pagePtr)
+{
+    // Validate pagePtr.
+    if (pagePtr == nullptr) {
+        K2LOG_E(log::pbrb, "find a cache row in nullptr");
+        return std::make_pair(nullptr, 0);
+    }
+    else if (getMagicPage(pagePtr) != 0x1010) {
+        K2LOG_E(log::pbrb, "page magic != 0x1010");
+        return std::make_pair(nullptr, 0);
+    }
+    else if (schemaID != getSchemaIDPage(pagePtr))
+    {
+        K2LOG_E(log::pbrb, "pagePtr schemaID: {} != schemaID {}", getSchemaIDPage(pagePtr), schemaID);
+        return std::make_pair(nullptr, 0);
+    }
+
+    uint32_t maxTryCnt = 10;
+    uint32_t tryNum = 0;
+
+    BufferPage *iterPtr = pagePtr;
+    while (iterPtr != nullptr && tryNum++ < maxTryCnt) {
+        RowOffset rowOffset = findEmptySlotInPage(schemaID, iterPtr);
+        if (rowOffset & 0x80000000)
+            // go to next page;
+            iterPtr = getNextPage(iterPtr);
+        else
+            return std::make_pair(iterPtr, rowOffset);
+    }
+    // allocate a newpage and insert in new page.
+    if (iterPtr == nullptr)
+        pagePtr = AllocNewPageForSchema(schemaID);
+    else {
+        pagePtr = AllocNewPageForSchema(schemaID, pagePtr);
+    }
+    //return std::make_pair(nullptr, 0);
+    return std::make_pair(pagePtr, 0);
 }
 
 //find an empty slot by querying the page one by one in turn
@@ -479,7 +524,9 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
             return p;
         }
         else {
-            auto ret = findCacheRowPosition(schemaID);
+            // auto ret = findCacheRowPosition(schemaID);
+            // optimize: from current page.
+            auto ret = findCacheRowPosition(schemaID, pagePtr);
             auto case1End = Clock::now();
             auto case1Ns = nsec(case1End - case1Start).count();
             fcrp.Insert(fcrp.accessId, idxNsecs, case1Ns, 12, sname, 0, 0, pageNum, rowNum);
@@ -548,7 +595,8 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
             RowOffset off = findEmptySlotInPage(schemaID, nextPageAddr);
             
             if (off & 0x80000000) 
-                ret = findCacheRowPosition(schemaID);
+                // optimize: from nextPageAddr;
+                ret = findCacheRowPosition(schemaID, nextPageAddr);
             else
                 ret = std::make_pair(nextPageAddr, off);
 
@@ -563,7 +611,8 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
         else if (prevPageAddr != nullptr && nextPageAddr == nullptr) {
             RowOffset off = findEmptySlotInPage(schemaID, prevPageAddr);
             if (off & 0x80000000)
-                ret = findCacheRowPosition(schemaID);
+                // optimize: from prevPageAddr;
+                ret = findCacheRowPosition(schemaID, prevPageAddr);
             else
                 ret = std::make_pair(prevPageAddr, off);
 
@@ -581,7 +630,7 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
                     off = findEmptySlotInPage(schemaID, prevPageAddr);
                 
                 if (off & 0x80000000)
-                    ret = findCacheRowPosition(schemaID);
+                    ret = findCacheRowPosition(schemaID, prevPageAddr);
                 else 
                     ret = std::make_pair(prevPageAddr, off);
 
@@ -593,12 +642,22 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
 
             uint16_t prevHotNum = getHotRowsNumPage(prevPageAddr);
             uint16_t nextHotNum = getHotRowsNumPage(nextPageAddr);
-            if (prevHotNum <= nextHotNum) {
+            if (prevHotNum == nextHotNum && prevHotNum == _schemaMap[schemaID].maxRowCnt)
+            {
+                // case 27:
+                ret = findCacheRowPosition(schemaID, prevPageAddr);
+                
+                auto case2End = Clock::now();
+                auto case2Ns = nsec(case2End - case2PointerEnd).count();
+                fcrp.Insert(fcrp.accessId, idxNsecs, case2Ns, 27, sname, prevTime, nextTime, pageNum, rowNum);  
+                return ret;             
+            }
+            else if (prevHotNum <= nextHotNum) {
                 RowOffset off = findEmptySlotInPage(schemaID, prevPageAddr, prevOff + 1, _schemaMap[schemaID].maxRowCnt);
                 if (off & 0x80000000)
                     off = findEmptySlotInPage(schemaID, prevPageAddr);
                 if (off & 0x80000000)
-                    ret = findCacheRowPosition(schemaID);
+                    ret = findCacheRowPosition(schemaID, prevPageAddr);
                 else
                     ret = std::make_pair(prevPageAddr, off);
                 
@@ -613,7 +672,7 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
                 if (off & 0x80000000)
                     off = findEmptySlotInPage(schemaID, nextPageAddr);
                 if (off & 0x80000000)
-                    ret = findCacheRowPosition(schemaID);
+                    ret = findCacheRowPosition(schemaID, nextPageAddr);
                 else 
                     ret = std::make_pair(nextPageAddr, off);
                 
