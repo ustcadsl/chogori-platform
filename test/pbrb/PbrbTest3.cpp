@@ -52,7 +52,7 @@ int test() {
 
     // Plog
     SimplePlog Plog1;
-    uint8_t *basePtr = (uint8_t *)Plog1.plog;
+    //uint8_t *basePtr = (uint8_t *)Plog1.plog;
 
     // Schema
     SimpleSchema S1({
@@ -64,7 +64,8 @@ int test() {
     auto sid1 = schemaUMap.addSchema(S1);
     initPlog(Plog1, sid1);
 
-    PBRB pbrb(8, &wm, &indexer);
+    //PBRB pbrb(8, &wm, &indexer);
+    PBRB pbrb(8, &wm);
 
     auto page1 = pbrb.createCacheForSchema(sid1);
     std::cout << page1 << " " << std::endl;
@@ -78,10 +79,10 @@ int test() {
         if (indexer.find(newKey) == indexer.end()) {
             KVN kvn;
             indexer.insert({newKey, kvn});
-            pbrb.cacheColdRow(basePtr + i * 128, newKey);
+            //pbrb.cacheColdRow(basePtr + i * 128, newKey);
         }
         else {
-            pbrb.cacheColdRow(basePtr + i * 128, newKey);
+            //pbrb.cacheColdRow(basePtr + i * 128, newKey);
         }
     }
 
