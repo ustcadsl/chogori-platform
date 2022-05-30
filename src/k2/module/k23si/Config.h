@@ -39,7 +39,9 @@ struct K23SIConfig {
     ConfigDuration minimumRetentionPeriod{"retention_minimum", 1s};//1h
 
     // how often to update our retention timestamp from the TSO.
-    ConfigDuration retentionTimestampUpdateInterval{"retention_ts_update_interval", 5s};//60s
+    ConfigDuration retentionTimestampUpdateInterval{"retention_ts_update_interval", 10s};//60s
+
+    ConfigDuration dealRequestQueueInterval{"deal_request_queue_interval", 5ms};//
 
     // timeout for read requests (including potential PUSH operation)
     ConfigDuration readTimeout{"read_timeout", 100ms};
@@ -48,7 +50,7 @@ struct K23SIConfig {
     ConfigDuration writeTimeout{"write_timeout", 150ms};
 
     // what is our read cache size in number of entries
-    ConfigVar<uint64_t> readCacheSize{"k23si_read_cache_size", 1000000};
+    ConfigVar<uint64_t> readCacheSize{"k23si_read_cache_size", 1000}; //1000000
 
     // how many times to try and finalize a transaction
     ConfigVar<uint64_t> finalizeRetries{"k23si_txn_finalize_retries", 10};
@@ -68,7 +70,7 @@ struct K23SIConfig {
     ConfigVar<bool> enablePBRB{"k23si_enable_pbrb", true};
 
      // control the total number of page allocated in pbrb
-    ConfigVar<uint32_t> totalNumberofPage{"k23si_page_number_pbrb", 3000};
+    ConfigVar<uint32_t> totalNumberofPage{"k23si_page_number_pbrb", 3000};//10000
     
     // the path of pmem engine
     ConfigVar<String> pmemEnginePath{"k23si_pmem_engine_path","/mnt/pmem0/chogori-engine"};

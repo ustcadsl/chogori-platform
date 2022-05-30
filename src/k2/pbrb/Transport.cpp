@@ -100,12 +100,48 @@ dto::SKVRecord *PBRB::generateSKVRecordByRow(uint32_t schemaId, void *rAddr, con
     return record;
 }
 
+void PBRB::generateSKVRecordByPayloadRow(uint32_t schemaId, void *rAddr, bool isPayloadRow, Payload& rowData, uint64_t &totalReadCopyFeildms) {
+    //dto::SKVRecord *record = new dto::SKVRecord(collName, schema);
+    const SchemaMetaData &smd = _schemaMap[schemaId];
+    
+    if(isPayloadRow){//////
+        auto _copyFieldStart = k2::now_nsec_count();
+        /*void* srcAddr = (void*) ((uint8_t *)rAddr + smd.fieldsInfo[0].fieldOffset); //row header offset
+        size_t payloadRowSize;
+        //record->storage.fieldData.seek(0);
+        memcpy(&payloadRowSize, srcAddr, sizeof(size_t));
+        srcAddr = (void*) ((uint8_t *)rAddr + smd.fieldsInfo[0].fieldOffset + sizeof(size_t));
+        if ( payloadRowSize + sizeof(size_t) > smd.rowSize - smd.fieldsInfo[0].fieldOffset ) {
+            //large Payload whose size exceeds the row size
+            size_t inPlaceSize = smd.rowSize - smd.fieldsInfo[0].fieldOffset - sizeof(size_t) - sizeof(void *);
+            //record->setStorage(srcAddr, inPlaceSize);
+            rowData.write(srcAddr, inPlaceSize);
+            void *heapAddr = *((void **)((uint8_t *)rAddr + smd.rowSize - sizeof(void *) ));
+            size_t outPlaceSize = payloadRowSize - inPlaceSize;
+            //record->setStorage(heapAddr, outPlaceSize);
+            rowData.write(heapAddr, outPlaceSize);
+            K2LOG_D(log::pbrb, "@@@payloadRowSize:{}, heapAddr:{}, outPlaceSize:{}", payloadRowSize, (void *)(uint8_t *)heapAddr, outPlaceSize);
+        } else {
+            //K2LOG_I(log::pbrb, "####payloadRowSize:{}, srcAddr:{}", payloadRowSize, (void *)(uint8_t *)srcAddr);
+            //memcpy((void*)&(record->getStorage().fieldData), srcAddr, payloadRowSize);
+            //record->setStorage(srcAddr, payloadRowSize);
+            rowData.write(srcAddr, payloadRowSize);
+        }
+        */
+        
+        void* srcAddr = (void*) ((uint8_t *)rAddr + smd.fieldsInfo[0].fieldOffset + sizeof(size_t));
+        size_t inPlaceSize = smd.rowSize - smd.fieldsInfo[0].fieldOffset - sizeof(size_t) - sizeof(void *);
+        rowData.write(srcAddr, inPlaceSize);
+        auto _copyFieldEnd = k2::now_nsec_count();
+        totalReadCopyFeildms += _copyFieldEnd - _copyFieldStart;
+    }
+}
 
 dto::DataRecord *PBRB::generateDataRecord(dto::SKVRecord *skvRecord, void *hotAddr) {
     // validate
     K2EXPECT(log::pbrb, skvRecord != nullptr, true);
     dto::DataRecord *coldVer = static_cast<dto::DataRecord *>(getPlogAddrRow(hotAddr));
-    dto::DataRecord *prevVer = coldVer->prevVersion;
+    /*dto::DataRecord *prevVer = coldVer->prevVersion;
     dto::DataRecord *record = new dto::DataRecord {
         .value=std::move(skvRecord->storage), 
         .isTombstone=getIsTombstoneRow(hotAddr), 
@@ -117,6 +153,16 @@ dto::DataRecord *PBRB::generateDataRecord(dto::SKVRecord *skvRecord, void *hotAd
     };
     //K2LOG_D(log::pbrb, "Generated Datarecord: [timestamp = {}, status = {}, value = {}]", record->timestamp, record->status, record->value);
     return record;
+    */
+    coldVer->value=std::move(skvRecord->storage);
+    return coldVer;
+}
+
+dto::DataRecord *PBRB::generateDataRecord(void *hotAddr) {
+    // validate
+    dto::DataRecord *coldVer = static_cast<dto::DataRecord *>(getPlogAddrRow(hotAddr));
+    //coldVer->value=std::move(skvRecord->storage);
+    return coldVer;
 }
 
 }

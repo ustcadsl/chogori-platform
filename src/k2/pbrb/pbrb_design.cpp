@@ -1,6 +1,6 @@
 #include <iostream>
 #include "pbrb_design.h"
-#include "indexer.h"
+//#include "indexer.h"
 
 namespace k2
 {
@@ -11,7 +11,7 @@ namespace pbrb {
     }
 }
 // Copy the header of row from DataRecord of query to (pagePtr, rowOffset)
-void *PBRB::cacheRowHeaderFrom(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, dto::DataRecord* rec) {
+void *PBRB::cacheRowHeaderFrom(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, dto::DataRecord* rec, void *nodePtr) {
     if (pagePtr == nullptr) {
         K2LOG_I(log::pbrb, "Trying to cache row to nullptr!");
         return nullptr;
@@ -42,6 +42,7 @@ void *PBRB::cacheRowHeaderFrom(uint32_t schemaId, BufferPage *pagePtr, RowOffset
     setStatusRow(rowBasePtr, rec->status);
     setIsTombstoneRow(rowBasePtr, rec->isTombstone);
     setRequestIdRow(rowBasePtr, rec->request_id);
+    setKVNodeAddrRow(rowBasePtr, nodePtr);
 
     return rowBasePtr;
 }
@@ -76,7 +77,8 @@ void *PBRB::cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, 
         size_t copySize = strSize;
         k2::String *strPtr = static_cast<k2::String *>(valueAddr);
         //const size_t maxStrSize = FTSize[static_cast<int>(k2::dto::FieldType::STRING)] - 1;
-        size_t maxStrSize = smd.fieldsInfo[fieldID].fieldSize;
+        //size_t maxStrSize = smd.fieldsInfo[fieldID].fieldSize;
+        size_t maxStrSize = 256;
 
         memcpy(destPtr, &strSize, sizeof(size_t)); 
         destPtr = (void *) ((uint8_t *) rowBasePtr + smd.fieldsInfo[fieldID].fieldOffset + sizeof(size_t)); 
@@ -150,13 +152,14 @@ void *PBRB::cacheRowPayloadFromDataRecord(uint32_t schemaId, BufferPage *pagePtr
     //TODO: long payload exceeds row size
         size_t inPlaceSize = smd.rowSize - smd.fieldsInfo[0].fieldOffset - sizeof(size_t) - sizeof(void *);
         rowData.read(rowBasePtr, inPlaceSize); 
-        size_t outPlaceSize = rowPayloadSize - inPlaceSize;
+        /*size_t outPlaceSize = rowPayloadSize - inPlaceSize;
         uint8_t *outPlaceValue = static_cast<uint8_t *>(operator new((outPlaceSize) * sizeof(std::byte)));
         rowData.read(outPlaceValue, outPlaceSize); 
         void *destPtr = (void *) ((uint8_t *)(pagePtr) + byteOffsetInPage + smd.rowSize - sizeof(void *) );
         memcpy(destPtr, &outPlaceValue, sizeof(void *));
         void *retVal = *((void **)((uint8_t *)destPtr));
         K2LOG_D(log::pbrb, "^^^rowPayloadSize:{}, outPlaceValue:{}, retVal:{}", rowPayloadSize, (void *)(uint8_t *)outPlaceValue, retVal);
+        */
         //K2LOG_I(log::pbrb, "********cut long payload row, rowData.getSize:{}, row size:{}, rowPayloadSize:{}", rowData.getSize(), smd.rowSize, rowPayloadSize);
     } else {
         rowData.read(rowBasePtr, rowPayloadSize); 
@@ -267,7 +270,7 @@ void *PBRB::cacheRowFromPlog(BufferPage *pagePtr, RowOffset rowOffset, PLogAddr 
     return rowBasePtr;
 }
 
-void *PBRB::cacheColdRow(PLogAddr pAddress)
+/*void *PBRB::cacheColdRow(PLogAddr pAddress)
 {
     SchemaId schemaId = readFromPlog<SchemaId>(pAddress, 4);
     if (_schemaMap.find(schemaId) == _schemaMap.end() || _schemaMap[schemaId].headPage == nullptr) {
@@ -281,7 +284,9 @@ void *PBRB::cacheColdRow(PLogAddr pAddress)
 
     return cacheRowFromPlog(pagePtr, rowOffset, pAddress);
 
-}
+}*/
+
+/* ...New MapIndexer Integrated. Temporally disabled
 
 // cache cold row in pAddress with key, insert hot address into indexer;
 // return hot address.
@@ -345,6 +350,7 @@ void *PBRB::cacheColdRow(PLogAddr pAddress, String key)
     }
     return nullptr;
 }
+*/
 
 //find an empty slot between the beginOffset and endOffset in the page
 RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr, RowOffset beginOffset, RowOffset endOffset)
@@ -410,6 +416,11 @@ RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr)
 	//uint32_t schemaId = getSchemaIDPage(pagePtr); 
 	const SchemaMetaData& smd = _schemaMap[schemaID];
 	uint32_t maxRowCnt = smd.maxRowCnt;
+    if(getHotRowsNumPage(pagePtr) == maxRowCnt) {
+        //K2LOG_I(log::pbrb, "^^^current page is full, skip it!!");
+        return 0xFFFFFFFF; //current page is full
+    }
+
 	for (uint32_t i = 0; i < smd.occuBitmapSize; i++) {
 		uint8_t bitmap = pagePtr->content[_pageHeaderSize + i];
 		if (bitmap == 0xFF)
@@ -430,15 +441,30 @@ RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr)
 //find an empty slot by querying the page one by one in turn
 std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID)
 {
+    fcrp.fcrpBase++;
     BufferPage *pagePtr = _schemaMap[schemaID].headPage;
     //K2LOG_D(log::pbrb, "^^^^^^^^findCacheRowPosition, schemaID:{}, pagePtr empty:{}", schemaID, pagePtr==nullptr);
+    /*while(getNextPage(pagePtr) != nullptr) {
+        pagePtr = getNextPage(pagePtr);
+    }*/
+    int checkedPages = 0;
     while (pagePtr != nullptr) {
+        //auto _checkBitmapBegin = k2::now_nsec_count();
         RowOffset rowOffset = findEmptySlotInPage(schemaID, pagePtr);
-        if (rowOffset & 0x80000000)
+        checkedPages++;
+        //auto _checkBitmapEnd = k2::now_nsec_count();
+        //totalCheckBitmap += _checkBitmapEnd - _checkBitmapBegin;
+        if (rowOffset & 0x80000000) {
             // go to next page;
+            //if (checkedPages > 1500) break;
+            //auto _iterPageBegin = k2::now_nsec_count();
             pagePtr = getNextPage(pagePtr);
-        else
+            //pagePtr = getPrevPage(pagePtr);
+            //auto _iterPageEnd = k2::now_nsec_count();
+            //totalIteratorPage += _iterPageEnd - _iterPageBegin;
+        } else {
             return std::make_pair(pagePtr, rowOffset);
+        }
     }
     //all allocated pages for the schema are full, so allocate a new page
     pagePtr = AllocNewPageForSchema(schemaID);
@@ -447,37 +473,66 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID)
 }
 
 //find and empty slot that try to keep rows within/between pages as orderly as possible
-std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID, String key) {
-    KVN &kvNode = (*_indexer)[key];
+/*std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID, dto::Key key) {
+    
+    fcrp.fcrpNew++;
+    String sname = _schemaMap[schemaID].schema->name;
+    auto idxStart = Clock::now();
+    IndexerIterator iter = _indexer->find(key);
+    if (iter == _indexer->end()) {
+        K2LOG_E(log::pbrb, "Cannot find kvnode for key: {}", key);
+        return std::make_pair(nullptr, 0);
+    }
+    KeyValueNode &node = *_indexer->extractFromIter(iter);
+    auto idxEnd = Clock::now();
+    int idxNsecs = nsec(idxEnd - idxStart).count();
     BufferPage *pagePtr;
     RowOffset rowOffset;
     // 1. has hot row:
-    if (kvNode.hasCachedVer()) {
-        pagePtr = getPageAddr(kvNode.addr[0]);
+    int firstHotVer = node.first_cached_ver();
+    if (firstHotVer != -1) {
+        auto case1Start = Clock::now();
+        RowAddr hotAddr = static_cast<RowAddr>(node._getpointer(firstHotVer));
+        pagePtr = getPageAddr(hotAddr);
         rowOffset = findEmptySlotInPage(schemaID, pagePtr);
-        if (rowOffset & 0x80000000)
-            return findCacheRowPosition(schemaID);
-        else {
+        // TODO: 3 hot version -> evict
+        if (pbrb::isValid(rowOffset)) {
             // void *hotAddr = cacheRowFromPlog(pagePtr, rowOffset, pAddr);
             // kvNode.insertHotRow(hotAddr);
-            return std::make_pair(pagePtr, rowOffset);
+            auto p = std::make_pair(pagePtr, rowOffset);
+            auto case1End = Clock::now();
+            auto case1Ns = nsec(case1End - case1Start).count();
+            fcrp.insert(idxNsecs, case1Ns, 0, 11, sname);
+            return p;
+        }
+        else {
+            auto ret = findCacheRowPosition(schemaID);
+            auto case1End = Clock::now();
+            auto case1Ns = nsec(case1End - case1Start).count();
+            fcrp.insert(idxNsecs, case1Ns, 0, 12, sname);
+            return ret;
         }
     }
 
     // 2. 3 cold versions.
     else {
-        auto pit = _indexer->find(key);
-        auto nit = pit;
+        auto case2Start = Clock::now();
+        IndexerIterator prevIter = _indexer->find(key);
+        IndexerIterator nextIter = prevIter;
 
         int maxRetryCnt = 5;
+        auto case2prev = Clock::now();
         BufferPage *prevPageAddr = nullptr;
         RowOffset prevOff = 0;
         for (int i = 0; i < maxRetryCnt; i++) {
-            if (pit != _indexer->begin())
+            if (prevIter != _indexer->begin())
             {
-                pit--;
-                if (pit->second.hasCachedVer()) {
-                    auto retVal = findRowByAddr(pit->second.addr[0]);
+                prevIter--;
+                KeyValueNode &prevNode = *_indexer->extractFromIter(prevIter); 
+                int firstHotVer = prevNode.first_cached_ver();
+                if (firstHotVer != -1) {
+                    RowAddr prevAddr = static_cast<RowAddr>(prevNode._getpointer(firstHotVer));
+                    auto retVal = findRowByAddr(prevAddr);
                     prevPageAddr = retVal.first;
                     prevOff = retVal.second;
                     break;
@@ -485,42 +540,62 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
             }
             else break;
         }
-
+        auto case2Next = Clock::now();
         BufferPage *nextPageAddr = nullptr;
         RowOffset nextOff = 0;
-        for (int i = 0; i < maxRetryCnt && nit != _indexer->end(); i++) {
-            nit++;
-            if (nit == _indexer->end())
+        for (int i = 0; i < maxRetryCnt && nextIter != _indexer->end(); i++) {
+            nextIter++;
+            if (nextIter == _indexer->end())
                 break;
-            if (nit->second.hasCachedVer()) {
-                auto retVal = findRowByAddr(nit->second.addr[0]);
+            KeyValueNode &nextNode = *_indexer->extractFromIter(nextIter); 
+            int firstHotVer = nextNode.first_cached_ver();
+            if (firstHotVer != -1) {
+                RowAddr nextAddr = static_cast<RowAddr>(nextNode._getpointer(firstHotVer));
+                auto retVal = findRowByAddr(nextAddr);
                 nextPageAddr = retVal.first;
                 nextOff = retVal.second;
                 break;
             }
         }
-
+        auto case2PointerEnd = Clock::now();
+        std::pair<BufferPage *, RowOffset> ret;
         // cannot find neighboring pages...
         if (prevPageAddr == nullptr && nextPageAddr == nullptr) {
-            return findCacheRowPosition(schemaID);
+            ret = findCacheRowPosition(schemaID);
+            auto case2End = Clock::now();
+            auto case2Ns = nsec(case2End - case2Start).count();
+            fcrp.insert(idxNsecs, 0, case2Ns, 21, sname);
+            return ret;
         }
 
         // insert into next page...
         else if (prevPageAddr == nullptr && nextPageAddr != nullptr) {
             RowOffset off = findEmptySlotInPage(schemaID, nextPageAddr);
-            if (off & 0x80000000)
-                return findCacheRowPosition(schemaID);
+            
+            if (off & 0x80000000) 
+                ret = findCacheRowPosition(schemaID);
             else
-                return std::make_pair(nextPageAddr, off);
+                ret = std::make_pair(nextPageAddr, off);
+
+            auto case2End = Clock::now();
+            auto case2Ns = nsec(case2End - case2Start).count();
+            fcrp.insert(idxNsecs, 0, case2Ns, 22, sname);
+
+            return ret;
         }
 
         // insert into prev page...
         else if (prevPageAddr != nullptr && nextPageAddr == nullptr) {
             RowOffset off = findEmptySlotInPage(schemaID, prevPageAddr);
             if (off & 0x80000000)
-                return findCacheRowPosition(schemaID);
+                ret = findCacheRowPosition(schemaID);
             else
-                return std::make_pair(prevPageAddr, off);
+                ret = std::make_pair(prevPageAddr, off);
+
+            auto case2End = Clock::now();
+            auto case2Ns = nsec(case2End - case2Start).count();
+            fcrp.insert(idxNsecs, 0, case2Ns, 23, sname);
+            return ret;
         }
 
         // insert into page with lower occupancy rate...
@@ -529,9 +604,16 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
                 RowOffset off = findEmptySlotInPage(schemaID, prevPageAddr, prevOff + 1, nextOff);
                 if (off & 0x80000000)
                     off = findEmptySlotInPage(schemaID, prevPageAddr);
+                
                 if (off & 0x80000000)
-                    return findCacheRowPosition(schemaID);
-                return std::make_pair(prevPageAddr, off);
+                    ret = findCacheRowPosition(schemaID);
+                else 
+                    ret = std::make_pair(prevPageAddr, off);
+
+                auto case2End = Clock::now();
+                auto case2Ns = nsec(case2End - case2Start).count();
+                fcrp.insert(idxNsecs, 0, case2Ns, 24, sname);               
+                return ret;
             }
 
             uint16_t prevHotNum = getHotRowsNumPage(prevPageAddr);
@@ -541,24 +623,38 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
                 if (off & 0x80000000)
                     off = findEmptySlotInPage(schemaID, prevPageAddr);
                 if (off & 0x80000000)
-                    return findCacheRowPosition(schemaID);
-                return std::make_pair(prevPageAddr, off);
+                    ret = findCacheRowPosition(schemaID);
+                else
+                    ret = std::make_pair(prevPageAddr, off);
+                
+                auto case2End = Clock::now();
+                auto case2Ns = nsec(case2End - case2Start).count();
+                fcrp.insert(idxNsecs, 0, case2Ns, 25, sname);               
+                return ret;
+
             }
             else {
                 RowOffset off = findEmptySlotInPage(schemaID, nextPageAddr, 0, nextOff);
                 if (off & 0x80000000)
                     off = findEmptySlotInPage(schemaID, nextPageAddr);
                 if (off & 0x80000000)
-                    return findCacheRowPosition(schemaID);
-                return std::make_pair(nextPageAddr, off);
+                    ret = findCacheRowPosition(schemaID);
+                else 
+                    ret = std::make_pair(nextPageAddr, off);
+                
+                auto case2End = Clock::now();
+                auto case2Ns = nsec(case2End - case2Start).count();
+                fcrp.insert(idxNsecs, 0, case2Ns, 26, sname);    
+                return ret;
             }
         }
     }
-
+    
     return std::make_pair(nullptr, 0);
 }
+*/
 
-float PBRB::getAveragePageListUsage(float& maxPageListUsage) {
+float PBRB::getAveragePageListUsage(float& maxPageListUsage, uint32_t* schemaID, String* schemaNameArray, float* pageListUsageArray, int& schemaCount) {
     float pageListUsageSum = 0.0;
     int pageListNum = 0;
     float averagePageListUsage = 0.0;
@@ -566,24 +662,41 @@ float PBRB::getAveragePageListUsage(float& maxPageListUsage) {
         uint32_t sID = schemaEntry.first;
         SchemaMetaData sMeta = schemaEntry.second;
         BufferPage *pagePtr = sMeta.headPage;
-        long totalHotRowsOfaPageList = 0;
-        long totalMaxRow = 0;
+        float totalHotRowsOfaPageList = 0.0;
+        float totalMaxRow = 0.0;
         float curPageListUsage = 0.0;
         while (pagePtr) {
             //outputHeader(pagePtr);
-            totalHotRowsOfaPageList += getHotRowsNumPage(pagePtr);
+            uint16_t hotRowNum = getHotRowsNumPage(pagePtr);
+            totalHotRowsOfaPageList += hotRowNum;
+            //totalHotRowsOfaPageList += getHotRowsNumPageforGC(pagePtr, sID);
             totalMaxRow += sMeta.maxRowCnt;
+            if(hotRowNum > sMeta.maxRowCnt) {
+                K2LOG_I(log::pbrb, "#####sID:{}, hotRowNum:{}, sMeta.maxRowCnt:{}", sID, hotRowNum, sMeta.maxRowCnt);          
+            }
             pagePtr = getNextPage(pagePtr);
         }     
-        curPageListUsage = (float)totalHotRowsOfaPageList/(float)totalMaxRow;
-        if(curPageListUsage > maxPageListUsage) maxPageListUsage = curPageListUsage;
-        //pageListUsageSum += (float)totalHotRowsOfaPageList/(float)totalMaxRow;
-        pageListUsageSum += curPageListUsage;
-        K2LOG_I(log::pbrb, "schemaID:{}, totalHotRowsOfaPageList:{}, totalMaxRow:{}, sMeta.maxRowCnt:{}, maxPageListUsage:{}", sID, totalHotRowsOfaPageList, totalMaxRow, sMeta.maxRowCnt, maxPageListUsage);
-        pageListNum++;
+
+        if(totalMaxRow > 0) { 
+            curPageListUsage = totalHotRowsOfaPageList/totalMaxRow;
+            if(curPageListUsage > 0.9) {
+                schemaID[schemaCount] = sID;
+                pageListUsageArray[schemaCount] = curPageListUsage;
+                schemaNameArray[schemaCount] = schemaUMap.umap[sID].name;
+                schemaCount++;
+            }
+            if(curPageListUsage > maxPageListUsage) {
+                maxPageListUsage = curPageListUsage;
+                //*schemaID = sID;
+            }
+            //pageListUsageSum += (float)totalHotRowsOfaPageList/(float)totalMaxRow;
+            pageListUsageSum += curPageListUsage;
+            K2LOG_I(log::pbrb, "schemaID:{}, sName:{}, name:{}, totalHotRowsOfaPageList:{}, totalMaxRow:{}, sMeta.maxRowCnt:{}, maxPageListUsage:{}", sID, sMeta.schema->name, schemaUMap.umap[sID].name, totalHotRowsOfaPageList, totalMaxRow, sMeta.maxRowCnt, maxPageListUsage);
+            pageListNum++;
+        }
     }
     averagePageListUsage = pageListUsageSum/(float)pageListNum;
-    K2LOG_I(log::pbrb, "####averagePageListUsage:{}, maxPageListUsage:{}", averagePageListUsage, maxPageListUsage);
+    //K2LOG_I(log::pbrb, "####averagePageListUsage:{}, maxPageListUsage:{}", averagePageListUsage, maxPageListUsage);
     return averagePageListUsage;
 }
 
@@ -601,6 +714,7 @@ float PBRB::getCurPageListUsage(uint32_t schemaID) {
                 //outputHeader(pagePtr);
                 pageCount++;
                 totalHotRowsOfaPageList += getHotRowsNumPage(pagePtr);
+                //totalHotRowsOfaPageList += getHotRowsNumPageforGC(pagePtr, sID);
                 totalMaxRow += sMeta.maxRowCnt;
                 pagePtr = getNextPage(pagePtr);
             }     
@@ -741,7 +855,7 @@ void PBRB::releasePayloadHeapSpace(BufferPage *pagePtr, void *rowAddr) {
     if (payloadRowSize + sizeof(size_t) > smd.rowSize - smd.fieldsInfo[0].fieldOffset) { 
         void *heapAddr = *((void **)((uint8_t *)rowAddr + smd.rowSize - sizeof(void *) )); 
         delete (char *)heapAddr;
-        K2LOG_I(log::pbrb, "in releasePayloadHeapSpace, payloadRowSize:{}, heapAddr:{}", payloadRowSize, (void *)(uint8_t *)heapAddr);
+        K2LOG_I(log::pbrb, "in releasePayloadHeapSpace, payloadRowSize:{}, smd.rowSize:{}, field[0]Offset:{}, heapAddr:{}", payloadRowSize, smd.rowSize, smd.fieldsInfo[0].fieldOffset, (void *)(uint8_t *)heapAddr);
     }
 }
 
@@ -784,6 +898,7 @@ void *PBRB::copyRowInPages(BufferPage *srcPagePtr, RowOffset srcOffset,
     return dst;
 }
 
+/* New Indexer integrated... Temporally disabled
 bool PBRB::splitPage(BufferPage *pagePtr) {
     
     // 1. get metadata; find a free page.
@@ -861,10 +976,9 @@ bool PBRB::splitPage(BufferPage *pagePtr) {
         removeHotRow(pagePtr, offset);
     }
 
-
-
     return true;
 }
+
 
 bool PBRB::mergePage(BufferPage *pagePtr1, BufferPage *pagePtr2) {
     
@@ -939,6 +1053,7 @@ bool PBRB::mergePage(BufferPage *pagePtr1, BufferPage *pagePtr2) {
 
     return true;
 }
+*/
 
 // 1.2 Row get & set Functions.
 
@@ -1033,6 +1148,16 @@ Status PBRB::setRequestIdRow(RowAddr rAddr, const uint64_t& request_id) {
     memcpy(dstPtr, &request_id, sizeof(uint64_t));
     
     return Statuses::S200_OK("Set request_id in row successfully");
+}
+
+ // KVNodeAddr
+void *PBRB::getKVNodeAddrRow(RowAddr rAddr) {
+    void *retVal = *((void **)((uint8_t *)rAddr + 38));
+    return retVal;
+}
+void PBRB::setKVNodeAddrRow(RowAddr rAddr, void *KVNodeAddr) {
+    uint8_t *dstPtr = (uint8_t *)rAddr;
+    memcpy(dstPtr + 38, &KVNodeAddr, sizeof(void *));
 }
 
 }

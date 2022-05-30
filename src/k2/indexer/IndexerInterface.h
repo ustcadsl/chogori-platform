@@ -34,6 +34,8 @@ Copyright(c) 2020 Futurewei Cloud
 #include <k2/dto/K23SI.h>
 //#include <k2/pbrb/pbrb_design.h>
 
+//static std::mutex g_mutex;
+
 namespace k2 {
 //
 //  K2 internal MVCC representation
@@ -53,10 +55,11 @@ namespace k2 {
 
     class KeyValueNode {
     private:
-        uint64_t flags;
+        //std::mutex g_mutex;
+        uint64_t flags;       
         std::unique_ptr<dto::Key> key;
         typedef struct {
-            u_int64_t timestamp;
+            uint64_t timestamp;
             dto::DataRecord *valuepointer;
         } _valuedata;
         _valuedata valuedata[3];//8type for ts and 8 byte for pointer
@@ -71,7 +74,7 @@ namespace k2 {
         }
 
         KeyValueNode(dto::Key newKey) {
-            flags = 0;
+            flags = 0;          
             key = std::unique_ptr<dto::Key>(new dto::Key{.schemaName = newKey.schemaName, .partitionKey = newKey.partitionKey, .rangeKey = newKey.rangeKey});
             for (int i = 0; i < 3; ++i) {
                 valuedata[i].timestamp = 0;
@@ -188,6 +191,14 @@ namespace k2 {
             valuedata[order].valuepointer = nullptr;
         }
 
+        inline int first_cached_ver() {
+            for (int i = 0;i <= 2;i++) {
+                if (is_inmem(i) && is_exist(i))
+                    return i;
+            }
+            return -1;
+        }
+
         // debugging
         void printAll() {
             std::cout << "KeyValueNode: " << this << " IsWI: " << is_writeintent() << std::endl;
@@ -209,11 +220,21 @@ namespace k2 {
             valuedata[order].valuepointer = coldRecord;
         }
 
+        int getOffsetKVNode(void *datarecord) {
+            for (int i = 0; i < 3; ++i) {
+                if (valuedata[i].valuepointer == static_cast<dto::DataRecord *>(datarecord)) {
+                    K2LOG_I(log::indexer, "match valuepointer in KVNode!");
+                    return i;
+                }
+            }
+            return -1;
+        }
+
         dto::DataRecord *get_datarecord(const dto::Timestamp &timestamp, int &order, PBRB *pbrb);
 
         NodeVerMetadata getNodeVerMetaData(int order, PBRB *pbrb);
 
-        int insert_datarecord(dto::DataRecord *datarecord, PBRB *pbrb);
+        int insert_datarecord(dto::DataRecord *datarecord, PBRB *pbrb, const dto::Timestamp &timestamp, bool isUpdateAddr, int order);
 
         inline dto::DataRecord *_getColdVerPtr(int order, PBRB *pbrb);
 
@@ -261,14 +282,27 @@ namespace k2 {
             return 0;
         }
 
+        bool check_version_inKVNode(const dto::Timestamp &timestamp) {
+            for (int i = 0; i < 3; ++i) {
+                if (timestamp.tEndTSECount() == valuedata[i].timestamp) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         int insert_hot_datarecord(const dto::Timestamp &timestamp, void *datarecord) {
-            for (int i = 0; i < 3; ++i)
+            K2LOG_I(log::indexer, "in insert_hot_datarecord!");
+            for (int i = 0; i < 3; ++i) {
                 if (timestamp.tEndTSECount() == valuedata[i].timestamp) {
                     set_inmem(i, 1);
                     //datarecord->prevVersion = valuedata[i].valuepointer;
                     valuedata[i].valuepointer = static_cast<dto::DataRecord *>(datarecord);
+                    //K2LOG_I(log::indexer, "after valuepointer!");
                     return 0;
                 }
+            }
+            K2LOG_I(log::indexer, "update KVNode failed!!!");
             return 1;
         }
 

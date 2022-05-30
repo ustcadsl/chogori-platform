@@ -45,13 +45,15 @@ Copyright(c) 2020 Futurewei Cloud
 #include "Persistence.h"
 #include "Log.h"
 
-#include <k2/pbrb/indexer.h>
+//#include <k2/pbrb/indexer.h>
 #include <k2/pbrb/pbrb_design.h>
 #include <k2/pmemStorage/PmemEngine.h>
 #include <k2/pmemStorage/PmemLog.h>
 
 #include <map>
 #include<fstream>
+#include <queue>
+#include <mutex>
 using namespace std;
 
 #define PAYLOAD_ROW
@@ -61,6 +63,9 @@ using namespace std;
 
 #define OUTPUT_READ_INFO
 //#define OUTPUT_ACCESS_PATTERN
+
+#define ASYNC
+//#define SYNC
 
 //#define SPACE_UTILIZATION
 
@@ -93,10 +98,13 @@ struct VersionSet {
 */
 
 // the type holding versions for all keys, i.e. the indexer
-// typedef HOTindexer IndexerT;
-// typedef HotIterator IndexerIterator;
-typedef mapindexer IndexerT;
-typedef MapIterator IndexerIterator;
+typedef HOTindexer IndexerT;
+typedef HotIterator IndexerIterator;
+//typedef mapindexer IndexerT;
+//typedef MapIterator IndexerIterator;
+
+//static std::mutex g_mutex;
+//static std::unique_lock<std::mutex> uniqueLock(g_mutex);
 
 class K23SIPartitionModule {
 public: // lifecycle
@@ -108,6 +116,20 @@ public: // lifecycle
 
     // recover data upon startup
     seastar::future<> _recovery();
+
+    struct requestEntry {
+        uint32_t SMapIndex;
+        //dto::SKVRecord::Storage value;
+        dto::DataRecord* rec;
+        KeyValueNode* nodePtr;
+        int indexFlag;
+    };
+    queue<requestEntry*> requestQueue;
+    queue<requestEntry*> requestQueue1; 
+    int queueIndex = 0;
+
+    queue<requestEntry*> queuePool;
+    int queuePoolSize = 1000;
 
 public:
     // verb handlers
@@ -297,11 +319,18 @@ private:  // members
     PmemEngine * _enginePtr;
     PmemEngineConfig _engineConfig;
 
-    Index indexer; 
+    //Index indexer; 
+    long lastHitNum[12] = {0}; 
 
     long pbrbHitNum[12] = {0}; 
 
     long NvmReadNum[12] = {0}; 
+
+    long lastNvmReadNum[12] = {0}; 
+
+    float hitRatio[12] = {1.0}; 
+
+    int updateHitRatioT = 0;
 
     long writeCount[12]={0};
     long readCount[12]={0};
@@ -324,6 +353,10 @@ private:  // members
 
     uint64_t totalFindPositionns[12] = {0};
 
+    uint64_t totalCheckBitmap[12] = {0};
+
+    uint64_t totalIteratorPage[12] = {0};
+
     uint64_t totalHeaderns[12] = {0}; 
 
     uint64_t totalUpdateCachens[12] = {0};
@@ -338,9 +371,15 @@ private:  // members
 
     uint64_t totalReadPBRBns[12] = {0};
 
+    uint64_t allocatePayloadns[12] = {0};
+
     bool enablePBRB = true;
 
     bool isDonePBRBGC = true;
+
+    bool isDoneCache = true;
+
+    bool insertingKVNode = false;
 
     map<dto::Key, int> writeRecordMap;
 
@@ -352,7 +391,9 @@ private:  // members
 
     int isRunBenchMark = 0;
 
-    int count = 1;
+    int count = 1, sampleCounter = 1;
+
+    Payload storagePayload = Payload(Payload::DefaultAllocator());
 
     // manage transaction records as a coordinator
     TxnManager _txnMgr;
@@ -377,6 +418,8 @@ private:  // members
 
     // timer used to refresh the retention timestamp from the TSO
     PeriodicTimer _retentionUpdateTimer;
+
+    PeriodicTimer _dealRequestQueueTimer;
 
     std::shared_ptr<Persistence> _persistence;
 
