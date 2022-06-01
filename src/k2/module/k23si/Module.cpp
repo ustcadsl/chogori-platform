@@ -1299,6 +1299,15 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, VersionSet& ve
     _totalWI++;
 
     if (request.writeAsync) {
+        // TODO & FIXME: ONLY FOR DEBUG
+        String pkey = request.key.partitionKey;
+        pkey = pkey.substr(pkey.find("pkey"));
+        int index = -1;
+        sscanf(pkey.data(), "pkey%d", &index);
+        K2LOG_D(log::skvsvr, "pkey:{}, index: {}", pkey, index);
+        if (index % 30 != 0) {
+            return Statuses::S201_Created("WI created");
+        }
         auto futPersist = _persistence->append_cont(versions.WI->data)
             .then([this, request=std::move(request)] (auto&& status) {
                 K2LOG_D(log::skvsvr, "Write intent flush status: {}", status);
@@ -1396,7 +1405,7 @@ K23SIPartitionModule::handleWriteKeyPersist(dto::K23SIWriteKeyPersistRequest&& r
     if (it == writeInfo.end()) {
         // caes 1.1: write key persist request comes before write key request
         if (tr.finalizeAction == dto::EndAction::None) {
-            tr.keysNumber++;
+            // tr.keysNumber++;
             writeInfo.insert({request.writeKey, {request.request_id, dto::WriteKeyStatus::WriteKeyPersist}});
             return RPCResponse(dto::K23SIStatus::Created("created the write key info struct"), dto::K23SIWriteKeyPersistResponse());
         }

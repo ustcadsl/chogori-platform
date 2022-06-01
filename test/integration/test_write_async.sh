@@ -52,5 +52,5 @@ trap finish EXIT
 
 sleep 2
 
-./build/test/k23si/write_async_test --cpo_endpoint ${CPO} --k2_endpoints ${EPS} --enable_tx_checksum true --reactor-backend epoll --prometheus_port 63100 --memory=3G --concurrent_num=2 --txns_count=100 --keys_count=10 --single_partition=false --write_async=false  --count_latency=false
+./build/test/k23si/write_async_test --cpo_endpoint ${CPO} --k2_endpoints ${EPS} --enable_tx_checksum true --reactor-backend epoll --prometheus_port 63100 --memory=3G --concurrent_num=1 --txns_count=1000 --keys_count=30 --single_partition=false --write_async=true  --count_latency=false
 

@@ -182,6 +182,8 @@ Status TxnWIMetaManager::endTxn(dto::Timestamp txnId, dto::EndAction action) {
     if (it == _twims.end()) {
         return Statuses::S404_Not_Found(fmt::format("transaction ID {} not found in end {}", txnId, action));
     }
+    // TODO and FXIME: for debug only
+    // it->second.state = dto::TxnWIMetaState::InProgress;
     return _onAction(action == dto::EndAction::Commit ? Action::onCommit : Action::onAbort, it->second);
 }
 

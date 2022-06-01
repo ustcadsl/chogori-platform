@@ -271,6 +271,7 @@ seastar::future<EndResult> K2TxnHandle::end(bool shouldCommit) {
         _mtr,
         shouldCommit && !_failed ? dto::EndAction::Commit : dto::EndAction::Abort,
         std::move(_write_ranges),
+        std::move(_write_ids),
         _options.syncFinalize
     }; 
 

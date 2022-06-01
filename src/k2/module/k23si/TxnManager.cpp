@@ -378,9 +378,7 @@ TxnManager::endTxn(dto::K23SITxnEndRequest&& request) {
         return RPCResponse(dto::K23SIStatus::AbortRequestTooOld("request is outside retention window"), dto::K23SITxnEndResponse{});
     }
 
-    if (!rec.writeAsync) {
-        rec.writeRanges = std::move(request.writeRanges);
-    }
+    rec.writeRanges = std::move(request.writeRanges);
     rec.syncFinalize = request.syncFinalize;
     rec.timeToFinalize = request.timeToFinalize;
     if (!rec.finalizeInForceAborted) {
@@ -392,6 +390,31 @@ TxnManager::endTxn(dto::K23SITxnEndRequest&& request) {
 
     // to detect if all keys are persisted
     if (rec.finalizeAction == dto::EndAction::Commit && rec.writeAsync) {
+        auto& writeIds = request.writeIds;
+        for (auto& [cname, ids] : writeIds) {
+            rec.keysNumber += ids.size();
+            auto& infos = rec.writeInfos[cname];
+            for (auto& [key, id] : ids) {
+                // TODO & FIXME: ONLY FOR DEBUG
+                int index = -1;
+                String pkey = key.partitionKey;
+                pkey = pkey.substr(pkey.find("pkey"));
+                sscanf(pkey.data(), "pkey%d", &index);
+                K2LOG_D(log::skvsvr, "pkey:{}, index: {}", pkey, index);
+                if (index % 30 != 0) {
+                    rec.keysNumber--;
+                    continue;
+                }                
+                if (infos.find(key) != infos.end() && infos[key].request_id == id) {
+                    rec.persistedKeysNumber++;
+                    infos[key].status = dto::WriteKeyStatus::Persisted;
+                } else {
+                    infos[key].request_id = id;
+                    infos[key].status = dto::WriteKeyStatus::WriteKey;
+                }
+            }
+        }
+        K2LOG_D(log::skvsvr, "keysNumber={}, persistedKeysNumber={} for tr {}", rec.keysNumber, rec.persistedKeysNumber, rec);
         if (rec.keysNumber == rec.persistedKeysNumber) {
             rec.isAllKeysPersisted.set_value(dto::K23SIStatus::OK);
             K2LOG_D(log::skvsvr, "all keys persisted for tr {}", rec);

@@ -1,11 +1,11 @@
 #!/bin/bash
 # hugepage config
 # sudo hugeadm --create-group-mounts kvgroup
-# sudo hugeadm --pool-pages-min 2MB:45000
+sudo hugeadm --pool-pages-min 2MB:35000
 # increase mtu
 # will lead to failure to ssh knode1, but if not set, cannot establish the rdma channel
-# sudo ip link set ens4f1 mtu 9042	
-# sudo ip link set ens4f0 mtu 9042
+sudo ip link set ens4f1 mtu 9000	
+# sudo ip link set ens4f0 mtu 9000
 # other system config
 echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
 echo 0 | sudo tee /proc/sys/kernel/numa_balancing
@@ -17,4 +17,4 @@ do
 done
 echo 5 | sudo tee /proc/sys/vm/stat_interval
 # turn off swap
-swapoff -a
+# swapoff -a

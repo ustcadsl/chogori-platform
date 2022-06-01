@@ -415,6 +415,8 @@ struct K23SITxnEndRequest {
     EndAction action;
     // the ranges to which this transaction wrote. TRH will finalize WIs with each range when we commit/abort
     std::unordered_map<String, std::unordered_set<KeyRangeVersion>> writeRanges;
+    // the write keys' id 
+    std::unordered_map<String, std::unordered_map<dto::Key, uint64_t>> writeIds={};
     // flag to tell if the server should finalize synchronously.
     // this is useful in cases where the client knows that the data from the txn will be accessed a lot after
     // the commit, so it may choose to wait in order to get better performance.
@@ -423,8 +425,8 @@ struct K23SITxnEndRequest {
     // The interval from end to Finalize for a transaction
     Duration timeToFinalize{0};
 
-    K2_PAYLOAD_FIELDS(pvid, collectionName, key, mtr, action, writeRanges, syncFinalize, timeToFinalize);
-    K2_DEF_FMT(K23SITxnEndRequest, pvid, collectionName, key, mtr, action, writeRanges, syncFinalize, timeToFinalize);
+    K2_PAYLOAD_FIELDS(pvid, collectionName, key, mtr, action, writeRanges, writeIds, syncFinalize, timeToFinalize);
+    K2_DEF_FMT(K23SITxnEndRequest, pvid, collectionName, key, mtr, action, writeRanges, writeIds, syncFinalize, timeToFinalize);
 };
 
 struct K23SITxnEndResponse {

@@ -1,6 +1,6 @@
 #!/bin/bash
 # servers=(1 2 3 4 5 6 7 8)
-servers=(1)
+servers=(1 2 3 4)
 
 for num in ${servers[@]}; do
     unfinished=1

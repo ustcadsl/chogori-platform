@@ -294,40 +294,11 @@ public:
         _ongoing_ops++;
 
         if (writeAsync) {
-            std::unique_ptr<dto::K23SIWriteKeyRequest> writeKeyRequest = _makeWriteKeyRequest(*request);
-            if (writeKeyRequest == nullptr) {
-                K2LOG_E(log::skvclient, "Cannot make write key request!!!");
-                return seastar::make_ready_future<WriteResult>(WriteResult(dto::K23SIStatus::BadParameter, dto::K23SIWriteResponse{}));
+            if (_write_ids.count(request->collectionName) == 0) {
+                std::unordered_map<dto::Key, uint64_t> keyIdsMap;
+                _write_ids[request->collectionName] = keyIdsMap;
             }
-            return seastar::when_all(
-                _cpo_client->partitionRequest
-                    <dto::K23SIWriteRequest, dto::K23SIWriteResponse, dto::Verbs::K23SI_WRITE>
-                    (_options.deadline, *request),
-                _cpo_client->partitionRequest
-                    <dto::K23SIWriteKeyRequest, dto::K23SIWriteKeyResponse, dto::Verbs::K23SI_WRITE_KEY>
-                    (_options.deadline, *writeKeyRequest)
-            ).then([this, request=std::move(request)] (auto&& response) {
-                auto& [writeResp, writeKeyResp] = response;
-                auto [writeStatus, writeRes] = writeResp.get0();
-                auto [writeKeyStatus, _] = writeKeyResp.get0();
-
-                _ongoing_ops--;
-
-                _checkResponseStatus(writeKeyStatus);
-                if (!writeKeyStatus.is2xxOK()) {
-                    return seastar::make_ready_future<WriteResult>(WriteResult(std::move(writeKeyStatus), std::move(writeRes)));
-                }
-
-                _checkResponseStatus(writeStatus);
-                if (writeStatus.is2xxOK() && !_heartbeat_timer.isArmed()) {
-                    K2ASSERT(log::skvclient, _cpo_client->collections.find(_trh_collection) != _cpo_client->collections.end(), "collection not present after successful write");
-                    K2LOG_D(log::skvclient, "Starting hb, mtr={}", _mtr);
-                    _heartbeat_interval = _cpo_client->collections[_trh_collection]->collection.metadata.heartbeatDeadline / 2;
-                    _makeHeartbeatTimer();
-                    _heartbeat_timer.armPeriodic(_heartbeat_interval);
-                }
-                return seastar::make_ready_future<WriteResult>(WriteResult(std::move(writeStatus), std::move(writeRes)));
-            });
+            _write_ids[request->collectionName][request->key] = _client->write_ops - 1;
         }
 
         return _cpo_client->partitionRequest
@@ -410,37 +381,13 @@ public:
         }
 
         if (writeAsync) {
-            std::unique_ptr<dto::K23SIWriteKeyRequest> writeKeyRequest = _makeWriteKeyRequest(*request);
-            return seastar::when_all(
-                _cpo_client->partitionRequest
-                    <dto::K23SIWriteRequest, dto::K23SIWriteResponse, dto::Verbs::K23SI_WRITE>
-                    (_options.deadline, *request),
-                _cpo_client->partitionRequest
-                    <dto::K23SIWriteKeyRequest, dto::K23SIWriteKeyResponse, dto::Verbs::K23SI_WRITE_KEY>
-                    (_options.deadline, *writeKeyRequest)
-            ).then([this, request=std::move(request)] (auto&& response) {
-                auto& [writeResp, writeKeyResp] = response;
-                auto [writeStatus, writeRes] = writeResp.get0();
-                auto [writeKeyStatus, _] = writeKeyResp.get0();
-
-                _ongoing_ops--;
-
-                _checkResponseStatus(writeKeyStatus);
-                if (!writeKeyStatus.is2xxOK()) {
-                    return seastar::make_ready_future<PartialUpdateResult>(PartialUpdateResult(std::move(writeKeyStatus)));
-                }
-
-                _checkResponseStatus(writeStatus);
-                if (writeStatus.is2xxOK() && !_heartbeat_timer.isArmed()) {
-                    K2ASSERT(log::skvclient, _cpo_client->collections.find(_trh_collection) != _cpo_client->collections.end(), "collection not present after successful write");
-                    K2LOG_D(log::skvclient, "Starting hb, mtr={}", _mtr);
-                    _heartbeat_interval = _cpo_client->collections[_trh_collection]->collection.metadata.heartbeatDeadline / 2;
-                    _makeHeartbeatTimer();
-                    _heartbeat_timer.armPeriodic(_heartbeat_interval);
-                }
-                return seastar::make_ready_future<PartialUpdateResult>(PartialUpdateResult(std::move(writeStatus)));
-            });
+            if (_write_ids.count(request->collectionName) == 0) {
+                std::unordered_map<dto::Key, uint64_t> keyIdsMap;
+                _write_ids[request->collectionName] = keyIdsMap;
+            }
+            _write_ids[request->collectionName][request->key] = _client->write_ops - 1;
         }
+
 
         return _cpo_client->partitionRequest
             <dto::K23SIWriteRequest, dto::K23SIWriteResponse, dto::Verbs::K23SI_WRITE>
@@ -498,6 +445,9 @@ private:
 
     // affected write ranges per collection
     std::unordered_map<String, std::unordered_set<dto::KeyRangeVersion>> _write_ranges;
+
+    // write keys' id per collection
+    std::unordered_map<String, std::unordered_map<dto::Key, uint64_t>> _write_ids;
 
     // the trh key and home collection for this transaction
     std::optional<dto::Key> _trh_key;
