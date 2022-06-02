@@ -22,6 +22,9 @@ Copyright(c) 2020 Futurewei Cloud
 */
 
 #include "PmemLog.h"
+#include "PmemEngine.h"
+#include <fmt/format.h>
+#include <k2/common/Chrono.h>
 
 namespace k2 {
 
@@ -96,7 +99,7 @@ Status PmemLog::init(PmemEngineConfig &plog_meta){
     return PmemStatuses::S201_Created_Engine;
 }
 
-std::tuple<Status, PmemAddress> PmemLog::append(Payload &payload){
+std::tuple<Status, PmemAddress> PmemLog::append(Payload &payload, AccessOverhead * acco){
     PmemAddress pmemAddr;
     pmemAddr = _plog_meta.tail_offset;
     PmemSize appendSize = payload.getSize() + 8;
@@ -110,6 +113,8 @@ std::tuple<Status, PmemAddress> PmemLog::append(Payload &payload){
         Status status = PmemStatuses::S507_Insufficient_Storage_Over_Capcity;
         return std::tuple<Status, PmemAddress>(std::move(status), std::move(pmemAddr));
     }
+    // record the overhead of data serialization
+    auto start_serialization = k2::now_nsec_count();
     char * buffer_data = (char*)malloc(appendSize);
     uint64_t payload_data_size = payload.getSize();
     * (PmemSize *)(buffer_data) = payload_data_size;
@@ -117,7 +122,13 @@ std::tuple<Status, PmemAddress> PmemLog::append(Payload &payload){
     //promise not change the payload content
     payload.read(buffer_data + sizeof (PmemSize), payload_data_size);
     payload.seek(0);
+    if(acco != nullptr) acco->access_serialization_ns = k2::now_nsec_count() - start_serialization;
+
+    // record the overhead of access pmem
+    auto start_access_pmem = k2::now_nsec_count();
     Status status = _append(buffer_data,appendSize);
+    if (acco != nullptr) acco->access_pmem_ns = k2::now_nsec_count() - start_access_pmem;
+
     free(buffer_data);
     return std::tuple<Status, PmemAddress>(std::move(status), std::move(pmemAddr));
 }
@@ -128,7 +139,6 @@ Status PmemLog::_append(char *srcdata, size_t len){
     size_t remaining_space = _plog_meta.chunk_count * _plog_meta.chunk_size - _plog_meta.tail_offset;
     size_t first_write_size = remaining_space <= len? remaining_space : len;
     char * addr = _chunk_list[_active_chunk_id].pmem_addr + _plog_meta.tail_offset%_plog_meta.chunk_size;
-    k2::OperationLatencyReporter reporter(_writePmemLatency); // for reporting metrics
     if (_is_pmem){
         _copyToPmem(addr, srcdata, first_write_size);
     }else{
@@ -137,7 +147,7 @@ Status PmemLog::_append(char *srcdata, size_t len){
     // there is still data need to write to the next chunks
     if (len > first_write_size){
         size_t need_write_size = len - first_write_size;
-        size_t need_new_chunk = need_write_size % _plog_meta.chunk_size != 0? 
+        size_t need_new_chunk = need_write_size % _plog_meta.chunk_size != 0?
                                  need_write_size/_plog_meta.chunk_size+1:
                                  need_write_size/_plog_meta.chunk_size;
         K2LOG_D(log::pmem_storage, "Need write size:{} ,need new chunk:{}",need_write_size,need_new_chunk);
@@ -165,29 +175,36 @@ Status PmemLog::_append(char *srcdata, size_t len){
         }
     }
     _plog_meta.tail_offset += len;
-    reporter.report();
     return PmemStatuses::S200_OK_Append;
 }
 
-std::tuple<Status, Payload> PmemLog::read(const PmemAddress &readAddr){
+std::tuple<Status, Payload> PmemLog::read(const PmemAddress &readAddr, AccessOverhead * acco){
     Payload payload(Payload::DefaultAllocator());
     // checkout the effectiveness of start_offset
     if( readAddr > _plog_meta.tail_offset){
         Status status = PmemStatuses::S403_Forbidden_Invalid_Offset;
         return std::tuple<Status,Payload>(std::move(status), std::move(payload));
     }
+
+    // record the ovrehead of access pmem
+    auto start_access_pmem = k2::now_nsec_count();
     PmemSize readSize = *(PmemSize *)_read(readAddr, sizeof(PmemSize));
+    if(acco != nullptr) acco->access_pmem_ns = k2::now_nsec_count() - start_access_pmem;
     // checkout the effectiveness of read size
     if( readAddr + readSize > _plog_meta.tail_offset){
         Status status = PmemStatuses::S403_Forbidden_Invalid_Size;
         return std::tuple<Status,Payload>(std::move(status), std::move(payload));
     }
+    // record the overhead of data serialization
+    auto start_serialization = k2::now_nsec_count();
     char * read_data = _read(readAddr + sizeof(PmemSize), readSize);
     payload.reserve(readSize);
     payload.seek(0);
     payload.write(read_data, readSize);
     payload.seek(0);
     free(read_data);
+    if( acco != nullptr ) acco->access_serialization_ns = k2::now_nsec_count() - start_serialization;
+
     Status status = PmemStatuses::S200_OK_Found;
     return std::tuple<Status, Payload>(std::move(status), std::move(payload));
 }
@@ -195,7 +212,6 @@ std::tuple<Status, Payload> PmemLog::read(const PmemAddress &readAddr){
  char* PmemLog::_read(uint64_t offset, uint64_t len){
     K2LOG_D(log::pmem_storage, "Read data: offset =>{},len=>{}",offset,len);
     char * buffer_data = (char *)malloc(len);
-    k2::OperationLatencyReporter reporter(_readPmemLatency); // for reporting metrics
     // calculate the size need read in the first chunk
     size_t start_chunk_id = offset/_plog_meta.chunk_size;
     size_t start_chunk_offset = offset % _plog_meta.chunk_size;
@@ -221,7 +237,6 @@ std::tuple<Status, Payload> PmemLog::read(const PmemAddress &readAddr){
         }
 
     }
-    reporter.report();
     return buffer_data;
 }
 

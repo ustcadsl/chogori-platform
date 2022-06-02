@@ -24,18 +24,17 @@ Copyright(c) 2020 Futurewei Cloud
 #pragma once
 #include <k2/common/Common.h>
 #include <k2/transport/Payload.h>
-#include <k2/transport/Status.h>
 #include <k2/transport/PayloadSerialization.h>
+#include <k2/transport/Status.h>
 #include <tuple>
-namespace k2
-{
-    
+namespace k2 {
+
 namespace log {
-inline thread_local k2::logging::Logger pmem_storage("k2::pmem_storage");
+  inline thread_local k2::logging::Logger pmem_storage("k2::pmem_storage");
 }
 
 // define the plog address
-// 
+//
 using PmemAddress = uint64_t;
 using PmemSize = uint64_t;
 
@@ -51,7 +50,7 @@ using PmemSize = uint64_t;
 // S403_Forbidden_Invalid_Size             Invalid size in pmem engine
 
 // Append status
-// S200_OK_Append                          Append data successfully           
+// S200_OK_Append                          Append data successfully
 // S507_Insufficient_Storage_Over_Capcity  Data size is over the engine capcity
 // S409_Conflict_Append_Sealed_engine      Append data to a sealed engine
 
@@ -67,142 +66,136 @@ using PmemSize = uint64_t;
 // S500_Internal_Server_Error_Map_Fail     Fail to map a file to userspace
 
 struct PmemStatuses {
-    // 200 OK 
-    // append data in pmem engine sucessfully
-    static const inline Status S200_OK_Append{.code=200, .message="Append data to pemem engine successfully!"};
+  // 200 OK
+  // append data in pmem engine sucessfully
+  static const inline Status S200_OK_Append { .code = 200, .message = "Append data to pemem engine successfully!" };
 
-    // 200 OK 
-    // find the required data in pmem engine
-    static const inline Status S200_OK_Found{.code=200, .message="Found the required data!"};
+  // 200 OK
+  // find the required data in pmem engine
+  static const inline Status S200_OK_Found { .code = 200, .message = "Found the required data!" };
 
-    // 200 OK
-    // map file succeccfully
-    static const inline Status S200_OK_Map{.code=200, .message="Map file successfully!"};
+  // 200 OK
+  // map file succeccfully
+  static const inline Status S200_OK_Map { .code = 200, .message = "Map file successfully!" };
 
-    // 201 OK
-    // create pmem engine successfully
-    static const inline Status S201_Created_Engine{.code=201, .message="Created pmem engine successfully!"};
+  // 201 OK
+  // create pmem engine successfully
+  static const inline Status S201_Created_Engine { .code = 201, .message = "Created pmem engine successfully!" };
 
-    // 201 OK
-    // create file successfully
-    static const inline Status S201_Created_File{.code=201, .message="Created file successfully!"};
+  // 201 OK
+  // create file successfully
+  static const inline Status S201_Created_File { .code = 201, .message = "Created file successfully!" };
 
-    // 200 OK the request is addressed rightly
-    // the plog is sealed successfylly
-    static const inline Status S200_OK_Sealed{.code=200, .message="Seal the target plog successfully!"};
+  // 200 OK the request is addressed rightly
+  // the plog is sealed successfylly
+  static const inline Status S200_OK_Sealed { .code = 200, .message = "Seal the target plog successfully!" };
 
-    // 201 OK the request is addressed rightly
-    // the plog is already sealed
-    static const inline Status S200_OK_AlSealed{.code=200, .message="The target plog is already sealed!"};
+  // 201 OK the request is addressed rightly
+  // the plog is already sealed
+  static const inline Status S200_OK_AlSealed { .code = 200, .message = "The target plog is already sealed!" };
 
-    // 403 Forbidden
-    // the offset is invalid in the existing Pmem
-    static const inline Status S403_Forbidden_Invalid_Offset{.code=403, .message="Invalid offset in pmem!"};
+  // 403 Forbidden
+  // the offset is invalid in the existing Pmem
+  static const inline Status S403_Forbidden_Invalid_Offset { .code = 403, .message = "Invalid offset in pmem!" };
 
-    // 403 Forbidden
-    // the size is invalid in the existing Pmem
-    static const inline Status S403_Forbidden_Invalid_Size{.code=403, .message="Invalid size in pmem!"};
+  // 403 Forbidden
+  // the size is invalid in the existing Pmem
+  static const inline Status S403_Forbidden_Invalid_Size { .code = 403, .message = "Invalid size in pmem!" };
 
-    // 409 Conflict
-    // the file is already existed, so there is a conflict when creating file
-    static const inline Status S409_Conflict_File_Existed{.code=409, .message="The file is already existed before existing!"}; 
+  // 409 Conflict
+  // the file is already existed, so there is a conflict when creating file
+  static const inline Status S409_Conflict_File_Existed { .code = 409, .message = "The file is already existed before existing!" };
 
-    // 409 Conflict
-    // the engine is already sealed, so it cannot serve append request
-    static const inline Status S409_Conflict_Append_Sealed_engine{.code=409, .message="Try to append data to sealed engine!"}; 
+  // 409 Conflict
+  // the engine is already sealed, so it cannot serve append request
+  static const inline Status S409_Conflict_Append_Sealed_engine { .code = 409, .message = "Try to append data to sealed engine!" };
 
-    // 500 internal server error
-    // fail to create file
-    static const inline Status S500_Internal_Server_Error_Create_Fail{.code=500, .message="Create file failed!"};
+  // 500 internal server error
+  // fail to create file
+  static const inline Status S500_Internal_Server_Error_Create_Fail { .code = 500, .message = "Create file failed!" };
 
-    // 507 insufficient storage
-    // no enough space for pemem engine to create file
-    static const inline Status S507_Insufficient_Storage{.code=507, .message="Insufficien space for pmem engine!"};
+  // 507 insufficient storage
+  // no enough space for pemem engine to create file
+  static const inline Status S507_Insufficient_Storage { .code = 507, .message = "Insufficien space for pmem engine!" };
 
-    // 500 internal server error
-    // fail to map a file
-    static const inline Status S500_Internal_Server_Error_Map_Fail{.code=500, .message="Map a file failed!"};
+  // 500 internal server error
+  // fail to map a file
+  static const inline Status S500_Internal_Server_Error_Map_Fail { .code = 500, .message = "Map a file failed!" };
 
+  // 507 insufficient storage
+  // the internal data size is over the capacity
+  static const inline Status S507_Insufficient_Storage_Over_Capcity { .code = 507, .message = "Over the preset pmem engine capacity!" };
 
-
-    // 507 insufficient storage
-    // the internal data size is over the capacity
-    static const inline Status S507_Insufficient_Storage_Over_Capcity{.code=507, .message="Over the preset pmem engine capacity!"};
-
-    // 403 forbidden
-    // the configuration is invalid
-    static const inline Status S403_Forbidden_Invalid_Config{.code=403, .message="Invalid pmem configuration!"};
-
-
-
+  // 403 forbidden
+  // the configuration is invalid
+  static const inline Status S403_Forbidden_Invalid_Config { .code = 403, .message = "Invalid pmem configuration!" };
 };
+
+// overhead of accessing differnet part in pmemlog
+struct AccessOverhead {
+  uint64_t access_pmem_ns = 0;
+  uint64_t access_serialization_ns = 0;
+};
+
 //　plain old data format, satisfy the assignment with pmemcpy
 // pmem storage engine config
-struct PmemEngineConfig{
+struct PmemEngineConfig {
 
-    // upper limit of pmem engine, default 100GB
-    uint64_t engine_capacity = 100ULL << 30;
+  // upper limit of pmem engine, default 100GB
+  uint64_t engine_capacity = 100ULL << 30;
 
-    // current offset of the plog, this value is persisted 
-    // when the plog is sealed or close
-    uint64_t tail_offset = 0;
+  // current offset of the plog, this value is persisted
+  // when the plog is sealed or close
+  uint64_t tail_offset = 0;
 
-    // control chunk size, default 80MB
-    uint64_t chunk_size = 80ULL << 20;
+  // control chunk size, default 80MB
+  uint64_t chunk_size = 80ULL << 20;
 
-    // number of current chunks
-    uint64_t chunk_count = 0;
+  // number of current chunks
+  uint64_t chunk_count = 0;
 
-    // engine_path define the path of stored files 
-    char engine_path[128] = "/mnt/pmem0/pmem-chogori/";
+  // engine_path define the path of stored files
+  char engine_path[128] = "/mnt/pmem0/pmem-chogori/";
 
-    // plogId is used to encode the chunk name
-    // for example: if the plogId is userDataPlog
-    // so the name of first chunk is userDataPlog_chunk0.plog
-    //           the second chunk is userDataPlog_chunk1.plog
-    char plog_id[128] = "userDataPlog";
+  // plogId is used to encode the chunk name
+  // for example: if the plogId is userDataPlog
+  // so the name of first chunk is userDataPlog_chunk0.plog
+  //           the second chunk is userDataPlog_chunk1.plog
+  char plog_id[128] = "userDataPlog";
 
-    // is_sealed: true means sealed, false means activated 
-    bool is_sealed = false;
+  // is_sealed: true means sealed, false means activated
+  bool is_sealed = false;
 };
-
 
 //
 //  K2 pmem storage engine interface
 //
-class PmemEngine{
-    public:
+class PmemEngine {
+  public:
+  // open function is used to open an existing plog or create a plog
+  // the parameter path only refers to the directory of plogs
+  // the parameter plogId refers to the name of the plog
+  static Status open(PmemEngineConfig&, PmemEngine**);
 
-    // open function is used to open an existing plog or create a plog
-    // the parameter path only refers to the directory of plogs
-    // the parameter plogId refers to the name of the plog 
-    static Status open(PmemEngineConfig& ,PmemEngine **);
+  PmemEngine() { }
 
-    PmemEngine(){}
+  PmemEngine(const PmemEngine&) = delete;
 
-    PmemEngine(const PmemEngine &) = delete;
+  PmemEngine& operator=(const PmemEngine&) = delete;
 
-    PmemEngine &operator=(const PmemEngine &) = delete;
+  virtual ~PmemEngine() { }
 
-    virtual ~PmemEngine(){}    
+  virtual Status init(PmemEngineConfig& plog_meta) = 0;
 
-    virtual Status init(PmemEngineConfig &plog_meta) = 0;
+  virtual std::tuple<Status, PmemAddress> append(Payload&, AccessOverhead *acco = nullptr) = 0;
 
-    virtual std::tuple<Status, PmemAddress> append(Payload & ) = 0;
+  virtual std::tuple<Status, Payload> read(const PmemAddress&, AccessOverhead *acco = nullptr) = 0;
 
-    virtual std::tuple<Status, Payload> read(const PmemAddress &) = 0;
+  virtual Status seal() = 0;
 
-    virtual Status seal() = 0;
+  virtual uint64_t getFreeSpace() = 0;
 
-    virtual uint64_t getFreeSpace() = 0;
-
-    virtual uint64_t getUsedSpace() = 0;
-
-    virtual seastar::metrics::histogram & getPmemAppendLantency() = 0;
-
-    virtual seastar::metrics::histogram & getPmemReadLantency() = 0;
-
-
+  virtual uint64_t getUsedSpace() = 0;
 };
 
-}// ns k2
+} // ns k2

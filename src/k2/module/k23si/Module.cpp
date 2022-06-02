@@ -361,16 +361,8 @@ void K23SIPartitionModule::_registerMetrics() {
         sm::make_counter("total_committed_payload", _totalCommittedPayload, sm::description("Total size of committed payloads"), labels),
         sm::make_histogram("read_latency", [this]{ return _readLatency.getHistogram();},
                 sm::description("Latency of Read Operations"), labels),
-        sm::make_histogram("read_PmemLog_latency", [this]{ return _readPmemLogLatency.getHistogram();},
-                sm::description("Latency of Read PmemLog Operations"), labels),
-        sm::make_histogram("read_Pmem_latency", [this]{ return _enginePtr->getPmemReadLantency();},
-                sm::description("Latency of Read Persisent Memory Operations"), labels),
         sm::make_histogram("write_latency", [this]{ return _writeLatency.getHistogram();},
                 sm::description("Latency of Write Operations"), labels),
-        sm::make_histogram("write_PmemLog_latency", [this]{ return _writePmemLogLatency.getHistogram();},
-                sm::description("Latency of Write PmemLog Operations"), labels),        
-        sm::make_histogram("write_Pmem_latency", [this]{ return _enginePtr->getPmemAppendLantency();},
-                sm::description("Latency of Write Persisent Memory Operations"), labels),        
         sm::make_histogram("query_page_latency", [this]{ return _queryPageLatency.getHistogram();},
                 sm::description("Latency of Query Page Operations"), labels),
         sm::make_histogram("push_latency", [this]{ return _pushLatency.getHistogram();},
@@ -511,7 +503,7 @@ seastar::future<> K23SIPartitionModule::gracefulStop() {
 
         #ifdef OUTPUT_READ_INFO
             for(int i=0; i<12; i++){
-                K2LOG_I(log::skvsvr, "-----i:{}, totalUpdateCache:{} us, totalSerachTree:{} us, totalUpdateTree:{} us, totalIndex:{} us, totalGetRecordAddr:{} us, allocatePayloadns:{}, totalReadCopyFeild:{} us, totalGenRecord:{} us, totalFindPosition:{} us, totalCheckBitmap:{} us, totalIteratorPage:{} us, totalHeader:{} us, totalCopyFeild:{} us, totalUpdateKVNode:{} us, totalReadPBRB:{} us, totalReadNVM:{} us, totalRead:{} us, pbrbHitNum:{}, NvmReadNum:{}", i, totalUpdateCachens[i]/1000, totalSerachTreens[i]/1000, totalUpdateTreens[i]/1000,  totalIndexns[i]/1000, totalGetAddrns[i]/1000, allocatePayloadns[i]/1000, totalReadCopyFeildns[i]/1000, totalGenRecordns[i]/1000, totalFindPositionns[i]/1000, totalCheckBitmap[i]/1000, totalIteratorPage[i]/1000, totalHeaderns[i]/1000, totalCopyFeildns[i]/1000, totalUpdateKVNodens[i]/1000, totalReadPBRBns[i]/1000, totalReadNVMns[i]/1000, totalReadns[i]/1000, pbrbHitNum[i], NvmReadNum[i]);
+                K2LOG_I(log::skvsvr, "-----i:{}, totalUpdateCache:{} us, totalSerachTree:{} us, totalUpdateTree:{} us, totalIndex:{} us, totalGetRecordAddr:{} us, allocatePayloadns:{}, totalReadCopyFeild:{} us, totalGenRecord:{} us, totalFindPosition:{} us, totalCheckBitmap:{} us, totalIteratorPage:{} us, totalHeader:{} us, totalCopyFeild:{} us, totalUpdateKVNode:{} us, totalReadPBRB:{} us, totalReadPlog:{} us,totalReadPlogNVM:{} us, totalReadPlogSerde:{} us, totalRead:{} us, pbrbHitNum:{}, NvmReadNum:{}", i, totalUpdateCachens[i]/1000, totalSerachTreens[i]/1000, totalUpdateTreens[i]/1000,  totalIndexns[i]/1000, totalGetAddrns[i]/1000, allocatePayloadns[i]/1000, totalReadCopyFeildns[i]/1000, totalGenRecordns[i]/1000, totalFindPositionns[i]/1000, totalCheckBitmap[i]/1000, totalIteratorPage[i]/1000, totalHeaderns[i]/1000, totalCopyFeildns[i]/1000, totalUpdateKVNodens[i]/1000, totalReadPBRBns[i]/1000, totalReadPlogns[i]/1000,totalReadPlogNVMns[i]/1000, totalReadPlogSerdens[i]/1000, totalReadns[i]/1000, pbrbHitNum[i], NvmReadNum[i]);
             }
             //K2LOG_I(log::skvsvr, "pbrbHitNum:{}, NvmReadNum:{}", pbrbHitNum, NvmReadNum);
             K2LOG_I(log::skvsvr, "-----read count, item:{}, Warehouse: {}, Stock:{}, District:{}, Customer:{}, History:{}, OrderLine:{}, NewOrder:{}, Order:{}, Other:{}", 
@@ -1077,18 +1069,25 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             // case 1: cold version (not in kvnode)
             // return directly.
             K2LOG_I(log::skvsvr, "Case 1: Cold Version not in KVNode");
-            auto _readNVMtart = k2::now_nsec_count();
-            k2::OperationLatencyReporter reporter(_readPmemLogLatency);
+
+            // start to monitor the inside overhead of plog
+            AccessOverhead acco;
+            auto _readPlogStart = k2::now_nsec_count();
             // read version from pmem engine
-            auto read_pmem_status = _enginePtr->read(rec->valuePmemPtr);
+            auto read_pmem_status = _enginePtr->read(rec->valuePmemPtr,&acco);
             if (!std::get<0>(read_pmem_status).is2xxOK()){
                 K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
                 _partition, std::get<0>(read_pmem_status).message);
             }
+            // data serialization outside the plog
+            auto _dataSerdeStart = k2::now_nsec_count();
             std::get<1>(read_pmem_status).read(rec->value);
-            reporter.report();
-            auto _readNVMEnd = k2::now_nsec_count();
-            totalReadNVMns[indexFlag] += _readNVMEnd - _readNVMtart;
+            auto _readPlogEnd = k2::now_nsec_count();
+            acco.access_serialization_ns += _readPlogEnd - _dataSerdeStart;
+            totalReadPlogns[indexFlag] += _readPlogEnd - _readPlogStart;
+            totalReadPlogNVMns[indexFlag] += acco.access_pmem_ns;
+            totalReadPlogSerdens[indexFlag] += acco.access_serialization_ns;
+
             result = rec;
             NvmReadNum[indexFlag]++;
         }
@@ -1098,20 +1097,26 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             K2ASSERT(log::skvsvr, schemaIt != _schemas.end(), "Found Schema: {}", schemaIt->first);
             uint32_t sVer;
             if (!nodePtr->is_inmem(order)){
-                auto _readNVMtart = k2::now_nsec_count();
-                k2::OperationLatencyReporter reporter(_readPmemLogLatency);
+                AccessOverhead acco;
+                auto _readPlogStart = k2::now_nsec_count();
                 // read version from pmem engine
-                auto read_pmem_status = _enginePtr->read(rec->valuePmemPtr);
+                auto read_pmem_status = _enginePtr->read(rec->valuePmemPtr, &acco);
                 if (!std::get<0>(read_pmem_status).is2xxOK()){
                     K2LOG_E(log::skvsvr,"-------Partition {}  read pmem error :{}",
                     _partition, std::get<0>(read_pmem_status).message);
                 }
+                auto _dataSerdeStart = k2::now_nsec_count();
                 std::get<1>(read_pmem_status).read(rec->value);
-                reporter.report();
                 sVer = rec->value.schemaVersion;
                 //K2LOG_I(log::skvsvr,"Read datarecord  from pmemLog, schemaVersion:{}, excludedFields:{}",rec->value.schemaVersion, rec->value.excludedFields);
-                auto _readNVMEnd = k2::now_nsec_count();
-                totalReadNVMns[indexFlag] += _readNVMEnd - _readNVMtart;
+                auto _readPlogEnd = k2::now_nsec_count();
+
+                acco.access_serialization_ns += _readPlogEnd - _dataSerdeStart;
+                totalReadPlogns[indexFlag] += _readPlogEnd - _readPlogStart;
+                totalReadPlogNVMns[indexFlag] += acco.access_pmem_ns;
+                totalReadPlogSerdens[indexFlag] += acco.access_serialization_ns;
+
+
             }
             // hot row
             else {
@@ -2036,7 +2041,6 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, KeyValueNode& 
     K2LOG_D(log::skvsvr, "Write Request creating WI: {}", request);
     // we need to copy this data into a new memory block so that we don't hold onto and fragment the transport memory
     
-    k2::OperationLatencyReporter reporter(_writePmemLogLatency);
     Payload payload(Payload::DefaultAllocator());
     payload.write(request.value);
     payload.seek(0);
@@ -2044,7 +2048,6 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, KeyValueNode& 
     if( !std::get<0>(pmem_status).is2xxOK()){
         return std::get<0>(pmem_status);
     }
-    reporter.report();
     PmemAddress pmemAddr =  std::get<1>(pmem_status);
     //K2LOG_I(log::skvsvr,"Write datarecord to pmemLog, pmemAddr: {}, request.value:{}",pmemAddr, request.value);
 

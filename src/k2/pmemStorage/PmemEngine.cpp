@@ -25,7 +25,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include "PmemLog.h"
 
 namespace k2 {
-    
+
 Status PmemEngine::open(PmemEngineConfig &plog_meta, PmemEngine ** engine_ptr){
     if ( plog_meta.chunk_size > plog_meta.engine_capacity
         || plog_meta.is_sealed == true ){

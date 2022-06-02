@@ -314,7 +314,7 @@ private:  // members
     // Duplicates are not allowed
     IndexerT _indexer;
 
-    PBRB *pbrb; 
+    PBRB *pbrb;
     
     PmemEngine * _enginePtr;
     PmemEngineConfig _engineConfig;
@@ -367,7 +367,11 @@ private:  // members
 
     uint64_t totalUpdateKVNodens[12] = {0}; 
 
-    uint64_t totalReadNVMns[12] = {0}; 
+    uint64_t totalReadPlogns[12] = {0}; 
+
+    uint64_t totalReadPlogNVMns [12] = {0};
+
+    uint64_t totalReadPlogSerdens [12] = {0};
 
     uint64_t totalReadPBRBns[12] = {0};
 
@@ -435,8 +439,6 @@ private:  // members
 
     k2::ExponentialHistogram _readLatency;
     k2::ExponentialHistogram _writeLatency;
-    k2::ExponentialHistogram _readPmemLogLatency;
-    k2::ExponentialHistogram _writePmemLogLatency;
     k2::ExponentialHistogram _queryPageLatency;
     k2::ExponentialHistogram _pushLatency;
     k2::ExponentialHistogram _queryPageScans;

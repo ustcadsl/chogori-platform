@@ -37,8 +37,7 @@ namespace k2{
 
 
 
-class PmemLog : public PmemEngine
-{
+class PmemLog : public PmemEngine {
 public:
     PmemLog(){}
 
@@ -58,9 +57,9 @@ public:
 
     Status init(PmemEngineConfig &plog_meta) override;
 
-    std::tuple<Status, PmemAddress>  append(Payload &payload) override;
+    std::tuple<Status, PmemAddress>  append(Payload &payload, AccessOverhead *acco) override;
 
-    std::tuple<Status, Payload> read(const PmemAddress &readAddr) override;
+    std::tuple<Status, Payload> read(const PmemAddress &readAddr, AccessOverhead *acco) override;
 
     Status seal() override;
 
@@ -68,13 +67,6 @@ public:
 
     uint64_t getUsedSpace() override;
 
-    seastar::metrics::histogram & getPmemAppendLantency() override{
-         return _readPmemLatency.getHistogram();
-    }
-
-    seastar::metrics::histogram & getPmemReadLantency() override{
-        return _writePmemLatency.getHistogram();
-    }
 
 
 private:
@@ -183,9 +175,7 @@ private:
     // usually user defined
     PmemEngineConfig _plog_meta;
 
-    k2::ExponentialHistogram _readPmemLatency;
 
-    k2::ExponentialHistogram _writePmemLatency;
 };
 
 }// ns k2
