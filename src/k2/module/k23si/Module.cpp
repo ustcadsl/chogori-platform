@@ -189,7 +189,8 @@ K23SIPartitionModule::K23SIPartitionModule(dto::CollectionMetadata cmeta, dto::P
     _cmeta(std::move(cmeta)),
     _partition(std::move(partition), _cmeta.hashScheme) {
     K2LOG_I(log::skvsvr, "---------Partition: {}", _partition);//////
-    pbrb = new PBRB(3000, &_retentionTimestamp, &_indexer);//////8192 //32768
+    K2LOG_I(log::skvsvr, "Allocate new PBRB instance with _maxPageSearchingNum: {}", _maxPageSearchingNum())
+    pbrb = new PBRB(20000, &_retentionTimestamp, &_indexer, _maxPageSearchingNum()); //////8192 //32768
 #ifdef OUTPUT_ACCESS_PATTERN  
     ofile.open("RWresults.txt");
 #endif
@@ -418,6 +419,7 @@ seastar::future<> K23SIPartitionModule::gracefulStop() {
         .then([this] {
             _unregisterVerbs();
             pbrb->fcrpOutput();
+            pbrb->AccessOutput();
             K2LOG_I(log::skvsvr, "stopped");
         });
 }
@@ -869,6 +871,9 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 // if (pagePtr != nullptr)
                 //     K2LOG_I(log::skvsvr, "find position in: (Page: {}, with max count:{}; Offset: {}) ", static_cast<void *>(pagePtr), pbrb->_schemaMap[SMapIndex].maxRowCnt, rowOffset);
                 clock_t  _findPositionEnd = clock(); //////
+
+                pbrb->AccessStructAppend(SName, pagePtr, rowOffset, 1);
+
                 double Positionms = (double)(_findPositionEnd - _findPositionStart)/CLOCKS_PER_SEC*1000; //////
                 // PBRB::cacheRowPosMetrix &fcrp = pbrb->fcrp;
                 // auto accId = fcrp.accessId - 1;
@@ -945,6 +950,9 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 //clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&_readPBRBtartNS);
                 clock_t _readPBRBtart = clock();
                 void *hotAddr = static_cast<void *>(rec);
+                // auto retPair = pbrb->findRowByAddr(hotAddr);
+                // pbrb->AccessStructAppend(SName, retPair.first, retPair.second, 0);
+                pbrb->AccessStructAppend(SName, pbrb->getPageAddr(hotAddr), 0, 0);
                 #ifdef PAYLOAD_ROW
                     dto::SKVRecord *sRec = pbrb->generateSKVRecordByRow(SMapIndex, hotAddr, request.collectionName, schemaVer->second, true, totalReadCopyFeildms[indexFlag]);
                     clock_t _genRecordStart = clock();
@@ -958,7 +966,7 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                     dto::SKVRecord *sRec = pbrb->generateSKVRecordByRow(SMapIndex, hotAddr, request.collectionName, schemaVer->second, false, totalReadCopyFeildms[indexFlag]);
                     clock_t _genRecordStart = clock();
                     result = pbrb->generateDataRecord(sRec, hotAddr);
-                    clock_t  _genRecordEnd = clock(); //////
+                    clock_t _genRecordEnd = clock(); //////
                     totalGenRecordms[indexFlag] += (double)(_genRecordEnd-_genRecordStart)/CLOCKS_PER_SEC*1000; //////
                 #endif
 

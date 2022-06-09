@@ -31,6 +31,7 @@ dto::SKVRecord *PBRB::generateSKVRecordByRow(uint32_t schemaId, void *rAddr, con
     
     if(!isPayloadRow){//////
         // Copy Fields.
+        // prefetcht2Row(rAddr, smd.rowSize);
         assert(smd.schema->fields.size() == smd.fieldsInfo.size() && smd.fieldsInfo.size() > 0);
         //K2LOG_D(log::pbrb, "field(s) count: {}", smd.schema->fields.size());
         for (uint32_t idx = 0; idx < smd.schema->fields.size(); idx++) {

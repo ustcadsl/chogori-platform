@@ -159,6 +159,13 @@ public:
     uint64_t abort_too_old{0};
     uint64_t heartbeats{0};
 
+    struct statusBySchema {
+        uint64_t read = 0;
+        uint64_t write = 0;
+        uint64_t partialUpdate = 0;
+    };
+    std::map<String, statusBySchema> statBySchema;
+
     CPOClient cpo_client;
     // collection name -> (schema name -> (schema version -> schemaPtr))
     std::unordered_map<String, std::unordered_map<String, std::unordered_map<uint32_t, std::shared_ptr<dto::Schema>>>> schemas;
@@ -246,6 +253,15 @@ public:
 
         std::unique_ptr<dto::K23SIReadRequest> request = _makeReadRequest(record);
 
+        K23SIClient::statusBySchema statusSchema;
+        String sName = record.schema->name;
+        if (_client->statBySchema.find(sName) == _client->statBySchema.end()) {
+            _client->statBySchema.insert(std::pair<String, K23SIClient::statusBySchema>{sName, statusSchema});
+            _client->statBySchema[sName].read++;
+        }
+        else
+            _client->statBySchema[sName].read++;
+
         _client->read_ops++;
         _ongoing_ops++;
 
@@ -286,6 +302,15 @@ public:
             record.__writeFields(skv_record);
             request = _makeWriteRequest(skv_record, erase, precondition);
         }
+
+        K23SIClient::statusBySchema statusSchema;
+        String sName = record.schema->name;
+        if (_client->statBySchema.find(sName) == _client->statBySchema.end()) {
+            _client->statBySchema.insert(std::pair<String, K23SIClient::statusBySchema>{sName, statusSchema});
+            _client->statBySchema[sName].write++;
+        }
+        else
+            _client->statBySchema[sName].write++;
 
         _client->write_ops++;
         _ongoing_ops++;
@@ -344,6 +369,16 @@ public:
         if (_failed) {
             return seastar::make_ready_future<PartialUpdateResult>(PartialUpdateResult(_failed_status));
         }
+
+        K23SIClient::statusBySchema statusSchema;
+        String sName = record.schema->name;
+        if (_client->statBySchema.find(sName) == _client->statBySchema.end()) {
+            _client->statBySchema.insert(std::pair<String, K23SIClient::statusBySchema>{sName, statusSchema});
+            _client->statBySchema[sName].partialUpdate++;
+        }
+        else
+            _client->statBySchema[sName].partialUpdate++;
+    
         _client->write_ops++;
         _ongoing_ops++;
 

@@ -379,6 +379,11 @@ private:  // members
     k2::ExponentialHistogram _pushLatency;
     k2::ExponentialHistogram _queryPageScans;
     k2::ExponentialHistogram _queryPageReturns;
+
+    // PBRB ConfigVar
+
+    ConfigVar<uint32_t> _maxPageSearchingNum{"pbrb_max_searching_num"};// PBRB max page searching num
+
 };
 
 } // ns k2

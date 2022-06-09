@@ -226,11 +226,14 @@ class PBRB
 {
 
 private:
+
     uint32_t _maxPageNumber;
     uint32_t _pageSize = pageSize;
     uint32_t _pageHeaderSize = 64;
     uint32_t _rowHeaderSize = 4 + 16 + 8 + 1 + 1 + 8;
 
+    uint32_t _maxPageSearchingNum;
+    std::string _fcrpOutputFileName;
     //A list to store allocated free pages
     std::list<BufferPage *> _freePageList;
 
@@ -247,6 +250,10 @@ private:
 
 public:
 
+    struct FCRPSlowCaseStatus {
+        bool isFound = true;
+        int searchPageNum = 0;
+    };
     struct cacheRowPosMetrix{
         int size = 0;
         //
@@ -261,8 +268,10 @@ public:
         std::vector<int> pageSize1;
         std::vector<int> rowSize1;
         std::vector<int> moduleNs;
+        std::vector<int> isFound;
+        std::vector<int> searchPageNum;
 
-        void Insert(int id, int a, int b, int t, String s, int p, int n, int pn, int rn)
+        void Insert(int id, int a, int b, int t, String s, int p, int n, int pn, int rn, FCRPSlowCaseStatus &stat)
         {
             accessId1.push_back(id);
             idxStep.push_back(a);
@@ -273,6 +282,8 @@ public:
             next.push_back(n);
             pageSize1.push_back(pn);
             rowSize1.push_back(rn);
+            isFound.push_back(stat.isFound);
+            searchPageNum.push_back(stat.searchPageNum);
             return;
         }
 
@@ -331,16 +342,22 @@ public:
     //SchemaMetaData tempSmeta;
     //int *watermark;
     std::ofstream ofile;
+    std::ofstream accessFile;
     k2::dto::Timestamp watermark;
     //Initialize a PBRB cache
     //PBRB(int maxPageNumber, int *wm, Index *indexer)
-    PBRB(int maxPageNumber, k2::dto::Timestamp *wm, IndexerT *indexer)
+    PBRB(int maxPageNumber, k2::dto::Timestamp *wm, IndexerT *indexer, uint32_t maxPageSearchingNum)
     {
         watermark = *wm;
         this->_maxPageNumber = maxPageNumber;
         auto aligned_val = std::align_val_t{_pageSize}; //page size = 64KB
 
         _indexer = indexer;
+        _maxPageSearchingNum = maxPageSearchingNum;
+
+        char buf[256];
+        sprintf(buf, "fcrp_20WH_400s_maxTryNum_%02d.csv", _maxPageSearchingNum);
+        _fcrpOutputFileName = buf;
         /* method 1:
         for (int i = 0; i < maxPageNumber; i++)
         {
@@ -353,6 +370,8 @@ public:
         // alloc maxPageNumber pages when initialize.
         BufferPage *basePtr = static_cast<BufferPage *>(operator new(maxPageNumber * sizeof(BufferPage), aligned_val));
         K2LOG_I(log::pbrb, "PBRB: Allocated: {} Pages in: {}", maxPageNumber, (void *)basePtr);
+        K2LOG_I(log::pbrb, "maxPageSearchingNum: {}", _maxPageSearchingNum);
+        K2LOG_I(log::pbrb, "fcrp output filename: {}", _fcrpOutputFileName);
         for (int idx = 0; idx < maxPageNumber; idx++)
         {
             _freePageList.push_back(basePtr + idx);
@@ -537,9 +556,11 @@ public:
 
     // 3.1 Initialize a schema.
 
-    void initializePage(BufferPage *pagePtr) {
+    void initializePage(BufferPage *pagePtr, SchemaMetaData &smd) {
     
-        memset(pagePtr, 0, sizeof(BufferPage));
+        // Memset May Cause Performance Problems.
+        // Optimized to just clear the header and occuBitMap
+        memset(pagePtr, 0, _pageHeaderSize + smd.occuBitmapSize);
 
         setMagicPage(pagePtr, 0x1010);
         setSchemaIDPage(pagePtr, -1);
@@ -568,7 +589,7 @@ public:
         // Initialize Page.
         //memset(pagePtr, 0, sizeof(BufferPage));
 
-        initializePage(pagePtr);
+        initializePage(pagePtr, smd);
         setSchemaIDPage(pagePtr, schemaId);
         setSchemaVerPage(pagePtr, schemaVer);
 
@@ -581,20 +602,29 @@ public:
 
 
     BufferPage *AllocNewPageForSchema(SchemaId schemaId) {
+        // al1
+        auto al1Start = Clock::now();
+
         if (_freePageList.empty())
             return nullptr;
 
         BufferPage *pagePtr = _schemaMap[schemaId].headPage;
-        _schemaMap[schemaId].curPageNum++;
+        _schemaMap[schemaId].curPageNum++;            
+
+        auto al1End = Clock::now();
+        auto al1ns = nsec(al1End - al1Start).count();
+
         if (pagePtr == nullptr)
             return createCacheForSchema(schemaId);
         else {
+            // al2
+            auto al2Start = Clock::now();
             K2ASSERT(log::pbrb, _freePageList.size() > 0, "There is no free page in free page list!");
             BufferPage *newPage = _freePageList.front();
 
             // Initialize Page.
             //memset(newPage, 0, sizeof(BufferPage));
-            initializePage(newPage);
+            initializePage(newPage, _schemaMap[schemaId]);
             setSchemaIDPage(newPage, schemaId);
             setSchemaVerPage(newPage, _schemaMap[schemaId].schema->version);
 
@@ -609,10 +639,19 @@ public:
             setNextPage(newPage, nullptr);
             setNextPage(tail, newPage);
             _schemaMap[schemaId].tailPage = newPage;
+            auto al2End = Clock::now();
+            auto al2ns = nsec(al2End - al2Start).count();
+
+            // al3
+            auto al3Start = Clock::now();
 
             _freePageList.pop_front();
+
+            auto al3End = Clock::now();
+            auto al3ns = nsec(al3End - al3Start).count();
             // K2LOG_I(log::pbrb, "Alloc new page type 1: sid: {}, sname: {}, currPageNum: {}", schemaId, _schemaMap[schemaId].schema->name, _schemaMap[schemaId].curPageNum);
             K2LOG_D(log::pbrb, "Remaining _freePageList size:{}", _freePageList.size());
+            K2LOG_D(log::pbrb, "Allocated page for schema: {}, page count: {}, time al1: {}, al2: {}, al3: {}, total: {}", _schemaMap[schemaId].schema->name, _schemaMap[schemaId].curPageNum, al1ns, al2ns, al3ns, al1ns + al2ns + al3ns);
 
             return newPage;
         }
@@ -621,7 +660,10 @@ public:
     BufferPage *AllocNewPageForSchema(SchemaId schemaId, BufferPage *pagePtr) {
         // TODO: validation
         if (_freePageList.empty())
+        {
+            K2LOG_E(log::pbrb, "No Free Page Now!");
             return nullptr;
+        }
 
         K2ASSERT(log::pbrb, _freePageList.size() > 0, "There is no free page in free page list!");
         BufferPage *newPage = _freePageList.front();
@@ -629,7 +671,7 @@ public:
 
         // Initialize Page.
         //memset(newPage, 0, sizeof(BufferPage));
-        initializePage(newPage);
+        initializePage(newPage, _schemaMap[schemaId]);
         setSchemaIDPage(newPage, schemaId);
         setSchemaVerPage(newPage, _schemaMap[schemaId].schema->version);
 
@@ -715,13 +757,13 @@ public:
     // find an empty slot in the page
     RowOffset findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr);
 
-    std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID);
+    std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID, FCRPSlowCaseStatus &stat);
 
     // Find the page pointer and row offset to cache cold row
     std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID, dto::Key key);
 
     // Find Cache Row Position From pagePtr to end
-    std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID, BufferPage *pagePtr);
+    std::pair<BufferPage *, RowOffset> findCacheRowPosition(uint32_t schemaID, BufferPage *pagePtr, FCRPSlowCaseStatus &stat);
 
     // store hot row in the empty row
     // void cacheHotRow(uint32_t schemaID, SKVRecord hotRecord);
@@ -879,26 +921,51 @@ public:
         return smd.schema->version;
     }
 
+    struct AccStruct {
+        String SName;
+        BufferPage* addr;
+        RowOffset rOff;
+        int type;
+    };
+    std::vector<AccStruct> accessVec;
+    void AccessStructAppend(String SName, BufferPage* addr, RowOffset rOff, int type) {
+        accessVec.push_back({SName, addr, rOff, type});
+    }
+
+    void AccessOutput() {
+        std::string _accessFileName = "AccessPattern.csv";
+        accessFile.open(_accessFileName);
+        for (auto it: accessVec) {
+            if (it.type == 0)
+                accessFile << it.SName << ",R," << it.addr << "," << it.rOff << std::endl;
+            else if (it.type == 1)
+                accessFile << it.SName << ",W," << it.addr << "," << it.rOff << std::endl;
+        }
+        accessFile.close();
+    }
+
     void fcrpOutput()
     {
-        ofile.open("fcrp_1.csv");
+        ofile.open(_fcrpOutputFileName);
         K2LOG_I(log::pbrb, "======= Output fcrp info =======");
         // fcrp.TotalInPageTime();
         int size = fcrp.idxStep.size();
-        ofile << "AccessId, SchemaName, Type, Indexer, Find, FindPrev, FindNext, PageNum, RowNum, TotalTime" << std::endl;
+        ofile << "AccessId,SchemaName,Type,isFound,SearchPageNum,Indexer,Find,FindPrev,FindNext,PageNum,RowNum,TotalTime" << std::endl;
         for (int i = 0; i < size; i++)
         {
-            ofile << fcrp.accessId1[i] << ", "
-                    << fcrp.sname[i] << ", "
-                    << fcrp.type[i] << ", "
-                    << fcrp.idxStep[i] << ", "
-                    << fcrp.findStep[i] << ", "
-                    << fcrp.prev[i] << ", "
-                    << fcrp.next[i] << ", "
+            ofile << fcrp.accessId1[i] << ","
+                    << fcrp.sname[i] << ","
+                    << fcrp.type[i] << ","
+                    << fcrp.isFound[i] << ","
+                    << fcrp.searchPageNum[i] << ","
+                    << fcrp.idxStep[i] << ","
+                    << fcrp.findStep[i] << ","
+                    << fcrp.prev[i] << ","
+                    << fcrp.next[i] << ","
                     // << fcrp.totalInPageTime[i] << ", "
-                    << fcrp.pageSize1[i] << ", "
-                    << fcrp.rowSize1[i] << ", "
-                    << fcrp.idxStep[i] + fcrp.findStep[i] + fcrp.prev[i] + fcrp.next[i] << ", "
+                    << fcrp.pageSize1[i] + 1 << ","
+                    << fcrp.rowSize1[i] + 1 << ","
+                    << fcrp.idxStep[i] + fcrp.findStep[i] + fcrp.prev[i] + fcrp.next[i]
                     << std::endl;
         }
         ofile.close();
@@ -931,7 +998,33 @@ public:
                     << smd.occuBitmapSize << ", "
                     << smd.maxRowCnt << std::endl;
         }
+
         ofile.close();
+        
+        ofile.open("LinkedList.txt");
+        for (auto &iter : _schemaMap)
+        {
+            ofile << std::endl;
+            auto smd = iter.second;
+            ofile << smd.schema->name << std::endl;
+            int pageId = 0;
+            for (BufferPage *ptr = smd.headPage; ptr!=nullptr; ptr = getNextPage(ptr)) {
+                ofile << ptr << " " << pageId++ << std::endl;
+            }
+        }
+        ofile.close();
+}
+
+    // Prefetch
+
+    inline void prefetcht2Row(RowAddr rowAddr, size_t size) 
+    {
+        size_t clsize = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+        for (size_t off = 0; off < size; off += clsize)
+        {
+            __builtin_prefetch((uint8_t *)rowAddr + off, 0, 1);
+        }
+        return;
     }
 };
 
