@@ -950,9 +950,9 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 //clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&_readPBRBtartNS);
                 clock_t _readPBRBtart = clock();
                 void *hotAddr = static_cast<void *>(rec);
-                // auto retPair = pbrb->findRowByAddr(hotAddr);
-                // pbrb->AccessStructAppend(SName, retPair.first, retPair.second, 0);
-                pbrb->AccessStructAppend(SName, pbrb->getPageAddr(hotAddr), 0, 0);
+                auto retPair = pbrb->findRowByAddr(hotAddr);
+                pbrb->AccessStructAppend(SName, retPair.first, retPair.second, 0);
+                // pbrb->AccessStructAppend(SName, pbrb->getPageAddr(hotAddr), 0, 0);
                 #ifdef PAYLOAD_ROW
                     dto::SKVRecord *sRec = pbrb->generateSKVRecordByRow(SMapIndex, hotAddr, request.collectionName, schemaVer->second, true, totalReadCopyFeildms[indexFlag]);
                     clock_t _genRecordStart = clock();

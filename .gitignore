@@ -11,3 +11,5 @@ k2b
 cluster/__pycache__/
 *.log
 /cmake-build-debug/
+
+./log/

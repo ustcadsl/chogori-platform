@@ -272,6 +272,10 @@ private:
             return _loader.loadData(_client, _num_concurrent_txns());
         }).then ([this] {
             K2LOG_I(log::tpcc, "Data load done");
+            K2LOG_I(log::tpcc, "Read & Write Status By Schema in Data Loading.");
+            for (auto &it : _client.statBySchema) {
+                K2LOG_I(log::tpcc, "Schema {}: read: {}, write: {}, partialUpdate: {}", it.first, it.second.read, it.second.write, it.second.partialUpdate);
+            }
         });
     }
 
@@ -374,6 +378,11 @@ private:
             //K2LOG_I(log::tpcc, "PaymentTxn latency={}", _paymentLatency);
             K2LOG_I(log::tpcc, "OrderstatusTxns={} ", _orderStatusTxns);
             //K2LOG_I(log::tpcc, "orderstatus latency={}", _orderStatusLatency);
+
+            K2LOG_I(log::tpcc, "Read & Write Status By Schema.");
+            for (auto &it : _client.statBySchema) {
+                K2LOG_I(log::tpcc, "Schema {}: read: {}, write: {}, partialUpdate: {}", it.first, it.second.read, it.second.write, it.second.partialUpdate);
+            }
             return make_ready_future();
         });
     }
