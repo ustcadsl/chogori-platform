@@ -3,6 +3,7 @@
 #include <k2/pbrb/pbrb_design.h>
 #include <k2/pbrb/indexer.h>
 
+/*
 using namespace k2;
 
 int length = 9;
@@ -52,7 +53,7 @@ int test() {
 
     // Plog
     SimplePlog Plog1;
-    uint8_t *basePtr = (uint8_t *)Plog1.plog;
+    //uint8_t *basePtr = (uint8_t *)Plog1.plog;
 
     // Schema
     SimpleSchema S1({
@@ -64,7 +65,8 @@ int test() {
     auto sid1 = schemaUMap.addSchema(S1);
     initPlog(Plog1, sid1);
 
-    PBRB pbrb(8, &wm, &indexer);
+    //PBRB pbrb(8, &wm, &indexer);
+    PBRB pbrb(8, &wm);
 
     auto page1 = pbrb.createCacheForSchema(sid1);
     std::cout << page1 << " " << std::endl;
@@ -74,14 +76,14 @@ int test() {
         std::string newKey = S1.getKey(uid[i]);
         std::cout << "Insert Key: " << newKey << " into indexer." << std::endl;
         
-        //*(pbrb.watermark) = i - 40;
+        // *(pbrb.watermark) = i - 40;
         if (indexer.find(newKey) == indexer.end()) {
             KVN kvn;
             indexer.insert({newKey, kvn});
-            pbrb.cacheColdRow(basePtr + i * 128, newKey);
+            //pbrb.cacheColdRow(basePtr + i * 128, newKey);
         }
         else {
-            pbrb.cacheColdRow(basePtr + i * 128, newKey);
+            //pbrb.cacheColdRow(basePtr + i * 128, newKey);
         }
     }
 
@@ -89,8 +91,8 @@ int test() {
     pbrb.printStats();
     return 0;
 }
-
+*/
 int main() {
-    test();
+    // test();
     return 0;
 }

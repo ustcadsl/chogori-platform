@@ -52,7 +52,8 @@ int test() {
     auto sid1 = schemaUMap.addSchema(S1);
     initPlog(Plog1, sid1);
 
-    PBRB pbrb(100, &wm, &indexer);
+    //PBRB pbrb(100, &wm, &indexer);
+    PBRB pbrb(100, &wm);
 
     auto page1 = pbrb.createCacheForSchema(sid1);
     std::cout << page1 << " " << std::endl;

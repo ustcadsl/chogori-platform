@@ -22,7 +22,7 @@ Copyright(c) 2020 Futurewei Cloud
 */
 
 #pragma once
-
+#include <chrono>
 #include <map>
 #include <unordered_map>
 #include <deque>
@@ -37,7 +37,7 @@ Copyright(c) 2020 Futurewei Cloud
 #include <k2/indexer/IndexerInterface.h>
 #include <k2/indexer/MapIndexer.h>
 #include <k2/indexer/HOTIndexer.h>
-
+#include <k2/dto/SKVRecord.h>
 #include "ReadCache.h"
 #include "TxnManager.h"
 #include "TxnWIMetaManager.h"
@@ -45,19 +45,29 @@ Copyright(c) 2020 Futurewei Cloud
 #include "Persistence.h"
 #include "Log.h"
 
-#include <k2/pbrb/indexer.h>
+//#include <k2/pbrb/indexer.h>
 #include <k2/pbrb/pbrb_design.h>
+#include <k2/pmemStorage/PmemEngine.h>
+#include <k2/pmemStorage/PmemLog.h>
+
 #include <map>
 #include<fstream>
+#include <queue>
+#include <mutex>
 using namespace std;
 
-// #define PAYLOAD_ROW
-#define FIXEDFIELD_ROW
+#define PAYLOAD_ROW
+//#define FIXEDFIELD_ROW
 #define READ_BREAKDOWN
 // #define NO_READ_BREAKDOWN
 
 #define OUTPUT_READ_INFO
-// #define OUTPUT_ACCESS_PATTERN 
+//#define OUTPUT_ACCESS_PATTERN
+
+#define ASYNC
+//#define SYNC
+
+//#define SPACE_UTILIZATION
 
 namespace k2 {
 
@@ -88,10 +98,13 @@ struct VersionSet {
 */
 
 // the type holding versions for all keys, i.e. the indexer
-//typedef HOTindexer IndexerT;
-//typedef HotIterator IndexerIterator;
+// typedef HOTindexer IndexerT;
+// typedef HotIterator IndexerIterator;
 typedef mapindexer IndexerT;
 typedef MapIterator IndexerIterator;
+
+//static std::mutex g_mutex;
+//static std::unique_lock<std::mutex> uniqueLock(g_mutex);
 
 class K23SIPartitionModule {
 public: // lifecycle
@@ -103,6 +116,23 @@ public: // lifecycle
 
     // recover data upon startup
     seastar::future<> _recovery();
+
+    struct requestEntry {
+        uint32_t SMapIndex;
+        //dto::SKVRecord::Storage value;
+        dto::DataRecord* rec;
+        KeyValueNode* nodePtr;
+        int indexFlag;
+
+        // June 27 2022: Add Key for access pattern output
+        dto::Key requestKey;
+    };
+    queue<requestEntry*> requestQueue;
+    queue<requestEntry*> requestQueue1; 
+    int queueIndex = 0;
+
+    queue<requestEntry*> queuePool;
+    int queuePoolSize = 1000;
 
 public:
     // verb handlers
@@ -267,7 +297,13 @@ private: // methods
 
     void _registerMetrics();
 
-    void doBackgroundPBRBGC(PBRB *pbrb, mapindexer& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod);
+    void cacheKVRecordtoPBRB(uint32_t SMapIndex, dto::DataRecord* rec, KeyValueNode* nodePtr, int indexFlag, dto::Key requestKey);
+
+    void doBackgroundPBRBGC(PBRB *pbrb, IndexerT& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod);
+
+    void stringFeildUtilization();
+
+    int getSchemaArrayIndex(String SName);
 
 private:  // members
     // the metadata of our collection
@@ -280,15 +316,24 @@ private:  // members
     // (newest item is at front of the deque)
     // Duplicates are not allowed
     IndexerT _indexer;
-    mapindexer _mapIndexer;
 
-    PBRB *pbrb; //////
-  
-    // Index indexer; //////
+    PBRB *pbrb;
+    
+    PmemEngine * _enginePtr;
+    PmemEngineConfig _engineConfig;
 
-    long pbrbHitNum[12] = {0}; //////
+    //Index indexer; 
+    long lastHitNum[12] = {0}; 
 
-    long NvmReadNum[12] = {0}; //////
+    long pbrbHitNum[12] = {0}; 
+
+    long NvmReadNum[12] = {0}; 
+
+    long lastNvmReadNum[12] = {0}; 
+
+    float hitRatio[12] = {1.0}; 
+
+    int updateHitRatioT = 0;
 
     long writeCount[12]={0};
     long readCount[12]={0};
@@ -297,33 +342,51 @@ private:  // members
 
     long totalWriteSize = 0;
 
-    double totalReadms[12]={0}; //////
+    uint64_t totalReadns[12]={0}; 
 
-    double totalCopyFeildms[12]={0}; //////
+    uint64_t totalCopyFeildns[12]={0}; 
 
-    double totalReadCopyFeildms[12]={0}; //////
+    uint64_t totalReadCopyFeildns[12]={0}; 
 
-    double totalGenRecordms[12]={0}; //////
+    uint64_t totalGenRecordns[12]={0};
 
-    double totalIndexms[12]={0}; //////
+    uint64_t totalIndexns[12]={0};
 
-    double totalGetAddrms[12] ={0}; //////
+    uint64_t totalGetAddrns[12] ={0};
 
-    double totalFindPositionms[12] = {0};
+    uint64_t totalFindPositionns[12] = {0};
 
-    double totalHeaderms[12] = {0}; 
+    uint64_t totalCheckBitmap[12] = {0};
 
-    double totalUpdateCachems[12] = {0};
+    uint64_t totalIteratorPage[12] = {0};
 
-    double totalSerachTreems[12] = {0};
+    uint64_t totalHeaderns[12] = {0}; 
 
-    double totalUpdateTreems[12] = {0};
+    uint64_t totalUpdateCachens[12] = {0};
 
-    double totalUpdateKVNodems[12] = {0}; 
+    uint64_t totalSerachTreens[12] = {0};
 
-    double totalReadNVMrus[12] = {0}; 
+    uint64_t totalUpdateTreens[12] = {0};
 
-    double totalReadPBRBms[12] = {0};
+    uint64_t totalUpdateKVNodens[12] = {0}; 
+
+    uint64_t totalReadPlogns[12] = {0}; 
+
+    uint64_t totalReadPlogNVMns [12] = {0};
+
+    uint64_t totalReadPlogSerdens [12] = {0};
+
+    uint64_t totalReadPBRBns[12] = {0};
+
+    uint64_t allocatePayloadns[12] = {0};
+
+    bool enablePBRB = true;
+
+    bool isDonePBRBGC = true;
+
+    bool isDoneCache = true;
+
+    bool insertingKVNode = false;
 
     map<dto::Key, int> writeRecordMap;
 
@@ -335,7 +398,9 @@ private:  // members
 
     int isRunBenchMark = 0;
 
-    int count = 1;
+    int count = 1, sampleCounter = 1;
+
+    Payload storagePayload = Payload(Payload::DefaultAllocator());
 
     // manage transaction records as a coordinator
     TxnManager _txnMgr;
@@ -361,6 +426,8 @@ private:  // members
     // timer used to refresh the retention timestamp from the TSO
     PeriodicTimer _retentionUpdateTimer;
 
+    PeriodicTimer _dealRequestQueueTimer;
+
     std::shared_ptr<Persistence> _persistence;
 
     CPOClient _cpo;
@@ -384,6 +451,42 @@ private:  // members
 
     ConfigVar<uint32_t> _maxPageSearchingNum{"pbrb_max_searching_num"};// PBRB max page searching num
 
+    // Add for hot and map test
+    //read 
+    k2::Duration _readSum;
+    k2::Duration _readCacheSum;
+    k2::Duration _readIndexerSum;
+    k2::Duration _readItorSum;
+    k2::Duration _readNodeSum;
+    uint64_t _totalRead{0};
+
+    k2::Duration _writeValidateSum;
+    k2::Duration _writeFindSum;
+    k2::Duration _createWISum;
+    //partial update
+    k2::Duration _partialUpdateSum;
+    k2::Duration _partialUpdateIndexerSum;
+    uint64_t _totalPartialUpdate{0};
+    //insert
+    k2::Duration _insertSum;
+    k2::Duration _insertIndexerSum;
+    uint64_t _totalInsert{0};
+    //delete
+    k2::Duration _deleteIndexerSum;
+    uint64_t  _totalDelete{0};
+
+    //query
+    k2::Duration _querySum;
+    k2::Duration _initItSum;
+    k2::Duration _forwardSum;
+    k2::Duration _isDoneSum;
+    k2::Duration _scanAdSum;
+    k2::Duration _getRecSum;
+    k2::Duration _handleSum;
+    k2::Duration _updateCacheSum;
+    k2::Duration _handleEndSum;
+    uint64_t _totalQuery{0};
+    uint64_t _totalScanNum{0};
 };
 
 } // ns k2

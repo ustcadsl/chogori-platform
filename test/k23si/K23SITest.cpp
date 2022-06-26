@@ -20,6 +20,7 @@ Copyright(c) 2020 Futurewei Cloud
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 */
+#include <chrono>
 
 #include <k2/appbase/AppEssentials.h>
 #include <k2/appbase/Appbase.h>
@@ -283,7 +284,7 @@ private:
 
     seastar::future<std::tuple<Status, dto::K23SITxnEndResponse>>
     doEnd(dto::Key trh, dto::K23SI_MTR mtr, const String& cname, bool isCommit, std::vector<dto::Key> writeKeys) {
-        K2LOG_D(log::k23si, "key={}, phash={}", trh, trh.partitionHash())
+        K2LOG_D(log::k23si, "trh key={}, phash={}", trh, trh.partitionHash())
         auto& part = _pgetter.getPartitionForKey(trh);
         std::unordered_map<String, std::unordered_set<dto::KeyRangeVersion>> writeRanges;
 
@@ -299,6 +300,7 @@ private:
         request.key = trh;
         request.action = isCommit ? dto::EndAction::Commit : dto::EndAction::Abort;
         request.writeRanges = std::move(writeRanges);
+        K2LOG_D(log::k23si, "End Request={}", request);
         return RPC().callRPC<dto::K23SITxnEndRequest, dto::K23SITxnEndResponse>(dto::Verbs::K23SI_TXN_END, request, *part.preferredEndpoint, 100ms);
     }
 
@@ -488,6 +490,77 @@ seastar::future<> runScenario03() {
     K2LOG_I(log::k23si, "Scenario 03");
     /* Test different schemaName, same partition and key different from trh*/
         return seastar::make_ready_future()
+    // .then([this] {
+    //     return getTimeNow();
+    // })
+    // .then([this] (dto::Timestamp&& ts) {
+    //     return seastar::do_with(
+    //         dto::K23SI_MTR{
+    //             .timestamp = std::move(ts),
+    //             .priority = dto::TxnPriority::Medium},
+    //         dto::Key{.schemaName = "schema", .partitionKey = "Key1", .rangeKey = "Key1rKey1"},
+    //         // dto::Key{.schemaName = "schema", .partitionKey = "Key1", .rangeKey = "Key2"},
+    //         dto::Key{.schemaName = "schema", .partitionKey = "Key1", .rangeKey = "Key1rKey1"},
+    //         DataRec{.f1="field1", .f2="field2"},
+    //         // [this] (dto::K23SI_MTR& mtr, dto::Key& key1, dto::Key& key2, dto::Key& trh, DataRec& rec) {
+    //         [this] (dto::K23SI_MTR& mtr, dto::Key& key1, dto::Key& trh, DataRec& rec) {
+    //             return doWrite(key1, rec, mtr, trh, collname, false, true)
+    //             .then([this, &key1](auto&& response) {
+    //                 K2LOG_I(log::k23si, "Insert first key {} as trh", key1);
+    //                 auto& [status, resp] = response;
+    //                 K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
+    //                 return seastar::make_ready_future<>();
+    //             })
+    //             // Verify there is one WI on node
+    //             .then([this, &key1] {
+    //                 return doRequestRecords(key1).
+    //                 then([this] (auto&& response) {
+    //                     auto& [status, k2response] = response;
+    //                     K2EXPECT(log::k23si, status, Statuses::S200_OK);
+    //                     K2EXPECT(log::k23si, k2response.records.size(), 1);
+    //                     return seastar::make_ready_future<>();
+    //                 });
+    //             })
+    //             // Verify the Txn is InProgress
+    //             .then([this, &trh, &mtr] {
+    //                     return doRequestTRH(trh, mtr).
+    //                     then([this] (auto&& response) {
+    //                         auto& [status, k2response] = response;
+    //                         K2EXPECT(log::k23si, status, Statuses::S200_OK);
+    //                         K2EXPECT(log::k23si, k2response.state, k2::dto::TxnRecordState::InProgress);
+    //                         return seastar::make_ready_future<>();
+    //                     });
+    //             })
+    //             // Write different schemaKey in same partition and same transaction
+    //             // .then([&] {
+    //             //     return doWrite(key2, rec, mtr, trh, collname, false, false);
+    //             // })
+    //             // .then([this, &key2](auto&& response) {
+    //             //     K2LOG_I(log::k23si, "Insert second key {} with diff schemaName", key2);
+    //             //     auto& [status, resp] = response;
+    //             //     K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
+    //             //     return seastar::make_ready_future<>();
+    //             //     // return seastar::sleep(2s);
+    //             // })
+    //             // // End transacton
+    //             // .then([this, &trh, &mtr, &key1, &key2] {
+    //             //     return doEnd(trh, mtr, collname, true, {key1, key2});
+    //             // })
+    //             .then([this, &trh, &mtr, &key1] {
+    //                 return doEnd(trh, mtr, collname, true, {key1});
+    //             })
+    //             .then([this, &key1, &mtr](auto&& response) {
+    //                 auto& [status, resp] = response;
+    //                 K2EXPECT(log::k23si, status, dto::K23SIStatus::OK);
+    //                 return doRead(key1, mtr, collname);
+    //             })
+    //             .then([&rec](auto&& response) {
+    //                 auto& [status, value] = response;
+    //                 K2EXPECT(log::k23si, status, dto::K23SIStatus::OK);
+    //                 K2EXPECT(log::k23si, value, rec);
+    //             });
+    //     });
+    // })
     .then([this] {
         return getTimeNow();
     })
@@ -496,11 +569,12 @@ seastar::future<> runScenario03() {
             dto::K23SI_MTR{
                 .timestamp = std::move(ts),
                 .priority = dto::TxnPriority::Medium},
-            dto::Key{.schemaName = "schema", .partitionKey = "Key1", .rangeKey = "Key1rKey1"},
-            dto::Key{.schemaName = "schema", .partitionKey = "Key1", .rangeKey = "Key1rKey1"},
-            dto::Key{.schemaName = "schema", .partitionKey = "Key1", .rangeKey = "Key1rKey1"},
+            dto::Key{.schemaName = "schema", .partitionKey = "Key1", .rangeKey = "NewrKey1"},
+            dto::Key{.schemaName = "schema", .partitionKey = "Key1", .rangeKey = "rKey"},
+            dto::Key{.schemaName = "myschema", .partitionKey = "Key1", .rangeKey = "NewrKey2"},
+            dto::Key{.schemaName = "schema", .partitionKey = "Key1", .rangeKey = "NewrKey1"},
             DataRec{.f1="field1", .f2="field2"},
-            [this] (dto::K23SI_MTR& mtr, dto::Key& key1, dto::Key& key2, dto::Key& trh, DataRec& rec) {
+            [this] (dto::K23SI_MTR& mtr, dto::Key& key1, dto::Key& key2, dto::Key& key3, dto::Key& trh, DataRec& rec) {
             // [this] (dto::K23SI_MTR& mtr, dto::Key& key1, dto::Key& trh, DataRec& rec) {
                 return doWrite(key1, rec, mtr, trh, collname, false, true)
                 .then([this, &key1](auto&& response) {
@@ -537,12 +611,20 @@ seastar::future<> runScenario03() {
                     K2LOG_I(log::k23si, "Insert second key {} with diff schemaName", key2);
                     auto& [status, resp] = response;
                     K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
-                    // return seastar::make_ready_future<>();
-                    return seastar::sleep(2s);
+                    return seastar::make_ready_future<>();
                 })
-                // End transacton
-                .then([this, &trh, &mtr, &key1, &key2] {
-                    return doEnd(trh, mtr, collname, true, {key1, key2});
+                .then([&] {
+                    return doWrite(key3, rec, mtr, trh, collname, false, false);
+                })
+                .then([this, &key3](auto&& response) {
+                    K2LOG_I(log::k23si, "Insert second key {} with diff schemaName", key3);
+                    auto& [status, resp] = response;
+                    K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
+                    return seastar::make_ready_future<>();
+                })
+                //End transacton
+                .then([this, &trh, &mtr, &key1, &key2, &key3] {
+                    return doEnd(trh, mtr, collname, true, {key1, key2, key3});
                 })
                 // .then([this, &trh, &mtr, &key1] {
                 //     return doEnd(trh, mtr, collname, true, {key1});
@@ -559,76 +641,6 @@ seastar::future<> runScenario03() {
                 });
         });
     });
-    // .then([this] {
-    //     return getTimeNow();
-    // })
-    // .then([this] (dto::Timestamp&& ts) {
-    //     return seastar::do_with(
-    //         dto::K23SI_MTR{
-    //             .timestamp = std::move(ts),
-    //             .priority = dto::TxnPriority::Medium},
-    //         dto::Key{.schemaName = "scNhema", .partitionKey = "Key1", .rangeKey = "rKey1"},
-    //         dto::Key{.schemaName = "myschema", .partitionKey = "Key1", .rangeKey = "rKey1"},
-    //         dto::Key{.schemaName = "scNhema", .partitionKey = "Key1", .rangeKey = "rKey1"},
-    //         DataRec{.f1="field1", .f2="field2"},
-    //         [this] (dto::K23SI_MTR& mtr, dto::Key& key1, dto::Key& key2, dto::Key& trh, DataRec& rec) {
-    //         // [this] (dto::K23SI_MTR& mtr, dto::Key& key1, dto::Key& trh, DataRec& rec) {
-    //             return doWrite(key1, rec, mtr, trh, collname, false, true)
-    //             .then([this, &key1](auto&& response) {
-    //                 K2LOG_I(log::k23si, "Insert first key {} as trh", key1);
-    //                 auto& [status, resp] = response;
-    //                 K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
-    //                 return seastar::make_ready_future<>();
-    //             })
-    //             // Verify there is one WI on node
-    //             .then([this, &key1] {
-    //                 return doRequestRecords(key1).
-    //                 then([this] (auto&& response) {
-    //                     auto& [status, k2response] = response;
-    //                     K2EXPECT(log::k23si, status, Statuses::S200_OK);
-    //                     K2EXPECT(log::k23si, k2response.records.size(), 1);
-    //                     return seastar::make_ready_future<>();
-    //                 });
-    //             })
-    //             // Verify the Txn is InProgress
-    //             .then([this, &trh, &mtr] {
-    //                     return doRequestTRH(trh, mtr).
-    //                     then([this] (auto&& response) {
-    //                         auto& [status, k2response] = response;
-    //                         K2EXPECT(log::k23si, status, Statuses::S200_OK);
-    //                         K2EXPECT(log::k23si, k2response.state, k2::dto::TxnRecordState::InProgress);
-    //                         return seastar::make_ready_future<>();
-    //                     });
-    //             })
-    //             // Write different schemaKey in same partition and same transaction
-    //             .then([&] {
-    //                 return doWrite(key2, rec, mtr, trh, collname, false, false);
-    //             })
-    //             .then([this, &key2](auto&& response) {
-    //                 K2LOG_I(log::k23si, "Insert second key {} with diff schemaName", key2);
-    //                 auto& [status, resp] = response;
-    //                 K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
-    //                 return seastar::make_ready_future<>();
-    //             })
-    //             //End transacton
-    //             .then([this, &trh, &mtr, &key1, &key2] {
-    //                 return doEnd(trh, mtr, collname, true, {key1, key2});
-    //             })
-    //             // .then([this, &trh, &mtr, &key1] {
-    //             //     return doEnd(trh, mtr, collname, true, {key1});
-    //             // })
-    //             .then([this, &key1, &mtr](auto&& response) {
-    //                 auto& [status, resp] = response;
-    //                 K2EXPECT(log::k23si, status, dto::K23SIStatus::OK);
-    //                 return doRead(key1, mtr, collname);
-    //             })
-    //             .then([&rec](auto&& response) {
-    //                 auto& [status, value] = response;
-    //                 K2EXPECT(log::k23si, status, dto::K23SIStatus::OK);
-    //                 K2EXPECT(log::k23si, value, rec);
-    //             });
-    //     });
-    // });
     return seastar::make_ready_future();
 }
 seastar::future<> runScenario04() {

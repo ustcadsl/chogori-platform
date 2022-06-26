@@ -17,4 +17,3 @@ cd chogori-intervaltree
 mkdir -p build
 cd build
 cmake .. && make -j install
-

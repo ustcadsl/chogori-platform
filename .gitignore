@@ -13,3 +13,6 @@ cluster/__pycache__/
 /cmake-build-debug/
 
 ./log/
+tpcc.sh
+/chogori-seastar-rd/
+fcrp.txt

@@ -1,6 +1,6 @@
 #include <iostream>
 #include "pbrb_design.h"
-#include "indexer.h"
+//#include "indexer.h"
 
 namespace k2
 {
@@ -11,13 +11,12 @@ namespace pbrb {
     }
 }
 // Copy the header of row from DataRecord of query to (pagePtr, rowOffset)
-void *PBRB::cacheRowHeaderFrom(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, dto::DataRecord* rec) {
-    //K2LOG_I(log::pbrb, "function cacheRowFromPlog(BufferPage, RowOffset:{}, PlogAddr", rowOffset);
+void *PBRB::cacheRowHeaderFrom(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, dto::DataRecord* rec, void *nodePtr) {
     if (pagePtr == nullptr) {
         K2LOG_I(log::pbrb, "Trying to cache row to nullptr!");
         return nullptr;
     }
-    //if (rowOffset > _schemaMap[getSchemaIDPage(pagePtr)].maxRowCnt) {
+    
     if (rowOffset > _schemaMap[schemaId].maxRowCnt) {
         K2LOG_I(log::pbrb, "Row Offset out of range!");
         return nullptr;
@@ -27,37 +26,34 @@ void *PBRB::cacheRowHeaderFrom(uint32_t schemaId, BufferPage *pagePtr, RowOffset
         return nullptr;
     }
 
-    //SchemaId schemaId = getSchemaIDPage(pagePtr);
     SchemaMetaData smd = _schemaMap[schemaId];
     uint32_t byteOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
                             smd.rowSize * rowOffset;
 
     void *rowBasePtr = (uint8_t *)(pagePtr) + byteOffsetInPage;
-    K2LOG_D(log::pbrb, "^^^^^^schemaId:{}, RowOffset:{}, occuBitmapSize:{}, rowSize:{}, byteOffsetInPage:{}, rowBasePtr:{}", schemaId, rowOffset, smd.occuBitmapSize, smd.rowSize, byteOffsetInPage, rowBasePtr);
+    //K2LOG_D(log::pbrb, "^^^^^^schemaId:{}, RowOffset:{}, occuBitmapSize:{}, rowSize:{}, byteOffsetInPage:{}, rowBasePtr:{}", schemaId, rowOffset, smd.occuBitmapSize, smd.rowSize, byteOffsetInPage, rowBasePtr);
 
     // Copy timestamp
     // uint32_t tsoId = timestamp.tsoId();
     // void *tsPtr = (void *) ((uint8_t *) rowBasePtr + 4);
     // memcpy(tsPtr, &tsoId, sizeof(uint32_t));
-
     setTimestampRow(rowBasePtr, rec->timestamp);
     setPlogAddrRow(rowBasePtr, rec);
     setStatusRow(rowBasePtr, rec->status);
     setIsTombstoneRow(rowBasePtr, rec->isTombstone);
     setRequestIdRow(rowBasePtr, rec->request_id);
+    setKVNodeAddrRow(rowBasePtr, nodePtr);
 
     return rowBasePtr;
 }
 
 // Copy the field of row from DataRecord of query to (pagePtr, rowOffset)
-void *PBRB::cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, void* valueAddr, size_t strSize, uint32_t fieldID, bool isStr)
-{
-    //K2LOG_I(log::pbrb, "function cacheRowFromPlog(BufferPage, RowOffset:{}, field:{}", rowOffset, field);
+void *PBRB::cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, void* valueAddr, size_t strSize, uint32_t fieldID, bool isStr) {
     if (pagePtr == nullptr) {
         K2LOG_E(log::pbrb, "Trying to cache row to nullptr!");
         return nullptr;
     }
-    //if (rowOffset > _schemaMap[getSchemaIDPage(pagePtr)].maxRowCnt) {
+
     if (rowOffset > _schemaMap[schemaId].maxRowCnt) {
         K2LOG_E(log::pbrb, "Row Offset out of range!");
         return nullptr;
@@ -67,7 +63,6 @@ void *PBRB::cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, 
         return nullptr;
     }
 
-    //SchemaId schemaId = getSchemaIDPage(pagePtr);
     SchemaMetaData smd = _schemaMap[schemaId];
     uint32_t byteOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
                             smd.rowSize * rowOffset;
@@ -82,10 +77,11 @@ void *PBRB::cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, 
         size_t copySize = strSize;
         k2::String *strPtr = static_cast<k2::String *>(valueAddr);
         //const size_t maxStrSize = FTSize[static_cast<int>(k2::dto::FieldType::STRING)] - 1;
-        size_t maxStrSize = smd.fieldsInfo[fieldID].fieldSize;
+        //size_t maxStrSize = smd.fieldsInfo[fieldID].fieldSize;
+        size_t maxStrSize = 256;
 
-        memcpy(destPtr, &strSize, sizeof(size_t)); //////
-        destPtr = (void *) ((uint8_t *) rowBasePtr + smd.fieldsInfo[fieldID].fieldOffset + sizeof(size_t)); //////
+        memcpy(destPtr, &strSize, sizeof(size_t)); 
+        destPtr = (void *) ((uint8_t *) rowBasePtr + smd.fieldsInfo[fieldID].fieldOffset + sizeof(size_t)); 
         if (strSize + sizeof(size_t) > maxStrSize) {
             //K2LOG_W(log::pbrb, "Trying to insert field strSize(: {}) > maxStrSize(: {}), Cut the string",
             //    strSize, maxStrSize);
@@ -96,14 +92,14 @@ void *PBRB::cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, 
             //delete buf;
 
             ///////////////////////////////
-            destPtr = (void *) ((uint8_t *) rowBasePtr + smd.fieldsInfo[fieldID].fieldOffset + sizeof(size_t) + segmentSize); //////
-            //std::byte *fieldValueSegment = new std::byte[strSize-segmentSize]; //////
+            destPtr = (void *) ((uint8_t *) rowBasePtr + smd.fieldsInfo[fieldID].fieldOffset + sizeof(size_t) + segmentSize); 
+            //std::byte *fieldValueSegment = new std::byte[strSize-segmentSize]; 
             uint8_t *fieldValueSegment = static_cast<uint8_t *>(operator new((strSize-segmentSize) * sizeof(std::byte)));
-            memcpy(fieldValueSegment, strPtr->substr(segmentSize, strSize).c_str(), strSize-segmentSize); //////
+            memcpy(fieldValueSegment, strPtr->substr(segmentSize, strSize).c_str(), strSize-segmentSize); 
             memcpy(destPtr, &fieldValueSegment, sizeof(void *));
 
-            // void *retVal = *((void **)((uint8_t *)destPtr));
-            // K2LOG_I(log::pbrb, "^^^strSize:{}, fieldValueSegment:{}, destPtr:{}", strSize, (void *)(uint8_t *)fieldValueSegment, retVal);
+            //void *retVal = *((void **)((uint8_t *)destPtr));
+            //K2LOG_D(log::pbrb, "^^^strSize:{}, fieldValueSegment:{}, destPtr:{}", strSize, (void *)(uint8_t *)fieldValueSegment, retVal);
             //delete (uint8_t *)retVal;
             //////////////////////////////
             copySize = maxStrSize;
@@ -111,19 +107,8 @@ void *PBRB::cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, 
             //memcpy(destPtr, strPtr->c_str(), strSize + 1);
             memcpy(destPtr, valueAddr, strSize);
         }
-        /*else if (strSize > 0) {
-            //memcpy(destPtr, strPtr->c_str(), strSize + 1);
-            memcpy(destPtr, strPtr->c_str(), strSize);
-        }
-        else {
-            *(uint8_t *)destPtr = '\0';
-            K2LOG_D(log::pbrb, "StrSize == 0, Wrote \\0");
-            return rowBasePtr;
-        }*/
         K2LOG_D(log::pbrb, "fieldID:{}, fieldOffset:{}, destPtr:{}, Copied k2::String: {}", fieldID, smd.fieldsInfo[fieldID].fieldOffset, destPtr, strPtr->c_str());
         K2LOG_D(log::pbrb, "Copied {} byte(s) to {}", copySize + 1, destPtr);
-        //K2LOG_I(log::pbrb, "strPtr size: {},  strSize + 1: {}", strPtr->size(), strSize + 1);
-        // printFieldsRow(pagePtr, rowOffset);
         return rowBasePtr;
     }
 
@@ -131,7 +116,6 @@ void *PBRB::cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, 
     size_t copySize = smd.fieldsInfo[fieldID].fieldSize;
     K2LOG_D(log::pbrb, "fieldID:{}, fieldOffset:{}, destPtr:{}, copySize:{}, strSize:{}", fieldID, smd.fieldsInfo[fieldID].fieldOffset, destPtr, copySize, strSize);
     // printFieldsRow(pagePtr, rowOffset);
-    // + 4 to move to the real address in simple plog
     memcpy(destPtr, valueAddr, copySize);
 
     return rowBasePtr;
@@ -139,14 +123,12 @@ void *PBRB::cacheRowFieldFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, 
 
 
 // Copy the payload of row from DataRecord of query to (pagePtr, rowOffset)
-void *PBRB::cacheRowPayloadFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, Payload& rowData)
-{
-    //K2LOG_I(log::pbrb, "function cacheRowFromPlog(BufferPage, RowOffset:{}", rowOffset);
+void *PBRB::cacheRowPayloadFromDataRecord(uint32_t schemaId, BufferPage *pagePtr, RowOffset rowOffset, Payload& rowData) {
     if (pagePtr == nullptr) {
         K2LOG_I(log::pbrb, "Trying to cache row to nullptr!");
         return nullptr;
     }
-    //if (rowOffset > _schemaMap[getSchemaIDPage(pagePtr)].maxRowCnt) {
+
     if (rowOffset > _schemaMap[schemaId].maxRowCnt) {
         K2LOG_I(log::pbrb, "Row Offset out of range!");
         return nullptr;
@@ -155,7 +137,7 @@ void *PBRB::cacheRowPayloadFromDataRecord(uint32_t schemaId, BufferPage *pagePtr
         K2LOG_I(log::pbrb, "Conflict: move row to occupied slot, In page, offset:{}", rowOffset);
         return nullptr;
     }
-    //SchemaId schemaId = getSchemaIDPage(pagePtr);
+
     SchemaMetaData smd = _schemaMap[schemaId];
     uint32_t byteOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
                             smd.rowSize * rowOffset;
@@ -169,21 +151,71 @@ void *PBRB::cacheRowPayloadFromDataRecord(uint32_t schemaId, BufferPage *pagePtr
     if ((rowPayloadSize + sizeof(size_t)) > (smd.rowSize - smd.fieldsInfo[0].fieldOffset)) { 
     //TODO: long payload exceeds row size
         size_t inPlaceSize = smd.rowSize - smd.fieldsInfo[0].fieldOffset - sizeof(size_t) - sizeof(void *);
-        rowData.read(rowBasePtr, inPlaceSize); ///
-        size_t outPlaceSize = rowPayloadSize - inPlaceSize;
+        rowData.read(rowBasePtr, inPlaceSize); 
+        /*size_t outPlaceSize = rowPayloadSize - inPlaceSize;
         uint8_t *outPlaceValue = static_cast<uint8_t *>(operator new((outPlaceSize) * sizeof(std::byte)));
-        rowData.read(outPlaceValue, outPlaceSize); ///
+        rowData.read(outPlaceValue, outPlaceSize); 
         void *destPtr = (void *) ((uint8_t *)(pagePtr) + byteOffsetInPage + smd.rowSize - sizeof(void *) );
         memcpy(destPtr, &outPlaceValue, sizeof(void *));
         void *retVal = *((void **)((uint8_t *)destPtr));
-        K2LOG_I(log::pbrb, "^^^rowPayloadSize:{}, outPlaceValue:{}, retVal:{}", rowPayloadSize, (void *)(uint8_t *)outPlaceValue, retVal);
+        K2LOG_D(log::pbrb, "^^^rowPayloadSize:{}, outPlaceValue:{}, retVal:{}", rowPayloadSize, (void *)(uint8_t *)outPlaceValue, retVal);
+        */
         //K2LOG_I(log::pbrb, "********cut long payload row, rowData.getSize:{}, row size:{}, rowPayloadSize:{}", rowData.getSize(), smd.rowSize, rowPayloadSize);
     } else {
-        rowData.read(rowBasePtr, rowPayloadSize); ///
+        rowData.read(rowBasePtr, rowPayloadSize); 
         //K2LOG_I(log::pbrb, "********rowBasePtr:{}, row size:{}, smd.rowSize:{}, rowPayloadSize:{}", (void *)(uint8_t *)rowBasePtr, rowData.getSize(), smd.rowSize, rowPayloadSize);
     }
     return rowBasePtr;
 }
+
+void PBRB::countStringFeildUtilization(BufferPage *pagePtr, RowOffset rowOffset, long &totalFieldsSize, long &totalStoreSize, long &heapFieldNum, bool isPayloadRow) {
+     SchemaId schemaId = getSchemaIDPage(pagePtr);
+    if (pagePtr == nullptr) {
+        K2LOG_E(log::pbrb, "Trying to cache row to nullptr!");
+    }
+    if (rowOffset > _schemaMap[schemaId].maxRowCnt) {
+        K2LOG_E(log::pbrb, "Row Offset out of range!");
+    }
+   
+    SchemaMetaData smd = _schemaMap[schemaId];
+    uint32_t byteOffsetInPage = _pageHeaderSize + smd.occuBitmapSize + 
+                            smd.rowSize * rowOffset;
+    void *rAddr = (uint8_t *)(pagePtr) + byteOffsetInPage;
+    if(!isPayloadRow){
+        for (uint32_t idx = 0; idx < smd.schema->fields.size(); idx++) {
+            dto::SchemaField& field = smd.schema->fields[idx];
+            if (field.type == dto::FieldType::STRING) {
+                size_t fieldOffset = smd.fieldsInfo[idx].fieldOffset;
+                void *srcAddr = (void *)((uint8_t *)rAddr + fieldOffset);
+                size_t maxStrSize = smd.fieldsInfo[idx].fieldSize;
+                size_t RowFieldSize;
+                memcpy(&RowFieldSize, srcAddr, sizeof(size_t));
+                totalFieldsSize +=  maxStrSize;
+                if(RowFieldSize + sizeof(size_t) > maxStrSize){
+                    heapFieldNum++;
+                    totalStoreSize += maxStrSize;
+                    //K2LOG_I(log::pbrb, "@@schema:{}, RowFieldSize:{}, maxStrSize{}", smd.schema->name, RowFieldSize, maxStrSize);
+                } else {
+                    totalStoreSize += RowFieldSize;
+                }
+            }
+        }
+    } else {
+        void* srcAddr = (void*) ((uint8_t *)rAddr + smd.fieldsInfo[0].fieldOffset); //row header offset
+        size_t payloadRowSize;
+        memcpy(&payloadRowSize, srcAddr, sizeof(size_t));
+        srcAddr = (void*) ((uint8_t *)rAddr + smd.fieldsInfo[0].fieldOffset + sizeof(size_t));
+        totalFieldsSize +=  smd.rowSize - smd.fieldsInfo[0].fieldOffset;
+        if ( payloadRowSize + sizeof(size_t) > smd.rowSize - smd.fieldsInfo[0].fieldOffset ) {
+            heapFieldNum++;
+            totalStoreSize += smd.rowSize - smd.fieldsInfo[0].fieldOffset;
+            //K2LOG_I(log::pbrb, "@@@payloadRowSize:{}, smd.rowSize - smd.fieldsInfo[0].fieldOffset:{}", payloadRowSize, smd.rowSize - smd.fieldsInfo[0].fieldOffset);
+        } else {
+            totalStoreSize += payloadRowSize;
+        }
+    }
+}
+
 
 // Copy memory from plog to (pagePtr, rowOffset)
 void *PBRB::cacheRowFromPlog(BufferPage *pagePtr, RowOffset rowOffset, PLogAddr pAddress)
@@ -238,7 +270,7 @@ void *PBRB::cacheRowFromPlog(BufferPage *pagePtr, RowOffset rowOffset, PLogAddr 
     return rowBasePtr;
 }
 
-void *PBRB::cacheColdRow(PLogAddr pAddress)
+/*void *PBRB::cacheColdRow(PLogAddr pAddress)
 {
     SchemaId schemaId = readFromPlog<SchemaId>(pAddress, 4);
     if (_schemaMap.find(schemaId) == _schemaMap.end() || _schemaMap[schemaId].headPage == nullptr) {
@@ -252,8 +284,7 @@ void *PBRB::cacheColdRow(PLogAddr pAddress)
 
     return cacheRowFromPlog(pagePtr, rowOffset, pAddress);
 
-}
-
+}*/
 
 /* ...New MapIndexer Integrated. Temporally disabled
 
@@ -396,7 +427,7 @@ RowOffset PBRB::findEmptySlotInPage(uint32_t schemaID, BufferPage *pagePtr)
 	uint32_t maxRowCnt = smd.maxRowCnt;
     
     // Mar. 2022: skip the full pages.
-    if (getHotRowsNumPage(pagePtr) == smd.maxRowCnt) {
+    if (getHotRowsNumPage(pagePtr) == maxRowCnt) {
         return result;
     }
 
@@ -470,22 +501,54 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
     // fcrp.fcrpBase++;
     BufferPage *pagePtr = _schemaMap[schemaID].headPage;
     //K2LOG_D(log::pbrb, "^^^^^^^^findCacheRowPosition, schemaID:{}, pagePtr empty:{}", schemaID, pagePtr==nullptr);
-    int count = 0;
+    int checkedPages = 0;
     while (pagePtr != nullptr) {
-        count++;
+        checkedPages++;
         RowOffset rowOffset = findEmptySlotInPage(schemaID, pagePtr);
-        if (rowOffset & 0x80000000)
+        //auto _checkBitmapEnd = k2::now_nsec_count();
+        //totalCheckBitmap += _checkBitmapEnd - _checkBitmapBegin;
+        if (rowOffset & 0x80000000) {
             // go to next page;
+            //if (checkedPages > 1500) break;
+            //auto _iterPageBegin = k2::now_nsec_count();
             pagePtr = getNextPage(pagePtr);
+        }
         else {
             stat.isFound = true;
-            stat.searchPageNum = count;
+            stat.searchPageNum = checkedPages;
             return std::make_pair(pagePtr, rowOffset);
         }
     }
     //all allocated pages for the schema are full, so allocate a new page
     stat.isFound = false;
-    stat.searchPageNum = count;
+    stat.searchPageNum = checkedPages;
+    pagePtr = AllocNewPageForSchema(schemaID);
+    //return std::make_pair(nullptr, 0);
+    return std::make_pair(pagePtr, 0);
+}
+
+std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID)
+{
+    // fcrp.fcrpBase++;
+    BufferPage *pagePtr = _schemaMap[schemaID].headPage;
+    //K2LOG_D(log::pbrb, "^^^^^^^^findCacheRowPosition, schemaID:{}, pagePtr empty:{}", schemaID, pagePtr==nullptr);
+    int checkedPages = 0;
+    while (pagePtr != nullptr) {
+        checkedPages++;
+        RowOffset rowOffset = findEmptySlotInPage(schemaID, pagePtr);
+        //auto _checkBitmapEnd = k2::now_nsec_count();
+        //totalCheckBitmap += _checkBitmapEnd - _checkBitmapBegin;
+        if (rowOffset & 0x80000000) {
+            // go to next page;
+            //if (checkedPages > 1500) break;
+            //auto _iterPageBegin = k2::now_nsec_count();
+            pagePtr = getNextPage(pagePtr);
+        }
+        else {
+            return std::make_pair(pagePtr, rowOffset);
+        }
+    }
+    //all allocated pages for the schema are full, so allocate a new page
     pagePtr = AllocNewPageForSchema(schemaID);
     //return std::make_pair(nullptr, 0);
     return std::make_pair(pagePtr, 0);
@@ -693,11 +756,11 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID,
             }
         }
     }
-
+    
     return std::make_pair(nullptr, 0);
 }
 
-float PBRB::getAveragePageListUsage(float& maxPageListUsage) {
+float PBRB::getAveragePageListUsage(float& maxPageListUsage, uint32_t* schemaID, String* schemaNameArray, float* pageListUsageArray, int& schemaCount) {
     float pageListUsageSum = 0.0;
     int pageListNum = 0;
     float averagePageListUsage = 0.0;
@@ -705,24 +768,41 @@ float PBRB::getAveragePageListUsage(float& maxPageListUsage) {
         uint32_t sID = schemaEntry.first;
         SchemaMetaData sMeta = schemaEntry.second;
         BufferPage *pagePtr = sMeta.headPage;
-        long totalHotRowsOfaPageList = 0;
-        long totalMaxRow = 0;
+        float totalHotRowsOfaPageList = 0.0;
+        float totalMaxRow = 0.0;
         float curPageListUsage = 0.0;
         while (pagePtr) {
             //outputHeader(pagePtr);
-            totalHotRowsOfaPageList += getHotRowsNumPage(pagePtr);
+            uint16_t hotRowNum = getHotRowsNumPage(pagePtr);
+            totalHotRowsOfaPageList += hotRowNum;
+            //totalHotRowsOfaPageList += getHotRowsNumPageforGC(pagePtr, sID);
             totalMaxRow += sMeta.maxRowCnt;
+            if(hotRowNum > sMeta.maxRowCnt) {
+                K2LOG_I(log::pbrb, "#####sID:{}, hotRowNum:{}, sMeta.maxRowCnt:{}", sID, hotRowNum, sMeta.maxRowCnt);          
+            }
             pagePtr = getNextPage(pagePtr);
         }     
-        curPageListUsage = (float)totalHotRowsOfaPageList/(float)totalMaxRow;
-        if(curPageListUsage > maxPageListUsage) maxPageListUsage = curPageListUsage;
-        //pageListUsageSum += (float)totalHotRowsOfaPageList/(float)totalMaxRow;
-        pageListUsageSum += curPageListUsage;
-        K2LOG_I(log::pbrb, "schemaID:{}, totalHotRowsOfaPageList:{}, totalMaxRow:{}, sMeta.maxRowCnt:{}, maxPageListUsage:{}", sID, totalHotRowsOfaPageList, totalMaxRow, sMeta.maxRowCnt, maxPageListUsage);
-        pageListNum++;
+
+        if(totalMaxRow > 0) { 
+            curPageListUsage = totalHotRowsOfaPageList/totalMaxRow;
+            if(curPageListUsage > 0.9) {
+                schemaID[schemaCount] = sID;
+                pageListUsageArray[schemaCount] = curPageListUsage;
+                schemaNameArray[schemaCount] = schemaUMap.umap[sID].name;
+                schemaCount++;
+            }
+            if(curPageListUsage > maxPageListUsage) {
+                maxPageListUsage = curPageListUsage;
+                //*schemaID = sID;
+            }
+            //pageListUsageSum += (float)totalHotRowsOfaPageList/(float)totalMaxRow;
+            pageListUsageSum += curPageListUsage;
+            K2LOG_I(log::pbrb, "schemaID:{}, sName:{}, name:{}, totalHotRowsOfaPageList:{}, totalMaxRow:{}, sMeta.maxRowCnt:{}, maxPageListUsage:{}", sID, sMeta.schema->name, schemaUMap.umap[sID].name, totalHotRowsOfaPageList, totalMaxRow, sMeta.maxRowCnt, maxPageListUsage);
+            pageListNum++;
+        }
     }
     averagePageListUsage = pageListUsageSum/(float)pageListNum;
-    K2LOG_I(log::pbrb, "####averagePageListUsage:{}, maxPageListUsage:{}", averagePageListUsage, maxPageListUsage);
+    //K2LOG_I(log::pbrb, "####averagePageListUsage:{}, maxPageListUsage:{}", averagePageListUsage, maxPageListUsage);
     return averagePageListUsage;
 }
 
@@ -740,6 +820,7 @@ float PBRB::getCurPageListUsage(uint32_t schemaID) {
                 //outputHeader(pagePtr);
                 pageCount++;
                 totalHotRowsOfaPageList += getHotRowsNumPage(pagePtr);
+                //totalHotRowsOfaPageList += getHotRowsNumPageforGC(pagePtr, sID);
                 totalMaxRow += sMeta.maxRowCnt;
                 pagePtr = getNextPage(pagePtr);
             }     
@@ -880,7 +961,7 @@ void PBRB::releasePayloadHeapSpace(BufferPage *pagePtr, void *rowAddr) {
     if (payloadRowSize + sizeof(size_t) > smd.rowSize - smd.fieldsInfo[0].fieldOffset) { 
         void *heapAddr = *((void **)((uint8_t *)rowAddr + smd.rowSize - sizeof(void *) )); 
         delete (char *)heapAddr;
-        K2LOG_D(log::pbrb, "in releasePayloadHeapSpace, payloadRowSize:{}, heapAddr:{}", payloadRowSize, (void *)(uint8_t *)heapAddr);
+        K2LOG_I(log::pbrb, "in releasePayloadHeapSpace, payloadRowSize:{}, smd.rowSize:{}, field[0]Offset:{}, heapAddr:{}", payloadRowSize, smd.rowSize, smd.fieldsInfo[0].fieldOffset, (void *)(uint8_t *)heapAddr);
     }
 }
 
@@ -1001,10 +1082,9 @@ bool PBRB::splitPage(BufferPage *pagePtr) {
         removeHotRow(pagePtr, offset);
     }
 
-
-
     return true;
 }
+
 
 bool PBRB::mergePage(BufferPage *pagePtr1, BufferPage *pagePtr2) {
     
@@ -1079,7 +1159,6 @@ bool PBRB::mergePage(BufferPage *pagePtr1, BufferPage *pagePtr2) {
 
     return true;
 }
-
 */
 
 // 1.2 Row get & set Functions.
@@ -1175,6 +1254,16 @@ Status PBRB::setRequestIdRow(RowAddr rAddr, const uint64_t& request_id) {
     memcpy(dstPtr, &request_id, sizeof(uint64_t));
     
     return Statuses::S200_OK("Set request_id in row successfully");
+}
+
+ // KVNodeAddr
+void *PBRB::getKVNodeAddrRow(RowAddr rAddr) {
+    void *retVal = *((void **)((uint8_t *)rAddr + 38));
+    return retVal;
+}
+void PBRB::setKVNodeAddrRow(RowAddr rAddr, void *KVNodeAddr) {
+    uint8_t *dstPtr = (uint8_t *)rAddr;
+    memcpy(dstPtr + 38, &KVNodeAddr, sizeof(void *));
 }
 
 }

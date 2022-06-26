@@ -271,15 +271,11 @@ public:  // Read API
         _Size size;
         if (!read(size))
             return false;
-        m.reserve(size);
-
         for (_Size i = 0; i < size; i++) {
             KeyT key;
             ValueT value;
-
             if (!read(key) || !read(value))
                 return false;
-
             m[std::move(key)] = std::move(value);
         }
 
@@ -330,8 +326,6 @@ public:  // Read API
         _Size size;
         if (!read(size))
             return false;
-        s.reserve(size);
-
         for (_Size i = 0; i < size; i++) {
             T key;
 
