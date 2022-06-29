@@ -1,7 +1,7 @@
 #!/bin/bash
 # concurrent_list=(1 2 3 4 5 6 7 8)
-# concurrent_list=(9 10)
-concurrent_list=(5 6 7 8 9 10 11 12)
+# concurrent_list=(9)
+concurrent_list=(5)
 
 for num in ${concurrent_list[@]}; do
     unfinished=1
@@ -13,8 +13,9 @@ for num in ${concurrent_list[@]}; do
         docker container rm -f cpo0 tso0 persist0 nodepool0 test_write_async0 tpcc_client0 cpo1 tso1 nodepool1 tpcc_client1 > /dev/null
         rm -rf state.p > /dev/null        
         sudo killall persistence cpo_main tso nodepool nebula-metad tpcc_client > /dev/null 2>&1
+        sleep 5
         ./run.py --config_file configs/cluster.cfg  --start cpo tso persist nodepool > /dev/null
-        sleep 50
+        sleep 40
         ./run.py --config_file configs/cluster.cfg  --start test_write_async > /dev/null
         sleep 5     
         logfile="./logs/test_write_async_${num}.log"

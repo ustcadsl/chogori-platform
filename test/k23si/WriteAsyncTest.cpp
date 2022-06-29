@@ -410,8 +410,9 @@ seastar::future<> runTransactions(String prefix = "run_trans", bool writeAsync =
                             reporter.report();
                         })
                         .then([&] {
-                            seastar::future<> fut = seastar::make_ready_future<>();
+                            std::vector<seastar::future<>> writes;
                             for (int i = 2; i <= keysCount; i++) {
+                                seastar::future<> fut = seastar::make_ready_future<>();
                                 dto::Key key{
                                     .schemaName = _schemaName,
                                     .partitionKey = prefix + (singlePartition ? "pkey1" : "pkey" + std::to_string(i)),
@@ -427,8 +428,9 @@ seastar::future<> runTransactions(String prefix = "run_trans", bool writeAsync =
                                             reporter.report();            
                                         });
                                 });
+                                writes.push_back(std::move(fut));
                             }
-                            return fut;
+                            return seastar::when_all(writes.begin(), writes.end()).discard_result();
                         })
                         .then([&] {
                             // K2LOG_I(log::k23si, "issuing the end request");

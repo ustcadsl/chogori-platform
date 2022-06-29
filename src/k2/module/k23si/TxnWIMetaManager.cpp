@@ -208,7 +208,8 @@ Status TxnWIMetaManager::_onAction(Action action, TxnWIMeta& twim) {
     switch (twim.state) {
         case dto::TxnWIMetaState::Created: switch (action) {
             case Action::onCreate: {
-                return _inProgressPIP(twim);
+                // return _inProgressPIP(twim);
+                return _inProgress(twim); // rdma simulation
             }
             case Action::onCommit:
             case Action::onAbort:
@@ -390,6 +391,7 @@ Status TxnWIMetaManager::_inProgressPIP(TxnWIMeta& twim) {
                 }
                 return seastar::make_ready_future<Status>(_onAction(Action::onPersistSucceed, twim));
             });
+        // auto fut = seastar::make_ready_future<Status>(_onAction(Action::onPersistSucceed, twim));
         _addBgTask(twim, [fut = std::move(fut)]() mutable { return fut.discard_result(); });
     }
     // NB: We rely on Module::persistAfterFlush() to queue-up a retry
