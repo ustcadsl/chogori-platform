@@ -64,8 +64,8 @@ using namespace std;
 #define OUTPUT_READ_INFO
 //#define OUTPUT_ACCESS_PATTERN
 
-#define ASYNC
-//#define SYNC
+//#define ASYNC
+#define SYNC
 
 //#define SPACE_UTILIZATION
 
@@ -382,6 +382,8 @@ private:  // members
 
     bool enablePBRB = true;
 
+    bool pbrbEnableOrderedCaching = true;
+    
     bool isDonePBRBGC = true;
 
     bool isDoneCache = true;
@@ -446,10 +448,6 @@ private:  // members
     k2::ExponentialHistogram _pushLatency;
     k2::ExponentialHistogram _queryPageScans;
     k2::ExponentialHistogram _queryPageReturns;
-
-    // PBRB ConfigVar
-
-    ConfigVar<uint32_t> _maxPageSearchingNum{"pbrb_max_searching_num"};// PBRB max page searching num
 
     // Add for hot and map test
     //read 

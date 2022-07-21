@@ -353,7 +353,7 @@ public:
     //PBRB(int maxPageNumber, int *wm, Index *indexer)
     PBRB(int maxPageNumber, k2::dto::Timestamp *wm, IndexerT *indexer, uint32_t maxPageSearchingNum)
     {
-        ofile.open("fcrp.txt");
+        // ofile.open("fcrp.txt");
         watermark = *wm;
         this->_maxPageNumber = maxPageNumber;
         auto aligned_val = std::align_val_t{_pageSize}; //page size = 64KB
@@ -362,7 +362,7 @@ public:
         _maxPageSearchingNum = maxPageSearchingNum;
 
         char buf[256];
-        sprintf(buf, "fcrp_20WH_400s_maxTryNum_%02d.csv", _maxPageSearchingNum);
+        sprintf(buf, "fcrp_merged_maxTryNum_%02d.csv", _maxPageSearchingNum);
         _fcrpOutputFileName = buf;
 
         /* method 1:
@@ -377,12 +377,16 @@ public:
         // alloc maxPageNumber pages when initialize.
         BufferPage *basePtr = static_cast<BufferPage *>(operator new(maxPageNumber * sizeof(BufferPage), aligned_val));
         K2LOG_I(log::pbrb, "PBRB: Allocated: {} Pages in: {}", maxPageNumber, (void *)basePtr);
-        K2LOG_I(log::pbrb, "maxPageSearchingNum: {}", _maxPageSearchingNum);
+        K2LOG_I(log::pbrb, "_maxPageSearchingNum: {}", _maxPageSearchingNum);
         K2LOG_I(log::pbrb, "fcrp output filename: {}", _fcrpOutputFileName);
         for (int idx = 0; idx < maxPageNumber; idx++)
         {
             _freePageList.push_back(basePtr + idx);
         }
+    }
+
+    ~PBRB() {
+        K2LOG_I(log::pbrb, "PBRB dtor");
     }
 
     // 0. Two template functions to read and write data in the page.
@@ -1118,8 +1122,29 @@ public:
             }
         }
         ofile.close();
+
+        ofile.open("Occupancy.csv");
+        for (auto &iter : _schemaMap)
+        {
+            auto smd = iter.second;
+            ofile << smd.schema->name << "," 
+                  << smd.curRowNum << ","
+                  << smd.curPageNum + 1 << ","
+                  << smd.maxRowCnt << ","
+                  << (double) smd.curRowNum / (double) ((smd.curPageNum + 1) * smd.maxRowCnt) << std::endl;
+        }
+        ofile.close();
 }
 
+    // Show Current SMD
+
+    void outputSMDs() {
+        int cnt = 0;
+        for (auto &pair: _schemaMap) {
+            auto &smd = pair.second;
+            K2LOG_I(log::pbrb, "{}: Schema {}: pageNum: {}, rowNum: {}", cnt++, smd.schema->name, smd.curPageNum, smd.curRowNum);
+        }
+    }
     // Prefetch
 
     inline void prefetcht2Row(RowAddr rowAddr, size_t size) 

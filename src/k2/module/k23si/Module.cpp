@@ -189,12 +189,14 @@ Status K23SIPartitionModule::_validateWriteRequest(const dto::K23SIWriteRequest&
 K23SIPartitionModule::K23SIPartitionModule(dto::CollectionMetadata cmeta, dto::Partition partition) :
     _cmeta(std::move(cmeta)),
     _partition(std::move(partition), _cmeta.hashScheme) {
-    K2LOG_I(log::skvsvr, "Allocate new PBRB instance with _maxPageSearchingNum: {}", _maxPageSearchingNum())
+    K2LOG_I(log::skvsvr, "Allocate new PBRB instance with maxPageSearchingNum: {}", _config.maxPageSearchingNum())
     uint32_t pageNum = _config.totalNumberofPage();
     K2LOG_I(log::skvsvr, "---------Partition: {}, pageNum:{}", _partition, pageNum);
     //pbrb = new PBRB(pageNum, &_retentionTimestamp, &indexer);
-    pbrb = new PBRB(pageNum, &_retentionTimestamp, &_indexer, _maxPageSearchingNum());
+    pbrb = new PBRB(pageNum, &_retentionTimestamp, &_indexer, _config.maxPageSearchingNum());
     enablePBRB = _config.enablePBRB();
+    pbrbEnableOrderedCaching = _config.pbrbEnableOrderedCaching();
+
     for(int i=0; i < 12; i++){
         hitRatio[i] = 1.0;
     }
@@ -471,12 +473,14 @@ seastar::future<> K23SIPartitionModule::start() {
 }
 
 K23SIPartitionModule::~K23SIPartitionModule() {
-    delete pbrb;
     K2LOG_I(log::skvsvr, "dtor for cname={}, part={}", _cmeta.name, _partition);
 }
 
 seastar::future<> K23SIPartitionModule::gracefulStop() {
     K2LOG_I(log::skvsvr, "stop for cname={}, part={}", _cmeta.name, _partition);
+
+    pbrb->fcrpOutput();
+    pbrb->AccessOutput();
     if(_enginePtr!=nullptr) delete _enginePtr;
     if(pbrb!=nullptr) delete pbrb;
 
@@ -499,14 +503,40 @@ seastar::future<> K23SIPartitionModule::gracefulStop() {
         })
         .then([this] {
             _unregisterVerbs();
-            pbrb->fcrpOutput();
-            pbrb->AccessOutput();
             K2LOG_I(log::skvsvr, "stopped");
+        
+        String schemasArr[] = {
+            "item",
+            "warehouse",
+            "stock",
+            "district",
+            "customer",
+            "history",
+            "orderline",
+            "neworder",
+            "order",
+            "idx_customer_name",
+            "idx_order_customer",
+            "default"
+        };
 
         #ifdef OUTPUT_READ_INFO
             for(int i=0; i<12; i++){
-                K2LOG_I(log::skvsvr, "-----i:{}, totalUpdateCache:{} us, totalSerachTree:{} us, totalUpdateTree:{} us, totalIndex:{} us, totalGetRecordAddr:{} us, allocatePayloadns:{}, totalReadCopyFeild:{} us, totalGenRecord:{} us, totalFindPosition:{} us, totalCheckBitmap:{} us, totalIteratorPage:{} us, totalHeader:{} us, totalCopyFeild:{} us, totalUpdateKVNode:{} us, totalReadPBRB:{} us, totalReadPlog:{} us,totalReadPlogNVM:{} us, totalReadPlogSerde:{} us, totalRead:{} us, pbrbHitNum:{}, NvmReadNum:{}", i, totalUpdateCachens[i]/1000, totalSerachTreens[i]/1000, totalUpdateTreens[i]/1000,  totalIndexns[i]/1000, totalGetAddrns[i]/1000, allocatePayloadns[i]/1000, totalReadCopyFeildns[i]/1000, totalGenRecordns[i]/1000, totalFindPositionns[i]/1000, totalCheckBitmap[i]/1000, totalIteratorPage[i]/1000, totalHeaderns[i]/1000, totalCopyFeildns[i]/1000, totalUpdateKVNodens[i]/1000, totalReadPBRBns[i]/1000, totalReadPlogns[i]/1000,totalReadPlogNVMns[i]/1000, totalReadPlogSerdens[i]/1000, totalReadns[i]/1000, pbrbHitNum[i], NvmReadNum[i]);
+                K2LOG_I(log::skvsvr, "-----i:{}, schema:{}, totalUpdateCache:{} us, totalSerachTree:{} us, totalUpdateTree:{} us, totalIndex:{} us, totalGetRecordAddr:{} us, allocatePayloadns:{}, totalReadCopyFeild:{} us, totalGenRecord:{} us, totalFindPosition:{} us, totalCheckBitmap:{} us, totalIteratorPage:{} us, totalHeader:{} us, totalCopyFeild:{} us, totalUpdateKVNode:{} us, totalReadPBRB:{} us, totalReadPlog:{} us,totalReadPlogNVM:{} us, totalReadPlogSerde:{} us, totalRead:{} us, pbrbHitNum:{}, NvmReadNum:{}", i, schemasArr[i], totalUpdateCachens[i]/1000, totalSerachTreens[i]/1000, totalUpdateTreens[i]/1000,  totalIndexns[i]/1000, totalGetAddrns[i]/1000, allocatePayloadns[i]/1000, totalReadCopyFeildns[i]/1000, totalGenRecordns[i]/1000, totalFindPositionns[i]/1000, totalCheckBitmap[i]/1000, totalIteratorPage[i]/1000, totalHeaderns[i]/1000, totalCopyFeildns[i]/1000, totalUpdateKVNodens[i]/1000, totalReadPBRBns[i]/1000, totalReadPlogns[i]/1000,totalReadPlogNVMns[i]/1000, totalReadPlogSerdens[i]/1000, totalReadns[i]/1000, pbrbHitNum[i], NvmReadNum[i]);
             }
+
+            K2LOG_I(log::skvsvr, "PBRB Hit Ratios:");
+            for(int i = 0;i < 12;i++){
+                double hitRatioI = (double) pbrbHitNum[i] / (double) (pbrbHitNum[i] + NvmReadNum[i]);
+                K2LOG_I(log::skvsvr, "Schema Name:{}, hit: {}， miss: {}, hitRatio: {}", schemasArr[i], pbrbHitNum[i], NvmReadNum[i], hitRatioI);
+            }
+            int hitCount = 0, missCount = 0;
+            for (int i = 0;i < 12;i++) {
+                hitCount += pbrbHitNum[i];
+                missCount += NvmReadNum[i];
+            }
+            double totalHitRatio = (double)hitCount / (double) (hitCount + missCount);
+            K2LOG_I(log::skvsvr, "Overall:[ Hit:{}, Miss:{}, HitRatio: {}]", hitCount, missCount, totalHitRatio);
             //K2LOG_I(log::skvsvr, "pbrbHitNum:{}, NvmReadNum:{}", pbrbHitNum, NvmReadNum);
             K2LOG_I(log::skvsvr, "-----read count, item:{}, Warehouse: {}, Stock:{}, District:{}, Customer:{}, History:{}, OrderLine:{}, NewOrder:{}, Order:{}, Other:{}", 
             readCount[0], readCount[1], readCount[2], readCount[3], readCount[4], readCount[5], readCount[6], readCount[7], readCount[8], readCount[9]);
@@ -949,7 +979,11 @@ void K23SIPartitionModule::cacheKVRecordtoPBRB(uint32_t SMapIndex, dto::DataReco
     }
 
     auto _findPositionStart = k2::now_nsec_count();
-    std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex);
+    std::pair<BufferPage *, RowOffset> retVal;
+    if (pbrbEnableOrderedCaching)
+        retVal = pbrb->findCacheRowPosition(SMapIndex, requestKey);
+    else
+        retVal = pbrb->findCacheRowPosition(SMapIndex);
     BufferPage *pagePtr = retVal.first;
     RowOffset rowOffset = retVal.second;
     auto _findPositionEnd = k2::now_nsec_count();
@@ -1175,44 +1209,56 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
                 // case 2: cold version (in kvnode)
                 K2LOG_D(log::skvsvr, "Case 2: Cold Version in KVNode");
                 if (enablePBRB) {
-                    //rec->value.fieldData.seek(0);
-                    //insert the SKV record to the PBRB cache
-                #ifdef SYNC
-                    if(isDonePBRBGC){
-                        cacheKVRecordtoPBRB(SMapIndex, rec, nodePtr, indexFlag, request.key);
-                    }
-                #endif
-
-                #ifdef ASYNC
-                //if(hitRatio[indexFlag] > 0.2 && sampleCounter%2==0) {
-                if(hitRatio[indexFlag] > 0.2) {
-                    sampleCounter = 1;
-                    if(requestQueue.size()< 200 && requestQueue1.size()< 200){
-                        //requestEntry *rEntry = new struct requestEntry;
-                        requestEntry *rEntry = queuePool.front();
-                        if(rEntry == nullptr) {
-                            rEntry = new struct requestEntry;
-                        } else {
-                            queuePool.pop();
+                        //rec->value.fieldData.seek(0);
+                        //insert the SKV record to the PBRB cache
+                    #ifdef SYNC
+                        if(isDonePBRBGC){
+                            cacheKVRecordtoPBRB(SMapIndex, rec, nodePtr, indexFlag, request.key);
                         }
-                        rEntry->SMapIndex = SMapIndex;
-                        //rEntry->value = rec->value.copy();
+                    #endif
+
+                    #ifdef ASYNC
+                    //if(hitRatio[indexFlag] > 0.2 && sampleCounter%2==0) {
+                    if(hitRatio[indexFlag] > 0.2) {
+                        sampleCounter = 1;
+                        if(requestQueue.size()< 200 && requestQueue1.size()< 200){
+                            //requestEntry *rEntry = new struct requestEntry;
+                            requestEntry *rEntry = queuePool.front();
+                            if(rEntry == nullptr) {
+                                rEntry = new struct requestEntry;
+                            } else {
+                                queuePool.pop();
+                            }
+                            rEntry->SMapIndex = SMapIndex;
+                            //rEntry->value = rec->value.copy();
+                            rEntry->rec = rec;                 
                         rEntry->rec = rec;                 
-                        rEntry->nodePtr = nodePtr;
-                        rEntry->indexFlag = indexFlag;
+                            rEntry->rec = rec;                 
+                            rEntry->nodePtr = nodePtr;
+                            rEntry->indexFlag = indexFlag;
+                            rEntry->requestKey = request.key;                       
                         rEntry->requestKey = request.key;                       
-                        if(queueIndex==0){
-                            requestQueue.push(rEntry);
-                        } else {
-                            //K2LOG_I(log::skvsvr, "--queueIndex:{}, queue size:{}", queueIndex, requestQueue1.size());
-                            requestQueue1.push(rEntry);
+                            rEntry->requestKey = request.key;                       
+                            if(queueIndex==0){
+                                requestQueue.push(rEntry);
+                            } else {
+                                //K2LOG_I(log::skvsvr, "--queueIndex:{}, queue size:{}", queueIndex, requestQueue1.size());
+                                requestQueue1.push(rEntry);
+                            }    
                         }    
+                            }    
+                        } 
                     } 
-                /*} else {
-                    sampleCounter++;
+                        } 
+                    /*} else {
+                        sampleCounter++;
+                    }*/     
                 }*/     
+                    }*/     
+                    }                                   
                 }                                   
-                #endif
+                    }                                   
+                    #endif
                 }
 
                 NvmReadNum[indexFlag]++;
@@ -1368,8 +1414,13 @@ K23SIPartitionModule::handleRead(dto::K23SIReadRequest&& request, FastDeadline d
             if (!nodePtr->is_inmem(order)) {
                 // case 2: cold version (in kvnode)
                 K2LOG_D(log::skvsvr, "Case 2: Cold Version in KVNode");
+                std::pair<BufferPage *, RowOffset> retVal;
+                if (pbrbEnableOrderedCaching)
+                    std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex, request.key); 
+                else
+                    std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex); 
                 std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex); 
-                //std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex, request.key); 
+                    std::pair<BufferPage *, RowOffset> retVal = pbrb->findCacheRowPosition(SMapIndex); 
                 BufferPage *pagePtr = retVal.first;
                 RowOffset rowOffset = retVal.second;
                 if (pagePtr!=nullptr) { //find empty slot    
@@ -2584,6 +2635,7 @@ int K23SIPartitionModule::getSchemaArrayIndex(String SName) {
 void K23SIPartitionModule::doBackgroundPBRBGC(PBRB *pbrb, IndexerT& _indexer, dto::Timestamp& newWaterMark, Duration& retentionPeriod) {
     K2LOG_I(log::pbrb, "####in doBackgroundPBRBGC, _freePageList.size:{}", pbrb->getFreePageList().size());
 
+    pbrb->outputSMDs();
     if(updateHitRatioT < 50){
         for(int i=0; i< 12; i++) {
             //if(NvmReadNum[i] > 0) hitRatio[i] = (float)pbrbHitNum[i]/(float)(NvmReadNum[i]+pbrbHitNum[i]);

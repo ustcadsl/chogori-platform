@@ -69,7 +69,13 @@ struct K23SIConfig {
     // control the pbrb is enabled or disabled
     ConfigVar<bool> enablePBRB{"k23si_enable_pbrb", true};
 
-     // control the total number of page allocated in pbrb
+    // Specify the number of searching pages in PBRB::findCacheRowPosition slow inserting cases.
+    ConfigVar<uint32_t> maxPageSearchingNum{"k23si_pbrb_max_searching_page_num", 5};// PBRB max page searching num
+
+    // Specify whether using ordered PBRB slot searching method.
+    ConfigVar<bool> pbrbEnableOrderedCaching{"k23si_pbrb_enable_ordered_caching", true};
+
+    // control the total number of page allocated in pbrb
     ConfigVar<uint32_t> totalNumberofPage{"k23si_page_number_pbrb", 3000};//10000
     
     // the path of pmem engine
