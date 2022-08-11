@@ -20,15 +20,13 @@ class HostNode:
 
 
 host_nodes: List[HostNode] = [
-    HostNode("server-1.mydomain.com", "192.168.1.2", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_0", "A"),
-    HostNode("server-2.mydomain.com", "192.168.1.4", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_0", "A"),
-    HostNode("server-3.mydomain.com", "192.168.1.6", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_0", "A"),
-    HostNode("server-4.mydomain.com", "192.168.1.8", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_0", "A"),
-    HostNode("server-5.mydomain.com", "192.168.1.10", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_0", "A"),
-    HostNode("server-6.mydomain.com", "192.168.1.12", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_0", "A"),
-    HostNode("server-7.mydomain.com", "192.168.1.14", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_0", "A"),
-    HostNode("server-8.mydomain.com", "192.168.1.16", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_0", "A"),
-    HostNode("server-9.mydomain.com", "192.168.1.18", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_0", "A"),
-    HostNode("server-10.mydomain.com", "192.168.1.20", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_0", "A")]
+    HostNode("skv-node2", "192.168.1.103", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_1", "A"),
+    HostNode("skv-node2", "192.168.1.103", [20, 21, 22, 23, 24, 25, 26, 27, 28, 29], "mlx5_1", "A"),
+    HostNode("skv-node2", "192.168.1.103", [30, 31, 32, 33, 34, 35, 36, 37, 38, 39], "mlx5_1", "A"),
+    HostNode("skv-node2", "192.168.1.103", [40, 41, 42, 43, 44, 45, 46, 47, 48, 49], "mlx5_1", "A"),
+    HostNode("skv-node2", "192.168.1.103", [50, 51, 52, 53, 54, 55, 56, 57, 58, 59], "mlx5_1", "A"),
+    HostNode("skv-node2", "192.168.1.103", [60, 61, 62, 63, 64, 65, 66, 67, 68, 69], "mlx5_1", "A"),
+    HostNode("skv-node2", "192.168.1.103", [70, 71, 72, 73, 74, 75, 76, 77, 78, 79], "mlx5_1", "A"),
+    HostNode("skv-node2", "192.168.1.103", [3, 4, 5, 6, 7, 8, 9], "mlx5_1", "A")]
 
-port_bases: Dict[str, int] = {"cpo": 7000, "tso": 8000, "persist": 4000, "nodepool": 10000}
+port_bases: Dict[str, int] = {"cpo": 12300, "tso": 12400, "persist": 12500, "nodepool": 12600}

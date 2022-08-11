@@ -555,12 +555,10 @@ std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID)
 }
 
 //find and empty slot that try to keep rows within/between pages as orderly as possible
-std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(uint32_t schemaID, dto::Key key) {
+std::pair<BufferPage *, RowOffset> PBRB::findCacheRowPosition(
+    uint32_t schemaID, dto::Key key) {
     
     fcrp.accessId++;
-    // fcrp.fcrpNew++;
-    // K2LOG_I(log::pbrb, "SchemaID: {}", schemaID);
-    // _schemaMap[schemaID].printInfo();
     String sname = _schemaMap[schemaID].schema->name;
     // K2LOG_I(log::pbrb, "SchemaName: {}", sname);
     int pageNum = _schemaMap[schemaID].curPageNum;
@@ -1266,4 +1264,70 @@ void PBRB::setKVNodeAddrRow(RowAddr rAddr, void *KVNodeAddr) {
     memcpy(dstPtr + 38, &KVNodeAddr, sizeof(void *));
 }
 
+
+
+void SchemaMetaData::setInfo(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize, uint32_t rowHeaderSize) {
+        // read from Schema
+        // K2LOG_I(log::pbrb, "set smd info: rowHeaderSize: {}", rowHeaderSize);
+        const uint32_t FTSize[256] = {
+            0,                // NULL_T = 0,
+            128,    // 128 STRING, // NULL characters in string is OK
+            sizeof(int16_t),  // INT16T,
+            sizeof(int32_t),  // INT32T,
+            sizeof(int64_t),  // INT64T,
+            sizeof(float),    // FLOAT, // Not supported as key field for now
+            sizeof(double),   // DOUBLE,  // Not supported as key field for now
+            sizeof(bool),     // BOOL,
+            sizeof(std::decimal::decimal64),  // DECIMAL64, // Provides 16 decimal digits of precision
+            sizeof(std::decimal::decimal128), // DECIMAL128, // Provides 34 decimal digits of precision
+            1      // FIELD_TYPE, // The value refers to one of these types. Used in query filters.
+            // NOT_KNOWN = 254,
+            // NULL_LAST = 255
+        };
+
+        if (pbrb->schemaUMap.umap.find(schemaId) == pbrb->schemaUMap.umap.end())
+            return;
+
+        schema = &(pbrb->schemaUMap.umap[schemaId]);
+
+        setNullBitmapSize(schema->fields.size());
+
+        uint32_t currRowOffset = rowHeaderSize + nullableBitmapSize;
+
+        // Set Metadata
+        for (size_t i = 0;i < schema->fields.size();i++) {
+            k2::dto::FieldType currFT = schema->fields[i].type;
+            fieldMetaData fieldObj;
+
+            fieldObj.fieldSize = FTSize[static_cast<int>(currFT)];
+            fieldObj.fieldOffset = currRowOffset;
+            fieldObj.isNullable = false;
+            fieldObj.isVariable = false;
+
+            fieldsInfo.push_back(fieldObj);
+
+            // Go to next field.
+            currRowOffset += fieldObj.fieldSize;
+
+            // K2LOG_I(log::pbrb, "Current type: {}, offset: {}, currRowOffset: {}, rowHeaderSize :{}, nullableBitmapSize: {}", schema->fields[i].type, fieldObj.fieldOffset, currRowOffset, rowHeaderSize, nullableBitmapSize);
+        }
+
+        // set rowSize
+        //rowSize = currRowOffset;
+        rowSize = currRowOffset + sizeof(size_t);
+        setOccuBitmapSize(pageSize);
+        maxRowCnt = (pageSize - pageHeaderSize - occuBitmapSize) / rowSize;
+
+        // K2LOG_I(log::pbrb, "Add new schema:{}", schema->name);
+        // std::cout << std::dec << "\nGot Schema: " << schemaId << std::endl 
+        //           << "name: " << schema->name << std::endl
+        //           << "occuBitmapSize: " << occuBitmapSize << std::endl
+        //           << "rowSize: " << rowSize << std::endl
+        //           << "\trowHeaderSize: " << rowHeaderSize << std::endl
+        //           << "\tnullableBMSize: " << nullableBitmapSize << std::endl
+        //           << "\tAllFieldSize: " << rowSize - rowHeaderSize - nullableBitmapSize << std::endl
+        //           << "maxRowCnt: " << maxRowCnt << std::endl;
+    }
+
 }
+

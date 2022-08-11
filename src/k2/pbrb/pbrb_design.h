@@ -87,24 +87,6 @@ struct SchemaUMap {
     }
 };
 
-static uint32_t FTSize[256] = {
-    0,                // NULL_T = 0,
-    128,    // 128 STRING, // NULL characters in string is OK
-    sizeof(int16_t),  // INT16T,
-    sizeof(int32_t),  // INT32T,
-    sizeof(int64_t),  // INT64T,
-    sizeof(float),    // FLOAT, // Not supported as key field for now
-    sizeof(double),   // DOUBLE,  // Not supported as key field for now
-    sizeof(bool),     // BOOL,
-    sizeof(std::decimal::decimal64),  // DECIMAL64, // Provides 16 decimal digits of precision
-    sizeof(std::decimal::decimal128), // DECIMAL128, // Provides 34 decimal digits of precision
-    1,      // FIELD_TYPE, // The value refers to one of these types. Used in query filters.
-    // NOT_KNOWN = 254,
-    // NULL_LAST = 255
-};
-
-static SchemaUMap schemaUMap;
-
 struct BufferPage
 {
     uint8_t content[pageSize];
@@ -125,6 +107,8 @@ struct fieldMetaData
 // uint32_t cursor = 0;
 // inserting:
 //      
+class PBRB;
+
 struct SchemaMetaData
 {
     SimpleSchema *schema;
@@ -139,19 +123,22 @@ struct SchemaMetaData
     BufferPage *headPage = nullptr;
     BufferPage *tailPage = nullptr;
 
+    PBRB *pbrb;
     void printInfo()
     {
         K2LOG_I(log::pbrb, "{}, {}, {}, {}, {}, {}, {}, {}", (void *)schema, occuBitmapSize, nullableBitmapSize, maxRowCnt, rowSize, curPageNum, curRowNum, (void *)headPage);
     }
 
     SchemaMetaData(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize,
-                    uint32_t rowHeaderSize, BufferPage *pagePtr) {
+                    uint32_t rowHeaderSize, BufferPage *pagePtr, PBRB *pbrb_ptr) {
+        pbrb = pbrb_ptr;
         setInfo(schemaId, pageSize, pageHeaderSize, rowHeaderSize);
         setHeadPage(pagePtr);
         K2LOG_I(log::pbrb, "Set HeadPagePtr for schema:({}, {}), pagePtr empty:{}", schemaId, schema->name, pagePtr == nullptr);
     }
 
-    SchemaMetaData(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize, uint32_t rowHeaderSize) {
+    SchemaMetaData(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize, uint32_t rowHeaderSize, PBRB *pbrb_ptr) {
+        pbrb = pbrb_ptr;
         setInfo(schemaId, pageSize, pageHeaderSize, rowHeaderSize);
     }
 
@@ -164,52 +151,7 @@ struct SchemaMetaData
     }
 
     // Construct from a Schema
-    void setInfo(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize, uint32_t rowHeaderSize) {
-        // read from Schema
-        // K2LOG_I(log::pbrb, "set smd info: rowHeaderSize: {}", rowHeaderSize);
-        if (schemaUMap.umap.find(schemaId) == schemaUMap.umap.end())
-            return;
-
-        schema = &(schemaUMap.umap[schemaId]);
-
-        setNullBitmapSize(schema->fields.size());
-
-        uint32_t currRowOffset = rowHeaderSize + nullableBitmapSize;
-
-        // Set Metadata
-        for (size_t i = 0;i < schema->fields.size();i++) {
-            k2::dto::FieldType currFT = schema->fields[i].type;
-            fieldMetaData fieldObj;
-
-            fieldObj.fieldSize = FTSize[static_cast<int>(currFT)];
-            fieldObj.fieldOffset = currRowOffset;
-            fieldObj.isNullable = false;
-            fieldObj.isVariable = false;
-
-            fieldsInfo.push_back(fieldObj);
-
-            // Go to next field.
-            currRowOffset += fieldObj.fieldSize;
-
-            // K2LOG_I(log::pbrb, "Current type: {}, offset: {}, currRowOffset: {}, rowHeaderSize :{}, nullableBitmapSize: {}", schema->fields[i].type, fieldObj.fieldOffset, currRowOffset, rowHeaderSize, nullableBitmapSize);
-        }
-
-        // set rowSize
-        //rowSize = currRowOffset;
-        rowSize = currRowOffset + sizeof(size_t);
-        setOccuBitmapSize(pageSize);
-        maxRowCnt = (pageSize - pageHeaderSize - occuBitmapSize) / rowSize;
-
-        // K2LOG_I(log::pbrb, "Add new schema:{}", schema->name);
-        // std::cout << std::dec << "\nGot Schema: " << schemaId << std::endl 
-        //           << "name: " << schema->name << std::endl
-        //           << "occuBitmapSize: " << occuBitmapSize << std::endl
-        //           << "rowSize: " << rowSize << std::endl
-        //           << "\trowHeaderSize: " << rowHeaderSize << std::endl
-        //           << "\tnullableBMSize: " << nullableBitmapSize << std::endl
-        //           << "\tAllFieldSize: " << rowSize - rowHeaderSize - nullableBitmapSize << std::endl
-        //           << "maxRowCnt: " << maxRowCnt << std::endl;
-    }
+    void setInfo(SchemaId schemaId, uint32_t pageSize, uint32_t pageHeaderSize, uint32_t rowHeaderSize);
 
     void setNullBitmapSize(uint32_t fieldNumber) {
         nullableBitmapSize = (fieldNumber - 1) / 8 + 1;
@@ -255,6 +197,7 @@ private:
 
 public:
 
+    SchemaUMap schemaUMap;
     struct FCRPSlowCaseStatus {
         bool isFound = true;
         int searchPageNum = 0;
@@ -620,7 +563,7 @@ public:
 
         // Get a page and set schemaMetadata.
         BufferPage *pagePtr = _freePageList.front();
-        SchemaMetaData smd(schemaId, _pageSize, _pageHeaderSize, _rowHeaderSize, pagePtr);
+        SchemaMetaData smd(schemaId, _pageSize, _pageHeaderSize, _rowHeaderSize, pagePtr, this);
         _schemaMap.insert_or_assign(schemaId, smd);
 
         // Initialize Page.
