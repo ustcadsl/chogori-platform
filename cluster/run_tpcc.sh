@@ -1,20 +1,25 @@
 #!/bin/bash
+logdir=log_n10_l10_c10_wh20_pbrb_true
+echo ${logdir}/tpcc_load.log
 
 ./run.py --config_file configs/cluster.cfg  --start cpo tso persist nodepool
-sleep 30
-./run.py --config_file configs/cluster.cfg  --log nodepool > nodepool.log 2>&1
-./run.py --config_file configs/cluster.cfg  --start load
-sleep 5
-./run.py --config_file configs/cluster.cfg  --log load > tpcc_load.log 2>&1
-sleep 300
-./run.py --config_file configs/cluster.cfg  --stop load
 sleep 20
-./run.py --config_file configs/cluster.cfg  --remove load
-sleep 10
-./run.py --config_file configs/cluster.cfg  --start client
+./run.py --config_file configs/cluster.cfg  --start load
+sleep 600
+./run.py --config_file configs/cluster.cfg  --log load > ${logdir}/tpcc_load.log 2>&1
+./run.py --config_file configs/cluster.cfg  --stop load
 sleep 5
-./run.py --config_file configs/cluster.cfg  --log client > tpcc_client.log 2>&1
-sleep 300
+./run.py --config_file configs/cluster.cfg  --remove load
+sleep 5
+./run.py --config_file configs/cluster.cfg  --start client
+sleep 400
+./run.py --config_file configs/cluster.cfg  --log client > ${logdir}/tpcc_client.log 2>&1
+sleep 5
 ./run.py --config_file configs/cluster.cfg  --stop cpo tso persist nodepool client
-sleep 30
+sleep 20
+./run.py --config_file configs/cluster.cfg  --log cpo > ${logdir}/cpo.log 2>&1
+./run.py --config_file configs/cluster.cfg  --log tso > ${logdir}/tso.log 2>&1
+./run.py --config_file configs/cluster.cfg  --log persist > ${logdir}/persist.log 2>&1
+./run.py --config_file configs/cluster.cfg  --log nodepool > ${logdir}/nodepool.log 2>&1
+sleep 20
 ./run.py --config_file configs/cluster.cfg  --remove cpo tso persist nodepool client
