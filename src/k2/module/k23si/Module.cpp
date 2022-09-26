@@ -1121,7 +1121,7 @@ template<typename ResponseT>
 seastar::future<std::tuple<Status, ResponseT>>
 K23SIPartitionModule::_respondWithFlushAsync(std::tuple<Status, ResponseT>&& resp) {
     K2LOG_D(log::skvsvr, "Performing persistence flush asynchromously");
-    auto fut = seastar::sleep(0s).then([this] () {
+    auto fut = seastar::make_ready_future<>().then([this] () {
         return _persistence->flush().then([] (auto&& flushStatus) mutable {
             if (!flushStatus.is2xxOK()) {
                 K2LOG_E(log::skvsvr, "Persistence failed with status {}", flushStatus);
@@ -1198,7 +1198,7 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
     if (vset.WI.has_value() && vset.WI->data.timestamp != request.mtr.timestamp) {
         // this is a write request finding a WI from a different transaction. Do a push with the remaining
         // deadline time.
-        K2LOG_D(log::skvsvr, "different WI found for key {}", request.key);
+        // K2LOG_I(log::skvsvr, "different WI found for key {}", request.key);
         return _doPush(request.key, vset.WI->data.timestamp, request.mtr, deadline)
             .then([this, request = std::move(request), deadline](auto&& retryChallenger) mutable {
                 if (!retryChallenger.is2xxOK()) {
@@ -1208,7 +1208,9 @@ K23SIPartitionModule::_processWrite(dto::K23SIWriteRequest&& request, FastDeadli
                 }
 
                 K2LOG_D(log::skvsvr, "write push retry for key {}", request.key);
-                return _processWrite(std::move(request), deadline);
+                return seastar::sleep(50ms).then([this, request = std::move(request), deadline] () mutable {
+                    return _processWrite(std::move(request), deadline);
+                });
             });
     }
 
@@ -1300,14 +1302,14 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, VersionSet& ve
 
     if (request.writeAsync) {
         // TODO & FIXME: ONLY FOR DEBUG
-        String pkey = request.key.partitionKey;
-        pkey = pkey.substr(pkey.find("pkey"));
-        int index = -1;
-        sscanf(pkey.data(), "pkey%d", &index);
-        K2LOG_D(log::skvsvr, "pkey:{}, index: {}", pkey, index);
-        if (index % 30 != 0) {
-            return Statuses::S201_Created("WI created");
-        }
+        // String pkey = request.key.partitionKey;
+        // pkey = pkey.substr(pkey.find("pkey"));
+        // int index = -1;
+        // sscanf(pkey.data(), "pkey%d", &index);
+        // K2LOG_D(log::skvsvr, "pkey:{}, index: {}", pkey, index);
+        // if (index % 30 != 0) {
+        //     return Statuses::S201_Created("WI created");
+        // }
         auto futPersist = _persistence->append_cont(versions.WI->data)
             .then([this, request=std::move(request)] (auto&& status) {
                 K2LOG_D(log::skvsvr, "Write intent flush status: {}", status);

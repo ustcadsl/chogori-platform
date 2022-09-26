@@ -1,7 +1,7 @@
 #!/bin/bash
 # hugepage config
 # sudo hugeadm --create-group-mounts kvgroup
-sudo hugeadm --pool-pages-min 2MB:35000
+sudo hugeadm --pool-pages-min 2MB:30000
 # increase mtu
 # will lead to failure to ssh knode1, but if not set, cannot establish the rdma channel
 sudo ip link set ens4f1 mtu 9000	

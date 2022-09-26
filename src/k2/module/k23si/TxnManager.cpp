@@ -278,7 +278,7 @@ bool _evaluateChallenge(TxnRecord& incumbent, dto::K23SI_MTR& challengerMTR) {
 seastar::future<std::tuple<Status, dto::K23SITxnPushResponse>>
 TxnManager::push(dto::K23SI_MTR&& incumbentMTR, dto::K23SI_MTR&& challengerMTR, dto::Key trhKey) {
     TxnRecord& incumbent = getTxnRecord(std::move(incumbentMTR), std::move(trhKey));
-
+    K2LOG_D(log::skvsvr, "incumbent = {}, challger = {}", incumbent, challengerMTR);
     switch (incumbent.state) {
         case dto::TxnRecordState::Created:
             // incumbent did not exist. Perform a force-abort.
@@ -394,17 +394,18 @@ TxnManager::endTxn(dto::K23SITxnEndRequest&& request) {
         for (auto& [cname, ids] : writeIds) {
             rec.keysNumber += ids.size();
             auto& infos = rec.writeInfos[cname];
+            K2LOG_I(log::skvsvr, "mtr = {}, writeIds = {}, writeInfos = {}", rec.mtr, ids, infos);
             for (auto& [key, id] : ids) {
                 // TODO & FIXME: ONLY FOR DEBUG
-                int index = -1;
-                String pkey = key.partitionKey;
-                pkey = pkey.substr(pkey.find("pkey"));
-                sscanf(pkey.data(), "pkey%d", &index);
-                K2LOG_D(log::skvsvr, "pkey:{}, index: {}", pkey, index);
-                if (index % 30 != 0) {
-                    rec.keysNumber--;
-                    continue;
-                }                
+                // int index = -1;
+                // String pkey = key.partitionKey;
+                // pkey = pkey.substr(pkey.find("pkey"));
+                // sscanf(pkey.data(), "pkey%d", &index);
+                // K2LOG_D(log::skvsvr, "pkey:{}, index: {}", pkey, index);
+                // if (index % 30 != 0) {
+                //     rec.keysNumber--;
+                //     continue;
+                // }                
                 if (infos.find(key) != infos.end() && infos[key].request_id == id) {
                     rec.persistedKeysNumber++;
                     infos[key].status = dto::WriteKeyStatus::Persisted;
@@ -413,8 +414,8 @@ TxnManager::endTxn(dto::K23SITxnEndRequest&& request) {
                     infos[key].status = dto::WriteKeyStatus::WriteKey;
                 }
             }
-        }
-        K2LOG_D(log::skvsvr, "keysNumber={}, persistedKeysNumber={} for tr {}", rec.keysNumber, rec.persistedKeysNumber, rec);
+        }        
+        K2LOG_I(log::skvsvr, "keysNumber={}, persistedKeysNumber={} for tr {}", rec.keysNumber, rec.persistedKeysNumber, rec);
         if (rec.keysNumber == rec.persistedKeysNumber) {
             rec.isAllKeysPersisted.set_value(dto::K23SIStatus::OK);
             K2LOG_D(log::skvsvr, "all keys persisted for tr {}", rec);
@@ -632,23 +633,23 @@ seastar::future<Status> TxnManager::_forceAborted(TxnRecord& rec) {
     // there is no longer a heartbeat expectation
     rec.unlinkHB(_hblist);
     // if write async, we could now do the finalization task in background
-    if (rec.writeAsync) {
-        rec.finalizeInForceAborted = true;
-        rec.finalizeAction = dto::EndAction::Abort;
-        auto timeout = (10s + _config.writeTimeout() * rec.writeRanges.size()) / _config.finalizeBatchSize();
-        K2LOG_D(log::skvsvr, "preparing the finalization in force aborted state for TR {}", rec);
+    // if (rec.writeAsync) {
+    //     rec.finalizeInForceAborted = true;
+    //     rec.finalizeAction = dto::EndAction::Abort;
+    //     auto timeout = (10s + _config.writeTimeout() * rec.writeRanges.size()) / _config.finalizeBatchSize();
+    //     K2LOG_D(log::skvsvr, "preparing the finalization in force aborted state for TR {}", rec);
 
-        auto fut = seastar::sleep(_config.writeTimeout()).then([this, &rec, timeout=std::move(timeout)] () {
-            return _finalizeTransaction(rec, FastDeadline(timeout))
-                .then([this, &rec] (auto&& status){
-                    K2LOG_D(log::skvsvr, "finalize in force aborted async status: {}", status);
-                    if (!status.is2xxOK()) {
-                        K2LOG_D(log::skvsvr, "finalize in force aborted async failed");
-                    }
-                    rec.isFinalizeFinished.set_value(status);
-                });
-        });
-    }
+    //     auto fut = seastar::sleep(_config.writeTimeout()).then([this, &rec, timeout=std::move(timeout)] () {
+    //         return _finalizeTransaction(rec, FastDeadline(timeout))
+    //             .then([this, &rec] (auto&& status){
+    //                 K2LOG_D(log::skvsvr, "finalize in force aborted async status: {}", status);
+    //                 if (!status.is2xxOK()) {
+    //                     K2LOG_D(log::skvsvr, "finalize in force aborted async failed");
+    //                 }
+    //                 rec.isFinalizeFinished.set_value(status);
+    //             });
+    //     });
+    // }
     // we still want to keep the record inked in the retention window since we want to take action if it goes past the RWE
     return seastar::make_ready_future<Status>(dto::K23SIStatus::OK);
 }
@@ -660,6 +661,7 @@ seastar::future<Status> TxnManager::_commitPIP(TxnRecord& rec) {
     rec.state = dto::TxnRecordState::CommittedPIP;
     // if write async, we should wait until all write keys are persisted successfully
     if (rec.writeAsync) {
+        // rec.unlinkHB(_hblist);
         return rec.isAllKeysPersisted.get_future()
             .then([this, &rec, reporter=std::move(reporter)] (auto&& status) mutable {
                 K2LOG_D(log::skvsvr, "all keys persisted with status {} for rec {}", status, rec);

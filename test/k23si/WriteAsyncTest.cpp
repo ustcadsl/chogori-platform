@@ -92,8 +92,8 @@ public:  // application lifespan
                         .storageDriver = dto::StorageDriver::K23SI,
                         .capacity{
                             .dataCapacityMegaBytes = 1000,
-                            .readIOPs = 100000,
-                            .writeIOPs = 100000
+                            .readIOPs = 1000000,
+                            .writeIOPs = 1000000
                         },
                         .retentionPeriod = Duration(1h)*90*24
                     },
@@ -200,11 +200,13 @@ private:
     ConfigVar<std::vector<String>> _k2ConfigEps{"k2_endpoints"};
     ConfigVar<String> _cpoConfigEp{"cpo_endpoint"};
     ConfigVar<uint32_t> _concurrentNum{"concurrent_num"};
+    ConfigVar<uint32_t> _keySpace{"key_space"};
     ConfigVar<uint32_t> _txnsCount{"txns_count"};
     ConfigVar<uint32_t> _keysCount{"keys_count"};
     ConfigVar<bool> _singlePartition{"single_partition"};
     ConfigVar<bool> _writeAsync{"write_async"};
     ConfigVar<bool> _countLatency{"count_latency"};
+    ConfigVar<bool> _enableConcurrentWrite{"enable_concurrent_write"};
 
     std::vector<std::unique_ptr<k2::TXEndpoint>> _k2Endpoints;
     std::unique_ptr<k2::TXEndpoint> _cpoEndpoint;
@@ -240,12 +242,12 @@ private:
             sm::make_histogram("write_latency", [this]{ return _writeLatency.getHistogram();},
                     sm::description("Latency of write Operations"), labels),
             sm::make_histogram("txn_latency", [this]{ return _txnLatency.getHistogram();},
-                    sm::description("Latency of txn"), labels),
+                    sm::description("Latency of txn"), labels),                    
         });
     }
 
     seastar::future<std::tuple<Status, dto::K23SIWriteResponse>>
-    doWrite(const dto::Key& key, const DataRec& data, const dto::K23SI_MTR& mtr, const dto::Key& trh, const String& cname, bool isDelete, bool isTRH, bool writeAsync=false,std::unordered_map<dto::Key, uint64_t>&& writeKeyIds={}) {
+    doWrite(const dto::Key& key, const DataRec& data, const dto::K23SI_MTR& mtr, const dto::Key& trh, const String& cname, bool isDelete, bool isTRH, bool writeAsync=false, std::unordered_map<dto::Key, uint64_t>&& writeKeyIds={}) {
 
         SKVRecord record(cname, std::make_shared<k2::dto::Schema>(_schema));
         record.serializeNext<String>(key.partitionKey);
@@ -269,10 +271,7 @@ private:
             .fieldsForPartialUpdate = std::vector<uint32_t>(),
             .writeAsync = writeAsync
         };
-        if (writeAsync) {
-            writeKeyIds[key] = id - 1;
-            // K2LOG_I(log::k23si, "writeKeyIds={}", writeKeyIds);                                
-        }
+        writeKeyIds[key] = request.request_id;
         return RPC().callRPC<dto::K23SIWriteRequest, dto::K23SIWriteResponse>(dto::Verbs::K23SI_WRITE, request, *part.preferredEndpoint, 1000ms);
     }
 
@@ -378,7 +377,7 @@ seastar::future<> move_param(dto::Key&& key) {
     return seastar::make_ready_future<>();
 }
 
-seastar::future<> runTransactions(String prefix = "run_trans", bool writeAsync = false, int keysCount = 100, bool singlePartition = false, bool countLatency = false) {
+seastar::future<> runTransactionsWithoutConcurrentWrite(String prefix = "run_trans", bool writeAsync = false, int keysCount = 30, bool singlePartition = false, bool countLatency = false, int keySpace = 30) {
     return seastar::make_ready_future()
         .then([this] {
             return getTimeNow();
@@ -400,61 +399,148 @@ seastar::future<> runTransactions(String prefix = "run_trans", bool writeAsync =
                 keysCount,
                 singlePartition,
                 countLatency,
-                [this] (dto::K23SI_MTR& mtr, dto::Key& key1, dto::Key& trh, DataRec& rec, auto& txnReporter, auto& writeKeyIds, String& prefix, auto& writeAsync, auto& keysCount, auto& singlePartition, auto& countLatency) mutable {
+                keySpace,
+                [this] (dto::K23SI_MTR& mtr, dto::Key& key1, dto::Key& trh, DataRec& rec, auto& txnReporter, auto& writeKeyIds, String& prefix, auto& writeAsync, auto& keysCount, auto& singlePartition, auto& countLatency, auto& keySpace) mutable {
                     // K2LOG_I(log::k23si, "prefix={}, writeAsync={}, keysCount={}, singlePartition={}", prefix, writeAsync, keysCount, singlePartition);
-                    k2::OperationLatencyReporter reporter(_writeLatency);
-                    return doWrite(key1, rec, mtr, trh, _collName, false, true, writeAsync, std::move(writeKeyIds))
-                        .then([this, reporter=std::move(reporter)] (auto&& response) mutable{
-                            auto& [status, resp] = response;
-                            K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
-                            reporter.report();
-                        })
-                        .then([&] {
-                            std::vector<seastar::future<>> writes;
-                            for (int i = 2; i <= keysCount; i++) {
-                                seastar::future<> fut = seastar::make_ready_future<>();
-                                dto::Key key{
-                                    .schemaName = _schemaName,
-                                    .partitionKey = prefix + (singlePartition ? "pkey1" : "pkey" + std::to_string(i)),
-                                    .rangeKey = "rkey" + std::to_string(i)
-                                };
-                                fut = fut.then([this, key=std::move(key), &rec, &mtr, &trh, &writeAsync, &countLatency, &writeKeyIds] {
-                                    // K2LOG_I(log::k23si, "write key: {}", key);
-                                    k2::OperationLatencyReporter reporter(_writeLatency);
-                                    return doWrite(key, rec, mtr, trh, _collName, false, false, writeAsync, std::move(writeKeyIds))
-                                        .then([this, reporter=std::move(reporter)] (auto&& response) mutable{
-                                            auto& [status, resp] = response;
-                                            K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
-                                            reporter.report();            
-                                        });
-                                });
-                                writes.push_back(std::move(fut));
+                    // k2::OperationLatencyReporter reporter(_writeLatency);
+                    (void) key1;
+                    // (void) keySpace;
+                    // (void) txnReporter;
+                    seastar::future<Status> fut = seastar::make_ready_future<Status>(dto::K23SIStatus::Created);
+                    for (int i = 1; i <= keysCount; i++) {
+                        int rd = rand() % keySpace;
+                        dto::Key key{
+                            .schemaName = _schemaName,
+                            .partitionKey = prefix + (singlePartition ? "pkey1" : "pkey" + std::to_string(i)),
+                            .rangeKey = "rkey" + std::to_string(rd)
+                        };
+                        bool isTrh = i == 1;
+                        fut = fut.then([this, key=std::move(key), &rec, &mtr, &trh, &writeAsync, &countLatency, &writeKeyIds, isTrh=std::move(isTrh)] (auto&& status) {
+                            // K2LOG_I(log::k23si, "write key: {}", key);
+                            if (!status.is2xxOK()) {
+                                return seastar::make_ready_future<Status>(status);
                             }
-                            return seastar::when_all(writes.begin(), writes.end()).discard_result();
-                        })
-                        .then([&] {
-                            // K2LOG_I(log::k23si, "issuing the end request");
-                            std::vector<dto::Key> endKeys;
-                            for (int i = 1; i <= keysCount; i++) {
-                                dto::Key key{
-                                    .schemaName = _schemaName,
-                                    .partitionKey = prefix + (singlePartition ? "pkey1" : "pkey" + std::to_string(i)),
-                                    .rangeKey = "rkey" + std::to_string(i)
-                                };
-                                endKeys.push_back(key);
-                            }
-                            k2::OperationLatencyReporter reporter(_endLatency);
-                            // K2LOG_I(log::k23si, "writeKeyIds={}", writeKeyIds);                                
-                            return doEnd(trh, mtr, _collName, true, endKeys, writeKeyIds)
+                            k2::OperationLatencyReporter reporter(_writeLatency);
+                            return doWrite(key, rec, mtr, trh, _collName, false, isTrh, writeAsync, std::move(writeKeyIds))
                                 .then([this, reporter=std::move(reporter)] (auto&& response) mutable{
                                     auto& [status, resp] = response;
-                                    K2EXPECT(log::k23si, status, dto::K23SIStatus::OK);
-                                    reporter.report();            
+                                    // K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
+                                    reporter.report();
+                                    return seastar::make_ready_future<Status>(status);
+                                });
+                        });
+                    }
+                    return fut.then([&] (auto&& status) {
+                        K2LOG_D(log::k23si, "write status = {} for mtr = {}", status, mtr);
+                        std::vector<dto::Key> endKeys;
+                        for (auto& it : writeKeyIds) {
+                            endKeys.push_back(it.first);
+                        }
+                        k2::OperationLatencyReporter reporter(_endLatency);
+                        // K2LOG_I(log::k23si, "writeKeyIds={}", writeKeyIds); 
+                        // K2LOG_I(log::k23si, "canCommit={}", status.is2xxOK());                              
+                        return doEnd(trh, mtr, _collName, status.is2xxOK(), endKeys, writeKeyIds)
+                            .then([this, reporter=std::move(reporter)] (auto&& response) mutable{
+                                auto& [status, resp] = response;
+                                // K2EXPECT(log::k23si, status, dto::K23SIStatus::OK);
+                                // K2LOG_D(log::k23si, "end status = {}", status);
+                                if (!status.is2xxOK()) {
+                                    K2LOG_D(log::k23si, "end status = {}", status);
+                                }
+                                reporter.report();            
+                            });
+                    }).then([&] () {
+                        txnReporter.report();
+                        return seastar::make_ready_future<>();
+                    });
+            });
+    });
+}
+
+seastar::future<> runTransactionsWithConcurrentWrite(String prefix = "run_trans", bool writeAsync = false, int keysCount = 30, bool singlePartition = false, bool countLatency = false, int keySpace = 30) {
+    return seastar::make_ready_future()
+        .then([this] {
+            return getTimeNow();
+        })
+        .then([&] (dto::Timestamp&& ts) {
+            k2::OperationLatencyReporter reporter(_txnLatency);
+            std::unordered_map<dto::Key, uint64_t> writeKeyIds;
+            return seastar::do_with(
+                dto::K23SI_MTR{
+                    .timestamp = std::move(ts),
+                    .priority = dto::TxnPriority::Medium},
+                dto::Key{.schemaName = _schemaName, .partitionKey = prefix + "pkey1", .rangeKey = "rKey1"},
+                dto::Key{.schemaName = _schemaName, .partitionKey = prefix + "pkey1", .rangeKey = "rKey1"},
+                DataRec{.f1="field1", .f2="field2"},
+                std::move(reporter),
+                std::move(writeKeyIds),
+                prefix,
+                writeAsync,
+                keysCount,
+                singlePartition,
+                countLatency,
+                keySpace,
+                [this] (dto::K23SI_MTR& mtr, dto::Key& key1, dto::Key& trh, DataRec& rec, auto& txnReporter, auto& writeKeyIds, String& prefix, auto& writeAsync, auto& keysCount, auto& singlePartition, auto& countLatency, auto& keySpace) mutable {
+                    // K2LOG_I(log::k23si, "prefix={}, writeAsync={}, keysCount={}, singlePartition={}", prefix, writeAsync, keysCount, singlePartition);
+                    // k2::OperationLatencyReporter reporter(_writeLatency);
+                    (void) key1;
+                    // (void) keySpace;
+                    std::vector<seastar::future<Status>> writes;
+                    for (int i = 1; i <= keysCount; i++) {
+                        int rd = rand() % keySpace;
+                        dto::Key key{
+                            .schemaName = _schemaName,
+                            .partitionKey = prefix + (singlePartition ? "pkey1" : "pkey" + std::to_string(i)),
+                            .rangeKey = "rkey" + std::to_string(rd)
+                        };
+                        seastar::future<Status> fut = seastar::make_ready_future<Status>(dto::K23SIStatus::Created);
+                        bool isTrh = i == 1;
+                        fut = fut.then([this, key=std::move(key), &rec, &mtr, &trh, &writeAsync, &countLatency, &writeKeyIds, isTrh=std::move(isTrh)] (auto&& status) {
+                            // K2LOG_I(log::k23si, "write key: {}", key);
+                            (void) status;
+                            k2::OperationLatencyReporter reporter(_writeLatency);
+                            return doWrite(key, rec, mtr, trh, _collName, false, isTrh, writeAsync, std::move(writeKeyIds))
+                                .then([this, reporter=std::move(reporter)] (auto&& response) mutable {
+                                    auto& [status, resp] = response;
+                                    // K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
+                                    reporter.report();
+                                    return seastar::make_ready_future<Status>(status); 
+                                });
+                        });
+                        writes.push_back(std::move(fut));
+                    }
+                    return seastar::when_all_succeed(writes.begin(), writes.end())
+                        .then([&] (auto&& doneStatuses) {
+                            // K2LOG_I(log::k23si, "issuing the end request");
+                            bool canCommit = true;
+                            for (auto& status : doneStatuses) {
+                                // auto& [status, resp] = doneStatus;
+                                if (!status.is2xxOK()) {
+                                    canCommit = false;
+                                    break;
+                                }
+                            }
+                            std::vector<dto::Key> endKeys;
+                            for (auto& it : writeKeyIds) {
+                                endKeys.push_back(it.first);
+                            }
+                            k2::OperationLatencyReporter reporter(_endLatency);
+                            // K2LOG_I(log::k23si, "writeKeyIds={}", writeKeyIds);  
+                            // K2LOG_I(log::k23si, "canCommit={}", canCommit);                              
+                            return doEnd(trh, mtr, _collName, canCommit, endKeys, writeKeyIds)
+                                .then([&, reporter=std::move(reporter)] (auto&& response) mutable {
+                                    auto& [status, resp] = response;
+                                    // K2EXPECT(log::k23si, status, dto::K23SIStatus::OK);
+                                    if (!status.is2xxOK()) {
+                                        K2LOG_D(log::k23si, "end status = {}", status);
+                                    }
+                                    reporter.report();
                                 });
                         })
                         .then([&] () {
                             txnReporter.report();
-                        });
+                            // return seastar::sleep(10ms);
+                        });                    
             });
     });
 }
@@ -466,11 +552,13 @@ seastar::future<> runScenario09() {
     
     K2LOG_I(log::k23si, "startTp: {}", startTp.time_since_epoch().count());
     int concurrentNum = _concurrentNum();
+    int keySpace = _keySpace();
     int transactionsCount = _txnsCount();
     int keysCount = _keysCount();
     bool singlePartition = _singlePartition();
     bool writeAsync = _writeAsync();
     bool countLatency = _countLatency();
+    bool enableConcurrentWrite = _enableConcurrentWrite();
     return seastar::do_with(
         std::move(concurrentNum),
         std::move(transactionsCount),
@@ -478,17 +566,24 @@ seastar::future<> runScenario09() {
         std::move(singlePartition),
         std::move(writeAsync),
         std::move(countLatency),
+        std::move(keySpace),
+        std::move(enableConcurrentWrite),
         std::move(startTp),
-        [this] (auto& concurrentNum, auto& transactionsCount, auto& keysCount, auto& singlePartition, auto& writeAsync, auto& countLatency, auto& startTp) {
+        [this] (auto& concurrentNum, auto& transactionsCount, auto& keysCount, auto& singlePartition, auto& writeAsync, auto& countLatency, auto& keySpace, auto& enableConcurrentWrite, auto& startTp) {
             std::vector<seastar::future<>> futs;
             int shard_id = seastar::this_shard_id();
             // int cpu_count = seastar::smp::count;
             for (int num = 0; num < concurrentNum; num += 1) {
                 seastar::future<> fut = seastar::make_ready_future<>();
                 for (int i = 0; i < transactionsCount; i++) {
-                    String prefix {"test_ops_" + std::to_string(shard_id) + "_" + std::to_string(num) + "_" + std::to_string(i)};
+                    // String prefix {"test_ops_" + std::to_string(shard_id) + "_" + std::to_string(num) + "_" + std::to_string(i)};
+                    String prefix {"test_ops"};
+                    (void) shard_id;
                     fut = fut.then([&, prefix=std::move(prefix)] () {
-                        return runTransactions(prefix, writeAsync, keysCount, singlePartition, countLatency);
+                        if (enableConcurrentWrite) {
+                            return runTransactionsWithConcurrentWrite(prefix, writeAsync, keysCount, singlePartition, countLatency, keySpace);
+                        }
+                        return runTransactionsWithoutConcurrentWrite(prefix, writeAsync, keysCount, singlePartition, countLatency, keySpace);
                     });
                 }
                 futs.push_back(std::move(fut));
@@ -532,11 +627,13 @@ int main(int argc, char** argv) {
     app.addOptions()("k2_endpoints", bpo::value<std::vector<k2::String>>()->multitoken(), "The endpoints of the k2 cluster");
     app.addOptions()("cpo_endpoint", bpo::value<k2::String>(), "The endpoint of the CPO");
     app.addOptions()("concurrent_num", bpo::value<uint32_t>()->default_value(1), "how many txns concurrently sent");
+    app.addOptions()("key_space", bpo::value<uint32_t>()->default_value(30), "control the conflict rate, the bigger key_space, the less conflict");
     app.addOptions()("txns_count", bpo::value<uint32_t>()->default_value(100), "how many txns to test");
     app.addOptions()("keys_count", bpo::value<uint32_t>()->default_value(50), "how many writes to test per txn");
     app.addOptions()("single_partition", bpo::value<bool>()->default_value(true), "whether to write in one partition only");
     app.addOptions()("write_async", bpo::value<bool>()->default_value(true), "whether to write in async manner");
     app.addOptions()("count_latency", bpo::value<bool>()->default_value(false), "whether to count latency of write and end opration");
+    app.addOptions()("enable_concurrent_write", bpo::value<bool>()->default_value(false), "whether to enable concurrent write in a txn");
     app.addApplet<k2::WriteAsyncTest>();
     return app.start(argc, argv);
 }

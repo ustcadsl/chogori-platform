@@ -45,7 +45,7 @@ struct K23SIConfig {
     ConfigDuration readTimeout{"read_timeout", 100ms};
 
     // timeout for write requests (including potential PUSH operations)
-    ConfigDuration writeTimeout{"write_timeout", 150ms};
+    ConfigDuration writeTimeout{"write_timeout", 1000ms};
 
     // timeout for write key persist requests
     ConfigDuration writeKeyPersistTimeout{"write_key_persist_timeout", 10s};
@@ -70,7 +70,7 @@ struct K23SIConfig {
     // the endpoint for our persistence
     ConfigVar<std::vector<String>> persistenceEndpoint{"k23si_persistence_endpoints"};
     ConfigDuration persistenceTimeout{"k23si_persistence_timeout", 10s};
-    ConfigDuration persistenceAutoflushDeadline{"k23si_autoflush_deadline", 1s};
+    ConfigDuration persistenceAutoflushDeadline{"k23si_autoflush_deadline", 500ms};
 
     // the endpoint for the CPO
     ConfigVar<String> cpoEndpoint{"k23si_cpo_endpoint", "tcp+k2rpc://127.0.0.1:12345"};
