@@ -208,8 +208,8 @@ Status TxnWIMetaManager::_onAction(Action action, TxnWIMeta& twim) {
     switch (twim.state) {
         case dto::TxnWIMetaState::Created: switch (action) {
             case Action::onCreate: {
-                return _inProgressPIP(twim);
-                // return _inProgress(twim); // rdma simulation
+                // return _inProgressPIP(twim);
+                return _inProgress(twim); // rdma simulation && client tracking
             }
             case Action::onCommit:
             case Action::onAbort:

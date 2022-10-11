@@ -230,7 +230,7 @@ seastar::future<> K23SIPartitionModule::_registerVerbs() {
         bool writeAsync = request.writeAsync;
         return seastar::do_with(std::move(writeAsync), [&] (auto& writeAsync) {
             return handleWrite(std::move(request), FastDeadline(_config.writeTimeout()))
-                .then([this, &writeAsync, reporter=std::move(reporter)] (auto&& resp) {
+                .then([this, &writeAsync, reporter=std::move(reporter)] (auto&& resp) mutable {
                     if (writeAsync) {
                         return _respondWithFlushAsync(std::move(resp))
                             .then([this, reporter=std::move(reporter)] (auto&& response) mutable {
@@ -238,11 +238,13 @@ seastar::future<> K23SIPartitionModule::_registerVerbs() {
                                 return std::move(response);
                             });
                     }
-                    return _respondAfterFlush(std::move(resp))
-                        .then([this, reporter=std::move(reporter)] (auto&& response) mutable {
-                            reporter.report();
-                            return std::move(response);
-                        });             
+                    reporter.report();
+                    return seastar::make_ready_future<std::tuple<k2::Status, k2::dto::K23SIWriteResponse>>(std::move(resp));
+                    // return _respondAfterFlush(std::move(resp))
+                    //     .then([this, reporter=std::move(reporter)] (auto&& response) mutable {
+                    //         reporter.report();
+                    //         return std::move(response);
+                    //     });             
                     });
         });
     });
@@ -1300,24 +1302,25 @@ K23SIPartitionModule::_createWI(dto::K23SIWriteRequest&& request, VersionSet& ve
     versions.WI.emplace(std::move(rec), request.request_id);
     _totalWI++;
 
-    if (request.writeAsync) {
-        // TODO & FIXME: ONLY FOR DEBUG
-        // String pkey = request.key.partitionKey;
-        // pkey = pkey.substr(pkey.find("pkey"));
-        // int index = -1;
-        // sscanf(pkey.data(), "pkey%d", &index);
-        // K2LOG_D(log::skvsvr, "pkey:{}, index: {}", pkey, index);
-        // if (index % 30 != 0) {
-        //     return Statuses::S201_Created("WI created");
-        // }
-        auto futPersist = _persistence->append_cont(versions.WI->data)
-            .then([this, request=std::move(request)] (auto&& status) {
-                K2LOG_D(log::skvsvr, "Write intent flush status: {}", status);
-                return _notifyWriteKeyPersist(request.collectionName, request.mtr, request.trh, request.key, request.request_id, FastDeadline(_config.writeKeyPersistTimeout()));
-            });
-    } else {
-        _persistence->append(versions.WI->data);
-    }
+    // no need for client tracking
+    // if (request.writeAsync) {
+    //     // TODO & FIXME: ONLY FOR DEBUG
+    //     // String pkey = request.key.partitionKey;
+    //     // pkey = pkey.substr(pkey.find("pkey"));
+    //     // int index = -1;
+    //     // sscanf(pkey.data(), "pkey%d", &index);
+    //     // K2LOG_D(log::skvsvr, "pkey:{}, index: {}", pkey, index);
+    //     // if (index % 30 != 0) {
+    //     //     return Statuses::S201_Created("WI created");
+    //     // }
+    //     auto futPersist = _persistence->append_cont(versions.WI->data)
+    //         .then([this, request=std::move(request)] (auto&& status) {
+    //             K2LOG_D(log::skvsvr, "Write intent flush status: {}", status);
+    //             return _notifyWriteKeyPersist(request.collectionName, request.mtr, request.trh, request.key, request.request_id, FastDeadline(_config.writeKeyPersistTimeout()));
+    //         });
+    // } else {
+    //     _persistence->append(versions.WI->data);
+    // }
     return Statuses::S201_Created("WI created");
 }
 

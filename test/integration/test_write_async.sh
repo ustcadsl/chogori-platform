@@ -4,7 +4,7 @@ cd ${topname}/../..
 set -e
 CPODIR=/tmp/___cpo_integ_test
 rm -rf ${CPODIR}
-EPS="tcp+k2rpc://0.0.0.0:11000 tcp+k2rpc://0.0.0.0:11001 tcp+k2rpc://0.0.0.0:11003"
+EPS="tcp+k2rpc://0.0.0.0:8000 tcp+k2rpc://0.0.0.0:8001 tcp+k2rpc://0.0.0.0:8002"
 
 PERSISTENCE=tcp+k2rpc://0.0.0.0:12001
 CPO=tcp+k2rpc://0.0.0.0:9000
@@ -15,11 +15,11 @@ TSO=tcp+k2rpc://0.0.0.0:13000
 cpo_child_pid=$!
 
 # start nodepool on 3 cores
-./build/src/k2/cmd/nodepool/nodepool --log_level ERROR k2::skv_server=WARN -c3 --tcp_endpoints ${EPS} --enable_tx_checksum true --k23si_persistence_endpoint ${PERSISTENCE} --reactor-backend epoll --prometheus_port 63009 --k23si_cpo_endpoint ${CPO} --tso_endpoint ${TSO} --partition_request_timeout=6s --memory=3G &
+./build/src/k2/cmd/nodepool/nodepool --log_level INFO k2::skv_server=INFO -c3 --tcp_endpoints ${EPS} --enable_tx_checksum true --k23si_persistence_endpoint ${PERSISTENCE} --reactor-backend epoll --prometheus_port 63009 --k23si_cpo_endpoint ${CPO} --tso_endpoint ${TSO} --partition_request_timeout=6s --memory=3G &
 nodepool_child_pid=$!
 
 # start persistence on 1 cores
-./build/src/k2/cmd/persistence/persistence -c1 --tcp_endpoints ${PERSISTENCE} --enable_tx_checksum true --reactor-backend epoll --prometheus_port 63008 &
+./build/src/k2/cmd/persistence/persistence -c1 --log_level INFO --tcp_endpoints ${PERSISTENCE} --enable_tx_checksum true --reactor-backend epoll --prometheus_port 63008 &
 persistence_child_pid=$!
 
 # start tso on 2 cores
@@ -52,5 +52,5 @@ trap finish EXIT
 
 sleep 2
 
-./build/test/k23si/write_async_test --cpo_endpoint ${CPO} --k2_endpoints ${EPS} --enable_tx_checksum true --reactor-backend epoll --prometheus_port 8866 --memory=10G --concurrent_num=4 --key_space=30 --txns_count=200 --keys_count=30 --single_partition=false --write_async=true --count_latency=false --enable_concurrent_write=false
+./build/test/k23si/write_async_test --cpo_endpoint ${CPO} --k2_endpoints ${EPS} --k23si_persistence_endpoints ${PERSISTENCE} --enable_tx_checksum true --reactor-backend epoll --prometheus_port 8866 --memory=10G --concurrent_num=4 --key_space=3000000 --txns_count=3000 --keys_count=30 --single_partition=false --write_async=false --count_latency=false --enable_concurrent_write=false --client_tracking=true
 

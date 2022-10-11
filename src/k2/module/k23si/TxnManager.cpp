@@ -415,7 +415,7 @@ TxnManager::endTxn(dto::K23SITxnEndRequest&& request) {
                 }
             }
         }        
-        K2LOG_I(log::skvsvr, "keysNumber={}, persistedKeysNumber={} for tr {}", rec.keysNumber, rec.persistedKeysNumber, rec);
+        K2LOG_D(log::skvsvr, "keysNumber={}, persistedKeysNumber={} for tr {}", rec.keysNumber, rec.persistedKeysNumber, rec);
         if (rec.keysNumber == rec.persistedKeysNumber) {
             rec.isAllKeysPersisted.set_value(dto::K23SIStatus::OK);
             K2LOG_D(log::skvsvr, "all keys persisted for tr {}", rec);
@@ -730,18 +730,18 @@ seastar::future<Status> TxnManager::_endHelper(TxnRecord& rec) {
 
     auto timeout = (10s + _config.writeTimeout() * rec.writeRanges.size()) / _config.finalizeBatchSize();
 
-    if (rec.finalizeInForceAborted) {
-        auto fut = seastar::sleep(1ms).then([this, &rec] {
-            return rec.isFinalizeFinished.get_future().then([this, &rec] (auto&& status) {
-                if (!status.is2xxOK()) {
-                    K2LOG_E(log::skvsvr, "finalization in force aborted failed with status {}", status);
-                }
-                K2LOG_D(log::skvsvr, "finalization in force aborted succeed for TR {}", rec);
-                return _onAction(TxnRecord::Action::onFinalizeComplete, rec);
-            }).discard_result();
-        });
-        return seastar::make_ready_future<Status>(dto::K23SIStatus::OK);
-    }
+    // if (rec.finalizeInForceAborted) {
+    //     auto fut = seastar::sleep(1ms).then([this, &rec] {
+    //         return rec.isFinalizeFinished.get_future().then([this, &rec] (auto&& status) {
+    //             if (!status.is2xxOK()) {
+    //                 K2LOG_E(log::skvsvr, "finalization in force aborted failed with status {}", status);
+    //             }
+    //             K2LOG_D(log::skvsvr, "finalization in force aborted succeed for TR {}", rec);
+    //             return _onAction(TxnRecord::Action::onFinalizeComplete, rec);
+    //         }).discard_result();
+    //     });
+    //     return seastar::make_ready_future<Status>(dto::K23SIStatus::OK);
+    // }
 
     if (rec.syncFinalize) {
         return _finalizeTransaction(rec, FastDeadline(timeout));

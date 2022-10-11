@@ -143,6 +143,7 @@ public:  // application lifespan
             .then([this] { return runScenario03(); })
             .then([this] { return runScenario04(); })
             .then([this] { return runScenario05(); })
+            .then([this] { return runScenario06(); })
             .then([this] {
                 K2LOG_I(log::k23si, "======= All tests passed ========");
                 exitcode = 0;
@@ -584,6 +585,99 @@ seastar::future<> runScenario05() {
                     DataRec d2{"fk2", "f2"};
                     K2EXPECT(log::k23si, value1, d1);
                     K2EXPECT(log::k23si, value2, d2);
+                });
+        });
+}
+
+seastar::future<> runScenario06() {
+    // 事务 1 写 K1 和 K3，事务 2 写 K2，并且事务 2 的时间戳小于事务 1.
+    K2LOG_I(log::k23si, "Scenario 06: concurrent transactions to validate high abort rate");
+    return seastar::do_with(
+        dto::K23SI_MTR{},
+        dto::K23SI_MTR{},
+        dto::Key{"schema", "s06-pkey1", "rkey1"},
+        dto::Key{"schema", "s06-pkey1", "rkey2"},
+        dto::Key{"schema", "s06-pkey1", "rkey3"},
+        [this](auto& m1, auto& m2, auto& k1, auto& k2, auto& k3) {
+            return getTimeNow()
+                .then([&](dto::Timestamp&& ts) {
+                    m2.timestamp = ts;
+                    m2.priority = dto::TxnPriority::Medium;
+                    return seastar::sleep(10ms).then([&] {
+                        return getTimeNow();
+                    });
+                })
+                .then([&](dto::Timestamp&& ts) {
+                    m1.timestamp = ts;
+                    m1.priority = dto::TxnPriority::Medium;
+                    return doWrite(k1, {"fk1","f1"}, m1, k1, collname, false, true);
+                })
+                .then([&](auto&& result) {
+                    auto& [status, r] = result;
+                    K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
+                    return doWrite(k3, {"fk3","f3"}, m1, k1, collname, false, false);
+                })
+                .then([&](auto&& result) {
+                    auto& [status, r] = result;
+                    K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
+                    return doRead(k1, m1, collname);
+                })
+                .then([&](auto&& result) {
+                    auto& [status, r] = result;
+                    K2EXPECT(log::k23si, status, dto::K23SIStatus::OK);
+                    DataRec d1{"fk1", "f1"};
+                    K2EXPECT(log::k23si, r, d1);
+                    return doRead(k3, m1, collname);
+                })  
+                .then([&](auto&& result) {
+                    auto& [status, r] = result;
+                    K2EXPECT(log::k23si, status, dto::K23SIStatus::OK);
+                    DataRec d3{"fk3", "f3"};
+                    K2EXPECT(log::k23si, r, d3);
+                    return doWrite(k2, {"fk2","f2"}, m2, k2, collname, false, true);
+                })                              
+                .then([&](auto&& result) {
+                    auto& [status, r] = result;
+                    K2EXPECT(log::k23si, status, dto::K23SIStatus::Created);
+                    return doRequestTRH(k1, m1);
+                })              
+                // Verify both txns are InProgress
+                .then([&] (auto&& response) {
+                    auto& [status, k2response] = response;
+                    K2EXPECT(log::k23si, status, Statuses::S200_OK);
+                    K2EXPECT(log::k23si, k2response.state, k2::dto::TxnRecordState::InProgress);
+
+                    return doRequestTRH(k2, m2);
+                })
+                .then([&] (auto&& response) {
+                    auto& [status, k2response] = response;
+                    K2EXPECT(log::k23si, status, Statuses::S200_OK);
+                    K2EXPECT(log::k23si, k2response.state, k2::dto::TxnRecordState::InProgress);
+
+                    return seastar::when_all(doEnd(k1, m1, collname, true, {k1, k3}), doEnd(k2, m2, collname, true, {k2}));
+                })
+                .then([&](auto&& result) mutable {
+                    auto& [r1, r2] = result;
+                    auto [status1, result1] = r1.get0();
+                    auto [status2, result2] = r2.get0();
+                    K2EXPECT(log::k23si, status1, dto::K23SIStatus::OK);
+                    K2EXPECT(log::k23si, status2, dto::K23SIStatus::OK);
+                    return seastar::when_all(doRead(k1, m1, collname), doRead(k2, m2, collname), doRead(k3, m1, collname));
+                })
+                .then([&](auto&& result) mutable {
+                    auto& [r1, r2, r3] = result;
+                    auto [status1, value1] = r1.get0();
+                    auto [status2, value2] = r2.get0();
+                    auto [status3, value3] = r3.get0();
+                    K2EXPECT(log::k23si, status1, dto::K23SIStatus::OK);
+                    K2EXPECT(log::k23si, status2, dto::K23SIStatus::OK);
+                    K2EXPECT(log::k23si, status3, dto::K23SIStatus::OK);
+                    DataRec d1{"fk1", "f1"};
+                    DataRec d2{"fk2", "f2"};
+                    DataRec d3{"fk3", "f3"};
+                    K2EXPECT(log::k23si, value1, d1);
+                    K2EXPECT(log::k23si, value2, d2);
+                    K2EXPECT(log::k23si, value3, d3);
                 });
         });
 }

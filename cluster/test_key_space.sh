@@ -1,5 +1,5 @@
 #!/bin/bash
-space_list=(1000000)
+space_list=(750 500 250 100 50 25 10)
 # space_list=(1000000 500000 100000 50000 10000 5000 1000 750 500 250 100 50 25 10)
 # concurrent_list=(9)
 # concurrent_list=(4)
@@ -28,6 +28,7 @@ for num in ${space_list[@]}; do
             fi
             echo "waiting..."
             sleep 5
+            ./run.py --config_file configs/cluster.cfg  --log nodepool > nodepool.log 2>&1
             ./run.py --config_file configs/cluster.cfg  --log test_write_async > ${logfile} 2>&1
         done
         ./run.py --config_file configs/cluster.cfg  --stop cpo tso persist nodepool test_write_async > /dev/null
