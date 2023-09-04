@@ -62,8 +62,9 @@ public:
     Deadline<> deadline;
     dto::TxnPriority priority;
     bool syncFinalize = false;
-    bool writeAsync = false;
-    K2_DEF_FMT(K2TxnOptions, deadline, priority, syncFinalize, writeAsync);
+    // bool writeAsync = false;
+    String writeMode{"sync_write"};
+    K2_DEF_FMT(K2TxnOptions, deadline, priority, syncFinalize, writeMode);
 };
 
 template<typename ValueType>
@@ -147,6 +148,7 @@ public:
 
     ConfigVar<std::vector<String>> _tcpRemotes{"tcp_remotes"};
     ConfigVar<String> _cpo{"cpo"};
+    ConfigVar<String> _writeMode{"write_mode", "sync_write"};
     ConfigDuration create_collection_deadline{"create_collection_deadline", 1s};
     ConfigDuration retention_window{"retention_window", 600s};
     ConfigDuration txn_end_deadline{"txn_end_deadline", 60s};
@@ -181,8 +183,7 @@ private:
     std::unique_ptr<dto::K23SIReadRequest> _makeReadRequest(const dto::Key& key,
                                                            const String& collectionName) const;
     std::unique_ptr<dto::K23SIWriteRequest> _makeWriteRequest(dto::SKVRecord& record, bool erase,
-                                                             dto::ExistencePrecondition precondition,
-                                                             bool writeAsync=false);
+                                                             dto::ExistencePrecondition precondition);
     std::unique_ptr<dto::K23SIWriteKeyRequest> _makeWriteKeyRequest(dto::K23SIWriteRequest& request);
 
     template <class T>
@@ -194,7 +195,7 @@ private:
     }
 
     std::unique_ptr<dto::K23SIWriteRequest> _makePartialUpdateRequest(dto::SKVRecord& record,
-            std::vector<uint32_t> fieldsForPartialUpdate, dto::Key&& key, bool writeAsync=false);
+            std::vector<uint32_t> fieldsForPartialUpdate, dto::Key&& key);
 
     void _prepareQueryRequest(Query& query);
 
@@ -272,8 +273,7 @@ public:
 
     template <class T>
     seastar::future<WriteResult> write(T& record, bool erase=false,
-                                       dto::ExistencePrecondition precondition=dto::ExistencePrecondition::None,
-                                       bool writeAsync=false) {
+                                       dto::ExistencePrecondition precondition=dto::ExistencePrecondition::None) {
         if (!_valid) {
             return seastar::make_exception_future<WriteResult>(K23SIClientException("Invalid use of K2TxnHandle"));
         }
@@ -283,17 +283,17 @@ public:
 
         std::unique_ptr<dto::K23SIWriteRequest> request;
         if constexpr (std::is_same<T, dto::SKVRecord>()) {
-            request = _makeWriteRequest(record, erase, precondition, writeAsync);
+            request = _makeWriteRequest(record, erase, precondition);
         } else {
             dto::SKVRecord skv_record(record.collectionName, record.schema);
             record.__writeFields(skv_record);
-            request = _makeWriteRequest(skv_record, erase, precondition, writeAsync);
+            request = _makeWriteRequest(skv_record, erase, precondition);
         }
 
         _client->write_ops++;
         _ongoing_ops++;
 
-        if (writeAsync) {
+        if (isWriteAsync() || isClientTrack()) {
             if (_write_ids.count(request->collectionName) == 0) {
                 std::unordered_map<dto::Key, uint64_t> keyIdsMap;
                 _write_ids[request->collectionName] = keyIdsMap;
@@ -326,7 +326,7 @@ public:
 
     template <typename T>
     seastar::future<PartialUpdateResult> partialUpdate(T& record, std::vector<k2::String> fieldsName,
-                                                       dto::Key key=dto::Key(), bool writeAsync=false) {
+                                                       dto::Key key=dto::Key()) {
         std::vector<uint32_t> fieldsForPartialUpdate;
         bool find = false;
         for (std::size_t i = 0; i < fieldsName.size(); ++i) {
@@ -342,14 +342,13 @@ public:
                     PartialUpdateResult(dto::K23SIStatus::BadParameter("error parameter: fieldsForPartialUpdate")) );
         }
 
-        return partialUpdate(record, std::move(fieldsForPartialUpdate), std::move(key), writeAsync);
+        return partialUpdate(record, std::move(fieldsForPartialUpdate), std::move(key));
     }
 
     template <typename T>
     seastar::future<PartialUpdateResult> partialUpdate(T& record,
                                                        std::vector<uint32_t> fieldsForPartialUpdate,
-                                                       dto::Key key=dto::Key(),
-                                                       bool writeAsync=false) {
+                                                       dto::Key key=dto::Key()) {
         if (!_valid) {
             return seastar::make_exception_future<PartialUpdateResult>(K23SIClientException("Invalid use of K2TxnHandle"));
         }
@@ -365,7 +364,7 @@ public:
                 key = record.getKey();
             }
 
-            request = _makePartialUpdateRequest(record, fieldsForPartialUpdate, std::move(key), writeAsync);
+            request = _makePartialUpdateRequest(record, fieldsForPartialUpdate, std::move(key));
         } else {
             dto::SKVRecord skv_record(record.collectionName, record.schema);
             record.__writeFields(skv_record);
@@ -373,19 +372,19 @@ public:
                 key = skv_record.getKey();
             }
 
-            request = _makePartialUpdateRequest(skv_record, fieldsForPartialUpdate, std::move(key), writeAsync);
+            request = _makePartialUpdateRequest(skv_record, fieldsForPartialUpdate, std::move(key));
         }
         if (!request) {
             return seastar::make_ready_future<PartialUpdateResult> (
                     PartialUpdateResult(dto::K23SIStatus::BadParameter("error _makePartialUpdateRequest()")) );
         }
 
-        if (writeAsync) {
+        if (isWriteAsync() || isClientTrack()) {
             if (_write_ids.count(request->collectionName) == 0) {
                 std::unordered_map<dto::Key, uint64_t> keyIdsMap;
                 _write_ids[request->collectionName] = keyIdsMap;
             }
-            _write_ids[request->collectionName][request->key] = _client->write_ops - 1;
+            _write_ids[request->collectionName][request->key] = _client->write_ops;
         }
 
 
@@ -422,6 +421,9 @@ public:
 
     // check if writes async
     bool isWriteAsync();
+
+    // check if client tracking
+    bool isClientTrack();
 
     // use to obtain the MTR(which acts as a unique transaction identifier) for this transaction
     const dto::K23SI_MTR& mtr() const;

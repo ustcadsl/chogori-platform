@@ -258,7 +258,7 @@ bool _evaluateChallenge(TxnRecord& incumbent, dto::K23SI_MTR& challengerMTR) {
         // Note that compareCertain will order timestamps based on tsoID in cases where raw times are equivalent,
         // thus guaranteeing strict ordering for non-identical timestamps.
         auto cmpResult = incumbent.mtr.timestamp.compareCertain(challengerMTR.timestamp);
-        if (cmpResult == dto::Timestamp::LT) {
+        if (cmpResult == dto::Timestamp::GT) {
             K2LOG_D(log::skvsvr, "incumbent {} could lose push", incumbent.mtr);
             incumbentLostConflict = true;
         } else if (cmpResult == dto::Timestamp::EQ) {
@@ -394,7 +394,7 @@ TxnManager::endTxn(dto::K23SITxnEndRequest&& request) {
         for (auto& [cname, ids] : writeIds) {
             rec.keysNumber += ids.size();
             auto& infos = rec.writeInfos[cname];
-            K2LOG_I(log::skvsvr, "mtr = {}, writeIds = {}, writeInfos = {}", rec.mtr, ids, infos);
+            // K2LOG_I(log::skvsvr, "mtr = {}, writeIds = {}, writeInfos = {}", rec.mtr, ids, infos);
             for (auto& [key, id] : ids) {
                 // TODO & FIXME: ONLY FOR DEBUG
                 // int index = -1;
@@ -420,6 +420,10 @@ TxnManager::endTxn(dto::K23SITxnEndRequest&& request) {
             rec.isAllKeysPersisted.set_value(dto::K23SIStatus::OK);
             K2LOG_D(log::skvsvr, "all keys persisted for tr {}", rec);
         }
+    }
+
+    if (rec.finalizeAction == dto::EndAction::Commit && rec.clientTrack) {
+        _persistence->append(request.writeIds);
     }
 
     // and just execute the transition
@@ -661,7 +665,7 @@ seastar::future<Status> TxnManager::_commitPIP(TxnRecord& rec) {
     rec.state = dto::TxnRecordState::CommittedPIP;
     // if write async, we should wait until all write keys are persisted successfully
     if (rec.writeAsync) {
-        // rec.unlinkHB(_hblist);
+        rec.unlinkHB(_hblist);
         return rec.isAllKeysPersisted.get_future()
             .then([this, &rec, reporter=std::move(reporter)] (auto&& status) mutable {
                 K2LOG_D(log::skvsvr, "all keys persisted with status {} for rec {}", status, rec);

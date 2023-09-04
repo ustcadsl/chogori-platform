@@ -179,6 +179,7 @@ private:
 
         schema_futures.push_back(_client.createSchema(tpccCollectionName, Warehouse::warehouse_schema)
         .then([] (auto&& result) {
+            K2LOG_D(log::tpcc, "result={}", result);
             K2ASSERT(log::tpcc, result.status.is2xxOK(), "Failed to create schema");
         }));
 
@@ -258,7 +259,7 @@ private:
             .then([this] {
                 K2LOG_I(log::tpcc, "Starting item data load");
                 _item_loader = DataLoader(TPCCDataGen().generateItemData());
-                return _item_loader.loadData(_client, _num_concurrent_txns(), _write_async());
+                return _item_loader.loadData(_client, _num_concurrent_txns());
             });
         } else {
             f = f.then([] { return seastar::sleep(5s); });
@@ -269,7 +270,7 @@ private:
             _loader = DataLoader(TPCCDataGen().generateWarehouseData(1 + (_global_id * share),
                                     1 + (_global_id * share) + share));
             K2LOG_I(log::tpcc, "Starting load to server");
-            return _loader.loadData(_client, _num_concurrent_txns(), _write_async());
+            return _loader.loadData(_client, _num_concurrent_txns());
         }).then ([this] {
             K2LOG_I(log::tpcc, "Data load done");
         });
@@ -283,21 +284,20 @@ private:
                 int16_t w_id = (_global_id % _max_warehouses()) + 1;
                 int16_t d_id = (_global_id % _districts_per_warehouse()) + 1;
                 TPCCTxn* curTxn;
-                bool write_async = _write_async();
                 if (txn_type <= _weights[0]) {
-                    curTxn = (TPCCTxn*) new PaymentT(_random, _client, w_id, _max_warehouses(), write_async);
+                    curTxn = (TPCCTxn*) new PaymentT(_random, _client, w_id, _max_warehouses());
                 } else if (txn_type <= _weights[1]) {
-                    curTxn = (TPCCTxn*) new OrderStatusT(_random, _client, w_id, write_async);
+                    curTxn = (TPCCTxn*) new OrderStatusT(_random, _client, w_id);
                 } else if (txn_type <= _weights[2]) {
                     // range from 1-10 is allowed, otherwise set to 10
                     uint16_t batch_size = (_delivery_txn_batch_size() <= 10 && _delivery_txn_batch_size() > 0) ? batch_size : 10;
-                    curTxn = (TPCCTxn*) new DeliveryT(_random, _client, w_id, batch_size, write_async);
+                    curTxn = (TPCCTxn*) new DeliveryT(_random, _client, w_id, batch_size);
                 } else if (txn_type <= _weights[3]) {
-                    curTxn = (TPCCTxn*) new NewOrderT(_random, _client, w_id, _max_warehouses(), write_async);
+                    curTxn = (TPCCTxn*) new NewOrderT(_random, _client, w_id, _max_warehouses());
                 } else if (txn_type <= _weights[4]) {
-                    curTxn = (TPCCTxn*) new StockLevelT(_random, _client, w_id, d_id, write_async);
+                    curTxn = (TPCCTxn*) new StockLevelT(_random, _client, w_id, d_id);
                 } else {
-                    curTxn = (TPCCTxn*) new CustomT(_random, _client, w_id, _write_size(), _write_ratio(), write_async);
+                    curTxn = (TPCCTxn*) new CustomT(_random, _client, w_id, _write_size(), _write_ratio());
                 }
 
                 auto txn_start = k2::Clock::now();
@@ -397,7 +397,8 @@ private:
     ConfigVar<std::vector<String>> _tcpRemotes{"tcp_remotes"};
     ConfigVar<bool> _do_data_load{"data_load"};
     ConfigVar<bool> _use_when_all{"use_when_all"};
-    ConfigVar<bool> _write_async{"write_async"};
+    // ConfigVar<bool> _write_async{"write_async"};
+    ConfigVar<String> _writeMode{"write_mode"};
     ConfigVar<int> _write_size{"write_size"};
     ConfigVar<int> _write_ratio{"write_ratio"};
     ConfigVar<bool> _do_verification{"do_verification"};
@@ -436,7 +437,8 @@ int main(int argc, char** argv) {;
         ("cpo", bpo::value<k2::String>(), "URL of Control Plane Oracle (CPO), e.g. 'tcp+k2rpc://192.168.1.2:12345'")
         ("tso_endpoint", bpo::value<k2::String>(), "URL of Timestamp Oracle (TSO), e.g. 'tcp+k2rpc://192.168.1.2:12345'")
         ("data_load", bpo::value<bool>()->default_value(false), "If true, only data gen and load are performed. If false, only benchmark is performed.")
-        ("write_async", bpo::value<bool>()->default_value(false), "If true, txn manager will process write request in async manner.")
+        // ("write_async", bpo::value<bool>()->default_value(false), "If true, txn manager will process write request in async manner.")
+        ("write_mode", bpo::value<k2::String>()->default_value("sync_write"), "write mode in which the k23si client will use, pick one from 'sync_write', 'async_write', 'client_track'")
         ("use_when_all", bpo::value<bool>()->default_value(true), "If true, using when all function to process tpcc(). If false, process write/read op one by one.")
         ("write_size", bpo::value<int>()->default_value(20), "write number in each CustomT txn")
         ("write_ratio", bpo::value<int>()->default_value(85), "write ratio in a CustomT txn")

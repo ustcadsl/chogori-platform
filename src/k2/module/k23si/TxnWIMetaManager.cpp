@@ -130,7 +130,7 @@ void TxnWIMetaManager::updateRetentionTimestamp(dto::Timestamp rts) {
     _retentionTs = rts;
 }
 
-Status TxnWIMetaManager::addWrite(dto::K23SI_MTR&& mtr, dto::Key&& key, dto::Key&& trh, String&& trhCollection) {
+Status TxnWIMetaManager::addWrite(dto::K23SI_MTR&& mtr, dto::Key&& key, dto::Key&& trh, String&& trhCollection, bool isAsyncWrite, bool isClientTrack) {
     K2LOG_D(log::skvsvr, "Adding write for mtr={}, key={}, trh={}, trhCollection={}", mtr, key, trh, trhCollection);
     auto& rec = _twims[mtr.timestamp];
     if (rec.state == dto::TxnWIMetaState::Created) {
@@ -139,7 +139,8 @@ Status TxnWIMetaManager::addWrite(dto::K23SI_MTR&& mtr, dto::Key&& key, dto::Key
         rec.trhCollection = std::move(trhCollection);
         _rwlist.push_back(rec);
         rec.state = dto::TxnWIMetaState::Created;
-
+        rec.isAsyncWrite = isAsyncWrite;
+        rec.isClientTrack = isClientTrack;
         K2LOG_D(log::skvsvr, "created new twim record: {}", rec);
     }
     auto status = _onAction(Action::onCreate, rec);
@@ -208,8 +209,11 @@ Status TxnWIMetaManager::_onAction(Action action, TxnWIMeta& twim) {
     switch (twim.state) {
         case dto::TxnWIMetaState::Created: switch (action) {
             case Action::onCreate: {
-                // return _inProgressPIP(twim);
-                return _inProgress(twim); // rdma simulation && client tracking
+                if (twim.isClientTrack) {
+                    return _inProgress(twim);
+                } else {
+                    return _inProgressPIP(twim);
+                }
             }
             case Action::onCommit:
             case Action::onAbort:

@@ -156,8 +156,7 @@ seastar::future<ReadResult<dto::SKVRecord>> K2TxnHandle::read(dto::Key key, Stri
 
 
 std::unique_ptr<dto::K23SIWriteRequest> K2TxnHandle::_makeWriteRequest(dto::SKVRecord& record, bool erase,
-                                                                    dto::ExistencePrecondition precondition,
-                                                                    bool writeAsync) {
+                                                                    dto::ExistencePrecondition precondition) {
     for (const String& key : record.partitionKeys) {
         if (key == "") {
             throw K23SIClientException("Partition key field not set for write request");
@@ -189,7 +188,8 @@ std::unique_ptr<dto::K23SIWriteRequest> K2TxnHandle::_makeWriteRequest(dto::SKVR
         key,
         record.storage.share(),
         std::vector<uint32_t>(),
-        writeAsync
+        isWriteAsync(),
+        isClientTrack()
     );
 }
 
@@ -212,7 +212,7 @@ std::unique_ptr<dto::K23SIWriteKeyRequest> K2TxnHandle::_makeWriteKeyRequest(dto
 }
 
 std::unique_ptr<dto::K23SIWriteRequest> K2TxnHandle::_makePartialUpdateRequest(dto::SKVRecord& record,
-                    std::vector<uint32_t> fieldsForPartialUpdate, dto::Key&& key, bool writeAsync) {
+                    std::vector<uint32_t> fieldsForPartialUpdate, dto::Key&& key) {
     bool isTRH = !_trh_key.has_value();
     if (isTRH) {
         _trh_key = key;
@@ -232,12 +232,17 @@ std::unique_ptr<dto::K23SIWriteRequest> K2TxnHandle::_makePartialUpdateRequest(d
         std::move(key),
         record.storage.share(),
         fieldsForPartialUpdate,
-        writeAsync
+        isWriteAsync(),
+        isClientTrack()
     });
 }
 
 bool K2TxnHandle::isWriteAsync() {
-    return _options.writeAsync;
+    return _options.writeMode == "async_write";
+}
+
+bool K2TxnHandle::isClientTrack() {
+    return _options.writeMode == "client_track";
 }
 
 seastar::future<EndResult> K2TxnHandle::end(bool shouldCommit) {
@@ -251,7 +256,7 @@ seastar::future<EndResult> K2TxnHandle::end(bool shouldCommit) {
         return seastar::make_exception_future<EndResult>(K23SIClientException("Tried to end() with ongoing ops"));
     }
 
-    if (_write_ranges.empty() && !isWriteAsync()) {
+    if (_write_ranges.empty()) {
         _client->successful_txns++;
 
         if (_failed && shouldCommit) {
@@ -365,6 +370,7 @@ seastar::future<Status> K23SIClient::makeCollection(dto::CollectionMetadata&& me
 
 seastar::future<K2TxnHandle> K23SIClient::beginTxn(const K2TxnOptions& options) {
     auto start_time = Clock::now();
+    const_cast<K2TxnOptions&>(options).writeMode = _writeMode();
     return _tsoClient.getTimestampFromTSO(start_time)
     .then([this, start_time, options] (auto&& timestamp) {
         dto::K23SI_MTR mtr{

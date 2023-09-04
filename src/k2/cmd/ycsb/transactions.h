@@ -59,8 +59,8 @@ template<typename Func>
                     });
             }).then_wrapped([this] (auto&& fut) {
                 if (fut.failed() || !_success) {
-                    K2LOG_W(log::ycsb, "Run failed");
-                    return seastar::make_exception_future<>(std::runtime_error("Run failed:"));
+                    K2LOG_W(log::ycsb, "Run failed, fut.failed={}, _success={}", fut.failed(), _success);
+                    // return seastar::make_exception_future<>(std::runtime_error("Run failed:"));
                 }
                 return seastar::make_ready_future<>();
             });
@@ -80,7 +80,7 @@ class YCSBTxn {
 public:
     seastar::future<bool> run() {
         // retry 10 times for a failed transaction
-        return seastar::do_with(FixedRetryStrategy(10),  [this] (auto& retryStrategy) {
+        return seastar::do_with(FixedRetryStrategy(5),  [this] (auto& retryStrategy) {
             return retryStrategy.run([this]() {
                 return attempt();
             }).then_wrapped([this] (auto&& fut) {
@@ -96,6 +96,7 @@ public:
      seastar::future<bool> attempt() {
         K2TxnOptions options{};
         options.deadline = Deadline(5s);
+        options.writeMode = _writeMode();
         return _client.beginTxn(options)
         .then([this] (K2TxnHandle&& txn) {
             _txn = std::move(txn);
@@ -325,4 +326,5 @@ private:
     ConfigVar<uint32_t> _num_fields{"num_fields"};
     ConfigVar<uint32_t> _max_fields_update{"max_fields_update"};
     ConfigVar<String> _requestDistName{"request_dist"};
+    ConfigVar<String> _writeMode{"write_mode"};
 };

@@ -16,7 +16,7 @@ COMMON_ARGS="--enable_tx_checksum true --thread-affinity false"
 cpo_child_pid=$!
 
 # start nodepool on 1 cores
-./build/src/k2/cmd/nodepool/nodepool -c1 --tcp_endpoints ${EPS} --k23si_persistence_endpoint ${PERSISTENCE} ${COMMON_ARGS} --prometheus_port 63001 --k23si_cpo_endpoint ${CPO} --tso_endpoint ${TSO} --memory=3G --partition_request_timeout=6s &
+./build/src/k2/cmd/nodepool/nodepool -c1 --log_level INFO --tcp_endpoints ${EPS} --k23si_persistence_endpoint ${PERSISTENCE} ${COMMON_ARGS} --prometheus_port 63001 --k23si_cpo_endpoint ${CPO} --tso_endpoint ${TSO} --memory=3G --partition_request_timeout=6s &
 nodepool_child_pid=$!
 
 # start persistence on 1 cores
@@ -62,4 +62,4 @@ echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 echo ">>> Starting benchmark Workload D..."
-./build/src/k2/cmd/ycsb/ycsb_client -c1 --tcp_remotes ${EPS} --cpo ${CPO} --tso_endpoint ${TSO} --data_load false --prometheus_port 63100 ${COMMON_ARGS} --memory=512M --partition_request_timeout=6s --num_concurrent_txns=1 --num_records=500 --num_records_insert=100 --test_duration=200ms --ops_per_txn=1 --read_proportion=95 --update_proportion=0 --scan_proportion=0 --insert_proportion=5 --request_dist="latest"
+./build/src/k2/cmd/ycsb/ycsb_client -c1 --tcp_remotes ${EPS} --cpo ${CPO} --tso_endpoint ${TSO} --data_load false --prometheus_port 63100 ${COMMON_ARGS} --memory=512M --partition_request_timeout=6s --num_concurrent_txns=1 --num_records=500 --num_records_insert=100 --test_duration=1000ms --ops_per_txn=10 --read_proportion=5 --update_proportion=0 --scan_proportion=0 --insert_proportion=95 --request_dist="uniform" --write_mode="client_track"  

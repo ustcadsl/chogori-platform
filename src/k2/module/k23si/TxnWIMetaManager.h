@@ -43,12 +43,14 @@ struct TxnWIMeta {
     dto::EndAction finalizeAction =dto::EndAction::None;
     dto::TxnWIMetaState state = dto::TxnWIMetaState::Created;
     nsbi::list_member_hook<> rwLink;
+    bool isAsyncWrite = false;
+    bool isClientTrack = false;
 
     bool isCommitted();
     bool isAborted();
     bool isInProgress();
-    K2_DEF_FMT(TxnWIMeta, trh, trhCollection, mtr, writeKeys, finalizeAction, state);
-    K2_PAYLOAD_FIELDS(trh, trhCollection, mtr, writeKeys, finalizeAction, state);
+    K2_DEF_FMT(TxnWIMeta, trh, trhCollection, mtr, writeKeys, finalizeAction, state, isAsyncWrite, isClientTrack);
+    K2_PAYLOAD_FIELDS(trh, trhCollection, mtr, writeKeys, finalizeAction, state, isAsyncWrite, isClientTrack);
 
     typedef nsbi::list<TxnWIMeta, nsbi::member_hook<TxnWIMeta, nsbi::list_member_hook<>, &TxnWIMeta::rwLink>> RWList;
 
@@ -79,7 +81,7 @@ public:
 
     // Add the given write to the twim identified by the given mtr.
     // If the twim does not exist, a new one is created with the given trh key+collection
-    Status addWrite(dto::K23SI_MTR&& mtr, dto::Key&& key, dto::Key&& trh, String&& trhCollection);
+    Status addWrite(dto::K23SI_MTR&& mtr, dto::Key&& key, dto::Key&& trh, String&& trhCollection, bool isAsyncWrite=false, bool isClientTrack=false);
 
     // Set the local txn state to abort/commit and stop tracking the given key.
     // Used to perform local optimizations after PUSH operations

@@ -215,17 +215,18 @@ struct K23SIWriteRequest {
     SKVRecord::Storage value; // the value of the write
     std::vector<uint32_t> fieldsForPartialUpdate; // if size() > 0 then this is a partial update
     bool writeAsync = false; // whether the write request is persisted asynchronously
+    bool clientTrack = false; // whether using the client tracking
 
     K23SIWriteRequest() = default;
     K23SIWriteRequest(PVID _pvid, String cname, K23SI_MTR _mtr, Key _trh, String _trhCollection, bool _isDelete,
                       bool _designateTRH, ExistencePrecondition _precondition, uint64_t id, Key _key, SKVRecord::Storage _value,
-                      std::vector<uint32_t> _fields, bool _writeAsync) :
+                      std::vector<uint32_t> _fields, bool _writeAsync=false, bool _clientTrack=false) :
         pvid(std::move(_pvid)), collectionName(std::move(cname)), mtr(std::move(_mtr)), trh(std::move(_trh)), trhCollection(std::move(_trhCollection)),
         isDelete(_isDelete), designateTRH(_designateTRH), precondition(_precondition), request_id(id),
-        key(std::move(_key)), value(std::move(_value)), fieldsForPartialUpdate(std::move(_fields)), writeAsync(_writeAsync) {}
+        key(std::move(_key)), value(std::move(_value)), fieldsForPartialUpdate(std::move(_fields)), writeAsync(_writeAsync), clientTrack(_clientTrack) {}
 
-    K2_PAYLOAD_FIELDS(pvid, collectionName, mtr, trh, trhCollection, isDelete, designateTRH, precondition, request_id, key, value, fieldsForPartialUpdate, writeAsync);
-    K2_DEF_FMT(K23SIWriteRequest, pvid, collectionName, mtr, trh, trhCollection, isDelete, designateTRH, precondition, request_id, key, value, fieldsForPartialUpdate, writeAsync);
+    K2_PAYLOAD_FIELDS(pvid, collectionName, mtr, trh, trhCollection, isDelete, designateTRH, precondition, request_id, key, value, fieldsForPartialUpdate, writeAsync, clientTrack);
+    K2_DEF_FMT(K23SIWriteRequest, pvid, collectionName, mtr, trh, trhCollection, isDelete, designateTRH, precondition, request_id, key, value, fieldsForPartialUpdate, writeAsync, clientTrack);
 };
 
 struct K23SIWriteResponse {

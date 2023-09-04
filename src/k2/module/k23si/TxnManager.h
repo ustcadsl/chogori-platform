@@ -51,6 +51,9 @@ struct TxnRecord {
     // determine whether the transaction is processing the write requests in an async manner
     bool writeAsync = false;
 
+    // determine whether the transaction is processing the write requests in a client tracking manner
+    bool clientTrack = false;
+
     // whether to perform the finalization task in background when entering the state ForceAborted
     bool finalizeInForceAborted = false;
 
@@ -98,8 +101,8 @@ struct TxnRecord {
     // if this transaction ever attempts to commit, we set this flag.
     bool hasAttemptedCommit{false};
 
-    K2_PAYLOAD_FIELDS(mtr, writeRanges, writeAsync, writeInfos, trh, syncFinalize, state, finalizeAction, hasAttemptedCommit);
-    K2_DEF_FMT(TxnRecord, mtr, writeRanges, writeAsync, writeInfos, trh, rwExpiry, hbExpiry, syncFinalize, timeToFinalize, state, finalizeAction, hasAttemptedCommit);
+    K2_PAYLOAD_FIELDS(mtr, writeRanges, writeAsync, clientTrack, writeInfos, trh, syncFinalize, state, finalizeAction, hasAttemptedCommit);
+    K2_DEF_FMT(TxnRecord, mtr, writeRanges, writeAsync, clientTrack, writeInfos, trh, rwExpiry, hbExpiry, syncFinalize, timeToFinalize, state, finalizeAction, hasAttemptedCommit);
 
     // The last action on this TR (the action that put us into the above state)
     K2_DEF_ENUM_IC(Action,

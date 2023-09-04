@@ -113,6 +113,7 @@ public:  // application lifespan
 
         _metric_groups.add_group("YCSB", {
             sm::make_counter("completed_txns", _completedTxns, sm::description("Number of completed YCSB transactions"), labels),
+            sm::make_counter("failed_txns", _failedTxns, sm::description("Number of failed YCSB transactions"), labels),
             sm::make_counter("read_ops", _readOps, sm::description("Number of completed Read operations"), labels),
             sm::make_counter("scan_ops", _scanOps, sm::description("Number of completed Scan operations"), labels),
             sm::make_counter("insert_ops", _insertOps, sm::description("Number of completed Insert operations"), labels),
@@ -151,10 +152,10 @@ public:  // application lifespan
         }).finally([this]() {
             K2LOG_I(log::ycsb, "Done with benchmark");
             cores_finished++;
-            if (cores_finished == seastar::smp::count) {
+            while (seastar::this_shard_id() == 0 && cores_finished != seastar::smp::count) {}
+            if (seastar::this_shard_id() == 0) {
                 seastar::engine().exit(0);
             }
-
             return seastar::make_ready_future<>();
         });
 
@@ -217,6 +218,7 @@ private:
                     return curTxn->run() // run the transaction
                     .then([this, txn_start, &curTxn] (bool success) {
                         if (!success) {
+                            _failedTxns++;
                             return;
                         }
 
@@ -304,6 +306,7 @@ private:
             auto querypsec = (double)_client.query_ops/totalsecs;
             K2LOG_I(log::ycsb, "duration={}", duration);
             K2LOG_I(log::ycsb, "completedTxns={} ({} per sec)", _completedTxns, cntpsec);
+            K2LOG_I(log::ycsb, "_failedTxns={} ({} per sec)", _failedTxns, (double)(_failedTxns / totalsecs));
             K2LOG_I(log::ycsb, "completed YCSB Read operations={}", _readOps);
             K2LOG_I(log::ycsb, "completed YCSB Update operations={}", _updateOps);
             K2LOG_I(log::ycsb, "completed YCSB Scan operations={}", _scanOps);
@@ -411,6 +414,7 @@ private:
     k2::ExponentialHistogram _insertLatency;
     k2::ExponentialHistogram _deleteLatency;
     uint64_t _completedTxns{0};
+    uint64_t _failedTxns{0};
     uint64_t _readOps{0};
     uint64_t _insertOps{0};
     uint64_t _updateOps{0};
@@ -447,6 +451,7 @@ int main(int argc, char** argv) {;
         ("delete_proportion",bpo::value<double>()->default_value(0), "Delete Proportion")
         ("max_scan_length",bpo::value<uint32_t>()->default_value(10), "Maximum scan length")
         ("max_fields_update",bpo::value<uint32_t>()->default_value(1), "Maximum number of fields to update")
+        ("write_mode", bpo::value<k2::String>()->default_value("sync_write"), "write mode in which the k23si client will use, pick one from 'sync_write', 'async_write', 'client_track'")
         ("ops_per_txn",bpo::value<uint64_t>()->default_value(1), "The number of operations per transaction");
 
     app.addApplet<k2::TSO_ClientLib>();
