@@ -1,0 +1,2 @@
+/usr/bin/ar qc libhot-test-helpers-lib.a  CMakeFiles/hot-test-helpers-lib.dir/src/hot/testhelpers/PartialKeyMappingTestHelper.cpp.o CMakeFiles/hot-test-helpers-lib.dir/src/hot/testhelpers/SampleTriples.cpp.o
+/usr/bin/ranlib libhot-test-helpers-lib.a

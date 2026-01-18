@@ -1,0 +1,14 @@
+tmp/
+build/
+release/
+debug/
+cmake/modules/glog.cmake
+cmake/modules/ibverbs.cmake
+cmake/modules/tbb.cmake
+cmake/modules/zmq.cmake
+.vscode/
+test_data/
+*.log
+result.csv
+LDBC.txt
+stat

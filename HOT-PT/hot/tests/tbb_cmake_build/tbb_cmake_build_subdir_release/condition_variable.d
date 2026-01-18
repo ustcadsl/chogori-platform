@@ -1,0 +1,31 @@
+condition_variable.o: \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./src/tbb/condition_variable.cpp \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/tbb_config.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/condition_variable \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../tbb_stddef.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../tbb_config.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../mutex.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../aligned_space.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../tbb_stddef.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../tbb_machine.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../machine/linux_intel64.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../machine/gcc_ia32_common.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../machine/gcc_itsx.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../machine/linux_common.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../tbb_profiling.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../internal/_tbb_strings.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../atomic.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../tbb_thread.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../internal/_tbb_hash_compare_impl.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../tick_count.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../tbb_exception.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../tbb_allocator.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/compat/../tbb_profiling.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/atomic.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./src/tbb/tbb_misc.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/tbb_stddef.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/tbb_machine.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./src/tbb/dynamic_link.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./src/tbb/itt_notify.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./src/tbb/tools_api/ittnotify.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./src/tbb/tools_api/legacy/ittnotify.h

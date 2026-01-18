@@ -1,0 +1,15 @@
+isSubclassOf	1
+isPartOf	2
+isLocatedIn	3
+hasType	4
+knows	5
+workAt	6
+hasInterest	7
+replyOf	8
+containerOf	9
+hasModerator	10
+hasMember	11
+hasTag	12
+hasCreator	13
+likes	14
+studyAt	15

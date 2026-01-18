@@ -1,0 +1,2 @@
+/usr/bin/ar qc libboost_timer.a  CMakeFiles/Boost_timer.dir/boost/boost_1_66_0/libs/timer/src/auto_timers_construction.cpp.o CMakeFiles/Boost_timer.dir/boost/boost_1_66_0/libs/timer/src/cpu_timer.cpp.o
+/usr/bin/ranlib libboost_timer.a

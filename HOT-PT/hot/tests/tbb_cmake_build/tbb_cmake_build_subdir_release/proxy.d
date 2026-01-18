@@ -1,0 +1,19 @@
+proxy.o: \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./src/tbbmalloc/proxy.cpp \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./src/tbbmalloc/proxy.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/tbb_config.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./src/tbbmalloc/Customize.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/tbb_stddef.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/tbb_config.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/tbb_machine.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/tbb_stddef.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/machine/linux_intel64.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/machine/gcc_ia32_common.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/machine/gcc_itsx.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/machine/linux_common.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./src/tbb/itt_notify.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./src/tbb/tools_api/ittnotify.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./src/tbb/tools_api/legacy/ittnotify.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/internal/_aggregator_impl.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/internal/../atomic.h \
+ /mnt/c/LCY/USTC/chogori/hot/third-party/tbb/./include/tbb/internal/../tbb_machine.h

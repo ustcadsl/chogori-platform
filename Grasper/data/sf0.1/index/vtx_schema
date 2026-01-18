@@ -1,0 +1,11 @@
+city 3 id name url
+country 3 id name url
+continent 3 id name url
+university 3 id name url
+company 3 id name url
+tagclass 3 id name url
+tag 3 id name url
+post 8 id browserUsed creationDate locationIP content length language imageFile
+comment 6 id browserUsed creationDate locationIP content length
+forum 3 id title creationDate
+person 10 id firstName lastName gender birthday email language browserUsed locationIP creationDate 

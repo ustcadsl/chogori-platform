@@ -1,0 +1,2 @@
+/usr/bin/ar qc libboost_signals.a  CMakeFiles/Boost_signals.dir/boost/boost_1_66_0/libs/signals/src/connection.cpp.o CMakeFiles/Boost_signals.dir/boost/boost_1_66_0/libs/signals/src/named_slot_map.cpp.o CMakeFiles/Boost_signals.dir/boost/boost_1_66_0/libs/signals/src/signal_base.cpp.o CMakeFiles/Boost_signals.dir/boost/boost_1_66_0/libs/signals/src/slot.cpp.o CMakeFiles/Boost_signals.dir/boost/boost_1_66_0/libs/signals/src/trackable.cpp.o
+/usr/bin/ranlib libboost_signals.a

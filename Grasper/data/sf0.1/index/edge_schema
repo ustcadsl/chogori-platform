@@ -1,0 +1,15 @@
+isSubclassOf 0
+isPartOf 0
+isLocatedIn 0
+hasType  0
+knows 1 creationDate
+workAt 1 workFrom
+hasInterest 0
+replyOf 0
+containerOf 0
+hasModerator 0
+hasMember 1 joinDate
+hasTag 0
+hasCreator 0
+likes 1 creationDate
+studyAt 1 classYear
